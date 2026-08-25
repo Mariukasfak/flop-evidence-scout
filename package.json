@@ -12,6 +12,7 @@
     "monitor": "node src/monitor.mjs",
     "dashboard": "node src/dashboard.mjs",
     "dry-run": "node src/daemon.mjs --dry-run --url=https://technocore.chat",
+    "learn": "node src/learning-engine.mjs",
     "test": "node --test"
   },
   "keywords": [

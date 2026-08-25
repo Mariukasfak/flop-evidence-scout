@@ -8,6 +8,7 @@ import { Guardrails } from './guardrails.mjs';
 import { ScoutEngine } from './scout-engine.mjs';
 import { ScribeEngine } from './scribe-engine.mjs';
 import { updateDashboardFile } from './dashboard.mjs';
+import { analyzeChatArchives } from './learning-engine.mjs';
 
 function parseArgs(argv) {
   const options = {
@@ -39,6 +40,33 @@ function appendAudit(logPath, record) {
     fs.appendFileSync(logPath, line, 'utf8');
   } catch (err) {
     console.error('Audit log failed:', err.message);
+  }
+}
+
+export function archiveRoomMessages(room, messages = []) {
+  if (!Array.isArray(messages) || messages.length === 0) return;
+  const archivePath = path.resolve(`data/chats/${room}-archive.jsonl`);
+  try {
+    fs.mkdirSync(path.dirname(archivePath), { recursive: true });
+    const existingSeqs = new Set();
+    if (fs.existsSync(archivePath)) {
+      const lines = fs.readFileSync(archivePath, 'utf8').split('\n').filter(Boolean);
+      for (const l of lines) {
+        try { const p = JSON.parse(l); if (p.seq) existingSeqs.add(p.seq); } catch {}
+      }
+    }
+    const newLines = [];
+    for (const m of messages) {
+      if (m && m.seq && !existingSeqs.has(m.seq)) {
+        newLines.push(JSON.stringify(m) + '\n');
+        existingSeqs.add(m.seq);
+      }
+    }
+    if (newLines.length > 0) {
+      fs.appendFileSync(archivePath, newLines.join(''), 'utf8');
+    }
+  } catch (err) {
+    console.warn(`[Archive Error] ${room}:`, err.message);
   }
 }
 
@@ -89,6 +117,9 @@ export async function runScoutDaemon(options = {}) {
         handledCount: (scoutEngine.localState.handledCount || 0) + (scribeEngine.localState.syncedWithScoutCount || 0),
         lastSeenSeq: lastResult.lastSeenSeq ?? scoutEngine.localState.lastSeenSeq
       }, null, 2), 'utf8');
+      
+      // Auto-analyze chats and refresh dashboard
+      analyzeChatArchives();
       await updateDashboardFile('docs', config.serverUrl);
     } catch {
       // ignore
@@ -105,6 +136,12 @@ export async function runScoutDaemon(options = {}) {
       console.log(`[Scout #${scoutResult.turns}] Action: ${scoutResult.action} | Seq: ${scoutResult.lastSeenSeq}`);
       appendAudit(config.auditLogPath, { agent: 'scout', ...scoutResult });
 
+      // Archive lobby messages if any
+      try {
+        const lobbyData = await client.readRoom(config.room, { limit: 25 });
+        if (lobbyData.messages) archiveRoomMessages(config.room, lobbyData.messages);
+      } catch {}
+
       // Stagger 2s between agents to ensure clean separation
       await new Promise((r) => setTimeout(r, 2000));
 
@@ -112,6 +149,12 @@ export async function runScoutDaemon(options = {}) {
       const scribeResult = await scribeEngine.runTurn();
       console.log(`[Scribe #${scribeResult.turns}] Action: ${scribeResult.action} | EventsSeq: ${scribeResult.lastEventsSeq}`);
       appendAudit(config.auditLogPath, { agent: 'scribe', ...scribeResult });
+
+      // Archive events messages if any
+      try {
+        const eventsData = await client.readRoom('events', { limit: 25 });
+        if (eventsData.messages) archiveRoomMessages('events', eventsData.messages);
+      } catch {}
 
       await writeHeartbeat('active', scoutResult);
     } catch (err) {

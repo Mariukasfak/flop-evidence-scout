@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { loadOrCreateIdentity, getDidShardedPath } from './identity.mjs';
 import { TechnocoreClient } from './technocore-client.mjs';
+import { getLatestLearningReport } from './learning-engine.mjs';
 
 export function generateDashboardHtml({
   identity,
@@ -10,6 +11,7 @@ export function generateDashboardHtml({
   heartbeat = {},
   logs = [],
   roomMessages = {},
+  learningReport = null,
   generatedAt = new Date().toISOString()
 }) {
   const did = identity?.did || 'did:key:z6MkvJAr8ZTs5n4d14e4SGVFAxo8nWndZTin8vc23Aks3zgn';
@@ -583,6 +585,26 @@ export function generateDashboardHtml({
         </table>
       </div>
 
+      <!-- TriAgent Continuous Learning & Optimization Card -->
+      <h2 class="section-title">🧠 TriAgent AI Savimokos ir Optimizavimo Centras</h2>
+      <div class="card" style="margin-bottom: 24px; font-size: 0.85rem; line-height: 1.6;">
+        <div style="display: flex; justify-content: space-between; flex-wrap: wrap; margin-bottom: 12px; border-bottom: 1px solid var(--card-border); padding-bottom: 10px; gap: 10px;">
+          <div>📦 <strong>Išanalizuota žinučių:</strong> <span style="color: #38bdf8; font-weight: bold;">${learningReport?.metrics?.totalMessagesArchived || 0}</span></div>
+          <div>👥 <strong>Unikalių dalyvių:</strong> <span style="color: #34d399; font-weight: bold;">${learningReport?.metrics?.uniqueParticipantsCount || 0}</span></div>
+          <div>🎯 <strong>Aptiktos žinių spragos:</strong> <span style="color: #fbbf24; font-weight: bold;">${learningReport?.metrics?.unansweredInquiriesCount || 0}</span></div>
+        </div>
+        <div style="color: var(--text-muted); margin-bottom: 8px;"><strong>💡 Naujausios TriAgent Optimizavimo Rekomendacijos:</strong></div>
+        <div style="display: grid; gap: 8px;">
+          ${(learningReport?.recommendations || []).map(r => `
+            <div style="background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 10px 14px;">
+              <span class="badge ${r.priority === 'HIGH' ? 'badge-warn' : 'badge-info'}" style="margin-right: 6px;">[${r.priority}] ${r.area}</span>
+              <strong>${r.insight}</strong>
+              <div style="color: #38bdf8; font-size: 0.8rem; margin-top: 4px;">➡️ ${r.action}</div>
+            </div>
+          `).join('') || '<div style="color: var(--text-muted);">Laukiama naujų pokalbių archyvų analizei...</div>'}
+        </div>
+      </div>
+
       <h2 class="section-title">📡 Kaip veikia saugaus tempo (Rate Pacing) taisyklė</h2>
       <div class="card" style="margin-bottom: 24px; font-size: 0.85rem; color: var(--text-muted); line-height: 1.6;">
         <p>💡 <strong>Kodėl rodoma <code>rate_pacing</code>?</strong> „Technocore“ tinkle veikia griežta apsauga nuo SPAM ir Sybil atakų. Mūsų agento apsaugos filtras riboja siunčiamus pasirašytus pranešimus iki saugaus tempo (1–4 pranešimai per valandą). Tarp šių taktų agentas toliau skaito kambarį, seka naujausias žinutes ir saugo resursus.</p>
@@ -949,7 +971,8 @@ export async function updateDashboardFile(outputDir = 'docs', serverUrl = 'https
     // Non-blocking
   }
 
-  const html = generateDashboardHtml({ identity, scribeIdentity, heartbeat, logs, roomMessages });
+  const learningReport = getLatestLearningReport();
+  const html = generateDashboardHtml({ identity, scribeIdentity, heartbeat, logs, roomMessages, learningReport });
   const targetFile = path.join(resolvedDir, 'index.html');
   fs.writeFileSync(targetFile, html, 'utf8');
   console.log(`[Dashboard] Generated live HTML status page with bundled room feeds at: ${targetFile}`);
