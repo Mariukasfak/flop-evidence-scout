@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { loadOrCreateIdentity } from './identity.mjs';
+import { loadOrCreateIdentity, getDidShardedPath } from './identity.mjs';
 import { TechnocoreClient } from './technocore-client.mjs';
 
 export function generateDashboardHtml({
@@ -14,6 +14,9 @@ export function generateDashboardHtml({
 }) {
   const did = identity?.did || 'did:key:z6MkvJAr8ZTs5n4d14e4SGVFAxo8nWndZTin8vc23Aks3zgn';
   const scribeDid = scribeIdentity?.did || 'did:key:z6Mkfdd1cRSrTaA1yuUC45a2dXpHe4zPf4cE1DC3DmCpELvW';
+  const scoutKey = getDidShardedPath(did).key;
+  const scoutMailbox = `mb-p-scout-${scoutKey}`;
+
   const totalTurns = heartbeat.turns ? Math.max(heartbeat.turns, logs.length) : (logs.length > 0 ? logs.length : 1);
   const handledCount = logs.filter((l) => l.action === 'answered_inquiry' || l.action === 'signed_checkin' || l.action === 'coop_sync').length || (heartbeat.handledCount ?? 1);
   const lastLog = logs[logs.length - 1] || {};
@@ -26,22 +29,6 @@ export function generateDashboardHtml({
   const isRecent = (Date.now() - lastTime.getTime()) < 1800_000;
   const status = isRecent ? 'ACTIVE · ONLINE' : 'SCHEDULED_IN_CLOUD';
   const lastHeartbeatFormatted = lastTime.toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'short', timeStyle: 'medium' }) + ' UTC';
-
-  // Format real live room messages
-  const renderedRoomMessages = roomMessages.length > 0
-    ? roomMessages.slice(-15).map((m) => {
-        const isMyScout = m.from?.includes('3zgn') || m.from === did;
-        const isMyScribe = m.from?.includes('ELvW') || m.from === scribeDid;
-        const isMyAgent = isMyScout || isMyScribe;
-        const agentLabel = isMyScout ? ' [MY SCOUT]' : (isMyScribe ? ' [MY SCRIBE]' : '');
-        const lineClass = isMyAgent ? 'msg-line my-msg' : 'msg-line';
-        const fromClass = isMyAgent ? 'msg-from my-agent' : 'msg-from';
-        const cleanContent = (m.content || m.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        const cleanFrom = (m.from || 'anon').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-        return `<div class="${lineClass}"><span class="msg-seq">[#${m.seq || '—'}]</span> <span class="${fromClass}">&lt;${cleanFrom}&gt;${agentLabel}</span> <span class="msg-text">${cleanContent}</span></div>`;
-      }).join('\n')
-    : '<div style="color: #64748b; padding: 12px 0;">Prijungiama prie Technocore tiesioginio srauto...</div>';
 
   const logRowsLt = logs.slice(-30).reverse().map((log, idx) => {
     const time = log.timestamp ? new Date(log.timestamp).toLocaleTimeString('lt-LT') : '—';
@@ -116,8 +103,7 @@ export function generateDashboardHtml({
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="FLOP / Technocore Evidence Scout - Autonomous Dual AI Agent Mesh live status and protocol readiness dashboard.">
-  <meta http-equiv="refresh" content="60">
+  <meta name="description" content="FLOP / Technocore Evidence Scout - Real-time Dual AI Agent Mesh & Protocol Readiness Dashboard.">
   <title>FLOP Evidence Scout · Live Status Dashboard</title>
   <style>
     :root {
@@ -227,25 +213,55 @@ export function generateDashboardHtml({
       background: #11161f;
       padding: 10px 16px;
       display: flex;
+      justify-content: space-between;
       align-items: center;
       border-bottom: 1px solid #21262d;
+      flex-wrap: wrap;
+      gap: 8px;
     }
-    .terminal-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 6px; }
-    .terminal-dot.red { background: #ef4444; }
-    .terminal-dot.yellow { background: #f59e0b; }
-    .terminal-dot.green { background: #10b981; }
+    .terminal-tabs { display: flex; gap: 8px; align-items: center; }
+    .tab-btn {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #94a3b8;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      font-family: var(--font-mono);
+      transition: all 0.2s;
+    }
+    .tab-btn.active {
+      background: var(--accent);
+      color: #000;
+      font-weight: 700;
+      border-color: var(--accent);
+    }
+    .terminal-tools { display: flex; gap: 8px; align-items: center; }
+    .tool-btn {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      color: #38bdf8;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      font-family: var(--font-mono);
+    }
+    .tool-btn:hover { background: #161b22; }
     .terminal-body {
       padding: 16px;
       font-size: 0.82rem;
       line-height: 1.7;
-      max-height: 280px;
+      max-height: 320px;
       overflow-y: auto;
     }
-    .msg-line { color: #cbd5e1; word-break: break-word; }
+    .msg-line { color: #cbd5e1; word-break: break-word; padding: 2px 0; border-bottom: 1px solid #0f141c; }
     .msg-seq { color: #64748b; margin-right: 6px; }
+    .msg-time { color: #475569; font-size: 0.75rem; margin-right: 6px; }
     .msg-from { color: #38bdf8; font-weight: 600; margin-right: 6px; }
     .msg-from.my-agent { color: #34d399; font-weight: 700; background: rgba(16, 185, 129, 0.15); padding: 1px 6px; border-radius: 4px; }
-    .msg-line.my-msg { background: rgba(16, 185, 129, 0.06); padding: 2px 6px; border-radius: 4px; margin: 2px 0; }
+    .msg-line.my-msg { background: rgba(16, 185, 129, 0.08); padding: 3px 6px; border-radius: 4px; border-left: 3px solid var(--accent); }
     
     .table-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; overflow: hidden; margin-bottom: 24px; }
     table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.85rem; }
@@ -372,20 +388,25 @@ export function generateDashboardHtml({
       </div>
     </div>
 
-    <!-- Live Room Feed Terminal -->
+    <!-- Live Room Feed Terminal with Real-time Client Polling -->
     <h2 class="section-title">
-      <span id="room-feed-title">📡 Live Technocore Feed (/r/lobby)</span>
-      <span style="font-size: 0.75rem; color: var(--accent); font-weight: normal;">● Auto-updating</span>
+      <span id="room-feed-title">📡 Live Technocore Feed</span>
+      <span id="live-indicator" style="font-size: 0.75rem; color: var(--accent); font-weight: normal; font-family: var(--font-mono);">● Connecting to live stream...</span>
     </h2>
     <div class="terminal-card">
       <div class="terminal-header">
-        <span class="terminal-dot red"></span>
-        <span class="terminal-dot yellow"></span>
-        <span class="terminal-dot green"></span>
-        <span style="margin-left: 8px; color: #94a3b8; font-size: 0.75rem;">https://technocore.chat/r/lobby</span>
+        <div class="terminal-tabs">
+          <button class="tab-btn active" id="tab-lobby" onclick="switchRoom('lobby')">/r/lobby</button>
+          <button class="tab-btn" id="tab-events" onclick="switchRoom('events')">/r/events</button>
+          <button class="tab-btn" id="tab-mailbox" onclick="switchRoom('${scoutMailbox}')">📬 Mailbox</button>
+        </div>
+        <div class="terminal-tools">
+          <button class="tool-btn" id="filter-btn" onclick="toggleMyFilter()">🔍 Show All</button>
+          <button class="tool-btn" onclick="fetchLiveRoomMessages()">🔄 Refresh</button>
+        </div>
       </div>
-      <div class="terminal-body">
-        ${renderedRoomMessages}
+      <div class="terminal-body" id="terminal-stream">
+        <div style="color: #64748b; padding: 12px 0;">Loading real-time room stream from https://technocore.chat...</div>
       </div>
     </div>
 
@@ -481,6 +502,12 @@ export function generateDashboardHtml({
 
   <script>
     const AUTH_HASH = "4dc03776bc1e1db9bfce2f08bad7ac5c7bc8af0aea4848a6d0d57afeefe7ff3c";
+    const SCOUT_DID = "${did}";
+    const SCRIBE_DID = "${scribeDid}";
+
+    let activeRoom = 'lobby';
+    let filterOnlyMine = false;
+    let currentMessages = [];
 
     const TEXTS = {
       en: {
@@ -493,7 +520,7 @@ export function generateDashboardHtml({
         actionTitle: "Last Action",
         handledTitle: "Processed Inquiries",
         handledSub: "Co-op Mesh Knowledge",
-        roomFeedTitle: "📡 Live Technocore Feed (/r/lobby)",
+        roomFeedTitle: "📡 Live Technocore Feed",
         readinessTitle: "🛡️ FLOP Airdrop & Protocol Readiness",
         check1Title: "W3C did:key Identity Mesh",
         check1Desc: "Two unique Ed25519 cryptographic keypairs registered on Technocore.",
@@ -524,7 +551,7 @@ export function generateDashboardHtml({
         actionTitle: "Paskutinis Veiksmas",
         handledTitle: "Apdoroti Klausimai",
         handledSub: "Žinių pagalba kitiems agentams",
-        roomFeedTitle: "📡 Gyvas Technocore srautas (/r/lobby)",
+        roomFeedTitle: "📡 Gyvas Technocore srautas",
         readinessTitle: "🛡️ FLOP Airdrop & Protokolo Pasirengimas",
         check1Title: "W3C did:key tapatybių tinklas",
         check1Desc: "Dvi unikalios Ed25519 raktų poros su nuolatiniais DID tinkle.",
@@ -613,6 +640,89 @@ export function generateDashboardHtml({
       document.getElementById('lock-err').style.display = 'none';
     }
 
+    function switchRoom(roomName) {
+      activeRoom = roomName;
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      if (roomName === 'lobby') document.getElementById('tab-lobby')?.classList.add('active');
+      else if (roomName === 'events') document.getElementById('tab-events')?.classList.add('active');
+      else document.getElementById('tab-mailbox')?.classList.add('active');
+      fetchLiveRoomMessages();
+    }
+
+    function toggleMyFilter() {
+      filterOnlyMine = !filterOnlyMine;
+      const btn = document.getElementById('filter-btn');
+      if (filterOnlyMine) {
+        btn.innerText = '⭐ Only My Agents';
+        btn.style.color = '#34d399';
+        btn.style.borderColor = '#34d399';
+      } else {
+        btn.innerText = '🔍 Show All';
+        btn.style.color = '#38bdf8';
+        btn.style.borderColor = '#30363d';
+      }
+      renderMessages(currentMessages);
+    }
+
+    function renderMessages(messages) {
+      const container = document.getElementById('terminal-stream');
+      if (!messages || messages.length === 0) {
+        container.innerHTML = '<div style="color: #64748b; padding: 12px 0;">No messages found in this room yet.</div>';
+        return;
+      }
+
+      const filtered = filterOnlyMine
+        ? messages.filter(m => (m.from && (m.from.includes(SCOUT_DID.slice(-8)) || m.from.includes(SCRIBE_DID.slice(-8)) || m.from === SCOUT_DID || m.from === SCRIBE_DID)))
+        : messages;
+
+      if (filtered.length === 0) {
+        container.innerHTML = '<div style="color: #64748b; padding: 12px 0;">No messages from your agents in the latest batch.</div>';
+        return;
+      }
+
+      container.innerHTML = filtered.map(m => {
+        const isScout = m.from && (m.from.includes(SCOUT_DID.slice(-8)) || m.from === SCOUT_DID);
+        const isScribe = m.from && (m.from.includes(SCRIBE_DID.slice(-8)) || m.from === SCRIBE_DID);
+        const isMyAgent = isScout || isScribe;
+        const agentBadge = isScout ? ' <span class="msg-from my-agent">[MY SCOUT]</span>' : (isScribe ? ' <span class="msg-from my-agent">[MY SCRIBE]</span>' : '');
+        const lineClass = isMyAgent ? 'msg-line my-msg' : 'msg-line';
+        const fromClass = isMyAgent ? 'msg-from my-agent' : 'msg-from';
+        const time = m.ts ? new Date(m.ts).toLocaleTimeString() : '';
+        const cleanFrom = (m.from || 'anon').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const cleanText = (m.text || m.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+        return '<div class="' + lineClass + '">' +
+          '<span class="msg-seq">[#' + (m.seq || '—') + ']</span> ' +
+          (time ? '<span class="msg-time">' + time + '</span> ' : '') +
+          '<span class="' + fromClass + '">&lt;' + cleanFrom + '&gt;</span>' +
+          agentBadge + ' ' +
+          '<span class="msg-text">' + cleanText + '</span>' +
+        '</div>';
+      }).join('');
+      container.scrollTop = container.scrollHeight;
+    }
+
+    async function fetchLiveRoomMessages() {
+      try {
+        const res = await fetch('https://technocore.chat/r/' + encodeURIComponent(activeRoom) + '?limit=30&format=json');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        currentMessages = data.messages || [];
+        renderMessages(currentMessages);
+        const ind = document.getElementById('live-indicator');
+        if (ind) {
+          ind.innerHTML = '● LIVE (/r/' + activeRoom + ' · ' + new Date().toLocaleTimeString() + ')';
+          ind.style.color = '#10b981';
+        }
+      } catch (err) {
+        const ind = document.getElementById('live-indicator');
+        if (ind) {
+          ind.innerHTML = '● Connection paused (' + err.message + ')';
+          ind.style.color = '#f59e0b';
+        }
+      }
+    }
+
     document.getElementById('scout-pass')?.addEventListener('keyup', function(e) {
       if (e.key === 'Enter') attemptUnlock();
     });
@@ -622,6 +732,10 @@ export function generateDashboardHtml({
     } else {
       applyTexts('en');
     }
+
+    // Start live client stream polling every 8 seconds
+    fetchLiveRoomMessages();
+    setInterval(fetchLiveRoomMessages, 8000);
   </script>
 </body>
 </html>`;
@@ -654,7 +768,7 @@ export async function updateDashboardFile(outputDir = 'docs', serverUrl = 'https
 
   try {
     const client = new TechnocoreClient({ baseUrl: serverUrl, timeoutMs: 4000 });
-    const res = await client.readRoom('lobby', { limit: 15 });
+    const res = await client.readRoom('lobby', { limit: 20 });
     roomMessages = res.messages || [];
   } catch {
     // Non-blocking
