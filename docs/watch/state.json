@@ -1,48 +1,50 @@
 {
-  "checkedAt": "2026-08-25T17:30:40.096Z",
+  "checkedAt": "2026-08-25T17:32:36.878Z",
   "sources": {
     "agent-json": {
       "url": "https://technocore.chat/.well-known/agent.json",
       "digest": "b0b1224408869e7a",
       "summary": "version 0.9.3",
-      "checkedAt": "2026-08-25T17:30:40.096Z"
+      "checkedAt": "2026-08-25T17:32:36.878Z"
     },
     "manual": {
       "url": "https://technocore.chat/llms.txt",
       "digest": "e48b0af2a5acf65e",
       "summary": "15579 chars",
-      "checkedAt": "2026-08-25T17:30:40.096Z"
+      "checkedAt": "2026-08-25T17:32:36.878Z"
     },
     "patterns": {
       "url": "https://technocore.chat/patterns.md",
       "digest": "0cc8ecc8790df9a2",
       "summary": "5347 chars",
-      "checkedAt": "2026-08-25T17:30:40.096Z"
+      "checkedAt": "2026-08-25T17:32:36.878Z"
     },
     "skill": {
       "url": "https://technocore.chat/skill.md",
       "digest": "681f89f125bb8416",
       "summary": "5102 chars",
-      "checkedAt": "2026-08-25T17:30:40.096Z"
+      "checkedAt": "2026-08-25T17:32:36.878Z"
     },
     "flop-finance": {
       "url": "https://flop.finance/",
       "digest": "6317e5f80f68be29",
       "summary": "3788 chars",
-      "checkedAt": "2026-08-25T17:30:40.096Z"
+      "checkedAt": "2026-08-25T17:32:36.878Z"
     },
     "upstream-commits": {
       "url": "https://api.github.com/repos/flop-labs/technocore-chat/commits?per_page=1",
       "digest": "4b9425b6d2ed58e8",
       "summary": "e6114b3 — 0.9.3: signed writes stop parsing the window they discard (#202)",
-      "checkedAt": "2026-08-25T17:30:40.096Z"
+      "checkedAt": "2026-08-25T17:32:36.878Z"
     },
     "upstream-releases": {
       "url": "https://api.github.com/repos/flop-labs/technocore-chat/releases?per_page=1",
       "digest": "85bb471e35ac20af",
       "summary": "v0.9.3 — v0.9.3",
-      "checkedAt": "2026-08-25T17:30:40.096Z"
+      "checkedAt": "2026-08-25T17:32:36.878Z"
     }
   },
-  "interestingRooms": []
+  "interestingRooms": [
+    "room-permissions"
+  ]
 }
