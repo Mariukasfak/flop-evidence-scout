@@ -10,6 +10,14 @@
  * State lives in docs/watch/state.json (committed), so a change is detected
  * across scheduled runs on ephemeral CI machines.
  *
+ * DO NOT turn this into a probe. /auth.md says plainly: "There is no
+ * registration, provisioning, claim or token endpoint at any path ... Please do
+ * not probe for one." This reads published documents — openapi.json, llms.txt,
+ * agent.json, the repo — which is how the service asks to be discovered. Adding
+ * speculative requests to guessed paths would be both rude and useless: a route
+ * cannot ship without appearing in openapi.json, so waiting for it there is
+ * strictly faster than guessing.
+ *
  * Run: node tools/watch-sources.mjs
  */
 import fs from 'node:fs';
@@ -31,14 +39,43 @@ const KEYWORDS = /faucet|testnet|airdrop|\btasks?\b|\bquests?\b|\bbount(?:y|ies)
 // a hyphen counts as a boundary and `flop-testnet-faucet` still matches.
 
 const SOURCES = [
+  // openapi.json is the highest-signal source there is: upstream's own
+  // CONTRIBUTING requires a new route to land in the manifest in the same
+  // change, and CI fails on an undocumented status code. A faucet endpoint
+  // therefore cannot ship without appearing here first.
+  { id: 'openapi', url: 'https://technocore.chat/openapi.json', kind: 'openapi' },
   { id: 'agent-json', url: 'https://technocore.chat/.well-known/agent.json', kind: 'json' },
   { id: 'manual', url: 'https://technocore.chat/llms.txt', kind: 'text' },
   { id: 'patterns', url: 'https://technocore.chat/patterns.md', kind: 'text' },
   { id: 'skill', url: 'https://technocore.chat/skill.md', kind: 'text' },
   { id: 'flop-finance', url: 'https://flop.finance/', kind: 'html' },
-  { id: 'upstream-commits', url: 'https://api.github.com/repos/flop-labs/technocore-chat/commits?per_page=1', kind: 'gh' },
+  { id: 'upstream-commits', url: 'https://api.github.com/repos/flop-labs/technocore-chat/commits?per_page=5', kind: 'gh' },
   { id: 'upstream-releases', url: 'https://api.github.com/repos/flop-labs/technocore-chat/releases?per_page=1', kind: 'gh' }
 ];
+
+/**
+ * Hayes said on 2026-08-25 that allocation will depend on testnet activity and
+ * that the faucet will live on technocore.chat behind a DID key. The first
+ * appearance of any of these words in a source that never carried them is a
+ * louder signal than any hash change, so it is reported separately — a digest
+ * moving tells you something changed, this tells you what to care about.
+ */
+const SIGNAL_WORDS = [
+  'faucet', 'testnet', 'inference', 'wallet', 'balance', 'mint',
+  'credit', 'quota', 'settle', 'payment', 'ledger'
+];
+
+function signalHits(body) {
+  const found = [];
+  for (const word of SIGNAL_WORDS) {
+    // "token bucket" is the rate limiter, not a token — require a word boundary
+    // and skip the phrases we already know are innocent.
+    const re = new RegExp(`\\b${word}\\b`, 'gi');
+    const matches = body.match(re);
+    if (matches) found.push(`${word}×${matches.length}`);
+  }
+  return found;
+}
 
 const sha = (s) => crypto.createHash('sha256').update(s, 'utf8').digest('hex').slice(0, 16);
 
@@ -68,6 +105,10 @@ function normalise(kind, body) {
 /** A human-readable marker per source, so a diff says something, not just "hash changed". */
 function summarise(id, kind, body) {
   try {
+    if (id === 'openapi') {
+      const paths = Object.keys(JSON.parse(body).paths || {}).sort();
+      return `${paths.length} paths`;
+    }
     if (id === 'agent-json') return `version ${JSON.parse(body).version}`;
     if (id === 'upstream-commits') {
       const c = JSON.parse(body)[0];
@@ -102,22 +143,57 @@ async function main() {
 
   const sources = {};
   const changes = [];
+  const signalAlerts = [];
 
   for (const source of SOURCES) {
     try {
       const body = await fetchText(source.url);
-      const digest = sha(normalise(source.kind, body));
+      const normalised = normalise(source.kind, body);
+      const digest = sha(normalised);
       const summary = summarise(source.id, source.kind, body);
-      sources[source.id] = { url: source.url, digest, summary, checkedAt: now };
+      const signals = signalHits(normalised);
+      const paths = source.id === 'openapi'
+        ? Object.keys(JSON.parse(body).paths || {}).sort()
+        : undefined;
+
+      sources[source.id] = { url: source.url, digest, summary, signals, paths, checkedAt: now };
 
       const before = prevSources[source.id];
       if (before && before.digest !== digest) {
-        changes.push({
-          id: source.id,
-          url: source.url,
-          was: before.summary,
-          now: summary
-        });
+        const change = { id: source.id, url: source.url, was: before.summary, now: summary };
+
+        // A route appearing is the event; the digest moving is just how we noticed.
+        if (paths && Array.isArray(before.paths)) {
+          const added = paths.filter((p) => !before.paths.includes(p));
+          const removed = before.paths.filter((p) => !paths.includes(p));
+          if (added.length) change.addedPaths = added;
+          if (removed.length) change.removedPaths = removed;
+        }
+
+        if (source.kind === 'text') {
+          const beforeLines = new Set((before.body || '').split('\n'));
+          const added = normalised.split('\n')
+            .filter((l) => l.trim() && !beforeLines.has(l))
+            .slice(0, 12);
+          if (added.length && before.body) change.addedLines = added;
+        }
+
+        changes.push(change);
+      }
+
+      // Report a signal word the first time it shows up in a source that never
+      // carried it, whether or not anything else about the source changed.
+      if (before) {
+        const seenBefore = new Set((before.signals || []).map((s) => s.split('×')[0]));
+        const fresh = signals.map((s) => s.split('×')[0]).filter((w) => !seenBefore.has(w));
+        if (fresh.length) {
+          signalAlerts.push({ id: source.id, url: source.url, words: fresh });
+        }
+      }
+
+      // Keep the body only where a line diff is cheap and useful.
+      if (source.kind === 'text' && normalised.length < 40000) {
+        sources[source.id].body = normalised;
       }
     } catch (err) {
       // A source being unreachable is not news; record it and move on.
@@ -156,18 +232,22 @@ async function main() {
     return;
   }
 
-  if (changes.length === 0 && newRooms.length === 0) {
+  if (changes.length === 0 && newRooms.length === 0 && signalAlerts.length === 0) {
     console.log('[watch] No change in any watched source.');
     if (fs.existsSync(CHANGE_PATH)) fs.rmSync(CHANGE_PATH);
     return;
   }
 
   fs.mkdirSync(path.dirname(CHANGE_PATH), { recursive: true });
-  fs.writeFileSync(CHANGE_PATH, JSON.stringify({ detectedAt: now, changes, newRooms }, null, 2), 'utf8');
+  fs.writeFileSync(CHANGE_PATH, JSON.stringify({ detectedAt: now, changes, newRooms, signalAlerts }, null, 2), 'utf8');
 
-  console.log(`[watch] ${changes.length} source change(s), ${newRooms.length} new room(s) of interest.`);
-  for (const c of changes) console.log(`  ${c.id}: ${c.was}  ->  ${c.now}`);
+  console.log(`[watch] ${changes.length} source change(s), ${newRooms.length} new room(s), ${signalAlerts.length} signal-word alert(s).`);
+  for (const c of changes) {
+    console.log(`  ${c.id}: ${c.was}  ->  ${c.now}`);
+    if (c.addedPaths) console.log(`    NEW PATHS: ${c.addedPaths.join(', ')}`);
+  }
   for (const r of newRooms) console.log(`  new room: ${r}`);
+  for (const a of signalAlerts) console.log(`  SIGNAL in ${a.id}: ${a.words.join(', ')}`);
 }
 
 main().catch((err) => {

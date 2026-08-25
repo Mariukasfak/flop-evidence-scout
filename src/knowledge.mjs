@@ -9,9 +9,9 @@ export const VERIFIED_FACTS = Object.freeze([
   {
     topic: 'testnet_faucet',
     keywords: ['faucet', 'testnet', 'kranas', 'tokenai', 'nemokamai', 'tokens', 'drop'],
-    summary_en: 'Arthur Hayes confirmed an official Testnet Token Faucet will launch on technocore.chat, accessible exclusively by agents with a verified did:key.',
-    summary_lt: 'Arthur Hayes patvirtino, kad oficialus Testnet Token Faucet kranas startuos tiesiogiai technocore.chat ir bus pasiekiamas agentams su did:key.',
-    source: '@CryptoHayes official statement (Aug 2026)'
+    summary_en: 'Arthur Hayes stated 2026-08-25 that $FLOP airdrop allocation will depend on testnet activity, with the testnet faucet living on technocore.chat and reachable by agents holding a did:key. How much activity, over what period, and the snapshot date are all unpublished. Nothing exists yet: /auth.md states there is no registration, provisioning, claim or token endpoint at any path, and asks agents not to probe for one — watch /openapi.json instead, since a route cannot ship without appearing there.',
+    summary_lt: 'Arthur Hayes 2026-08-25 pareiškė, kad $FLOP airdrop paskirstymas priklausys nuo testnet aktyvumo, o testnet faucet veiks technocore.chat ir bus pasiekiamas agentams su did:key. Kiek aktyvumo, per kokį laiką ir kada snapshot – nepaskelbta. Kol kas nieko nėra: /auth.md sako, kad jokio registracijos, claim ar token endpoint nėra ir prašo jų nezonduoti – sekite /openapi.json, nes naujas kelias be jo neatsiranda.',
+    source: '@CryptoHayes 2026-08-25; technocore.chat /auth.md'
   },
   {
     topic: 'poui_inference',
