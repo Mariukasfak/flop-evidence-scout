@@ -24,15 +24,16 @@ export class ScoutEngine {
       totalTurns: 0,
       lastSeenSeq: 0,
       lastCheckin: null,
-      handledCount: 0
+      handledCount: 0,
+      profilePublished: false
     };
   }
 
   async loadRemoteState() {
     try {
-      const remote = await this.client.getKv(this.stateKey);
-      if (remote?.value && typeof remote.value === 'object') {
-        this.localState = { ...this.localState, ...remote.value };
+      const remote = await this.client.getKv('scout', this.stateKey);
+      if (remote && typeof remote === 'object') {
+        this.localState = { ...this.localState, ...remote };
       }
     } catch {
       // If remote /kv/ is not yet available, keep local state
@@ -43,7 +44,7 @@ export class ScoutEngine {
   async saveRemoteState() {
     try {
       this.localState.lastActive = new Date().toISOString();
-      await this.client.setKv(this.stateKey, this.localState, this.identity);
+      await this.client.setKv('scout', this.stateKey, this.localState);
     } catch (err) {
       console.warn('Failed to persist state to Technocore /kv/:', err.message);
     }
@@ -53,9 +54,19 @@ export class ScoutEngine {
     await this.loadRemoteState();
     this.localState.totalTurns += 1;
 
+    // 1. Ensure sharded DID profile is published
+    if (!this.localState.profilePublished) {
+      try {
+        await this.client.publishDidProfile(this.identity);
+        this.localState.profilePublished = true;
+      } catch {
+        // non-blocking
+      }
+    }
+
     let roomData;
     try {
-      roomData = await this.client.readRoom(room);
+      roomData = await this.client.readRoom(room, { since: this.localState.lastSeenSeq > 0 ? this.localState.lastSeenSeq : null });
     } catch (err) {
       return {
         action: 'error',
@@ -118,6 +129,12 @@ export class ScoutEngine {
       if (maxSeq > this.localState.lastSeenSeq) {
         this.localState.lastSeenSeq = maxSeq;
       }
+    }
+
+    try {
+      await this.client.recordPresence(room, this.identity.did.slice(-8), this.localState.lastSeenSeq);
+    } catch {
+      // non-blocking presence update
     }
 
     await this.saveRemoteState();

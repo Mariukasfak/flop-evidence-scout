@@ -170,27 +170,32 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
         return;
       }
 
-      const kvMatch = url.pathname.match(/^\/kv\/([^/]+)$/);
+      const kvSetMatch = url.pathname.match(/^\/kv\/([^/]+)\/([^/]+)\/set\/(.*)$/);
+      if (kvSetMatch) {
+        const [, ns, key, encodedValue] = kvSetMatch;
+        const decodedKey = `${decodeURIComponent(ns)}/${decodeURIComponent(key)}`;
+        const val = decodeURIComponent(encodedValue);
+        let parsedVal;
+        try { parsedVal = JSON.parse(val); } catch { parsedVal = val; }
+        mockKv.set(decodedKey, parsedVal);
+        res.writeHead(200, { 'content-type': 'text/plain' });
+        res.end('OK');
+        return;
+      }
+
+      const kvMatch = url.pathname.match(/^\/kv\/([^/]+)\/([^/]+)$/);
       if (kvMatch) {
-        const key = decodeURIComponent(kvMatch[1]);
+        const [, ns, key] = kvMatch;
+        const decodedKey = `${decodeURIComponent(ns)}/${decodeURIComponent(key)}`;
         if (req.method === 'GET') {
-          if (mockKv.has(key)) {
-            res.writeHead(200, { 'content-type': 'application/json' });
-            res.end(JSON.stringify(mockKv.get(key)));
+          if (mockKv.has(decodedKey)) {
+            const data = mockKv.get(decodedKey);
+            res.writeHead(200, { 'content-type': typeof data === 'object' ? 'application/json' : 'text/plain' });
+            res.end(typeof data === 'object' ? JSON.stringify(data) : String(data));
           } else {
             res.writeHead(404, { 'content-type': 'application/json' });
             res.end(JSON.stringify({ error: 'Not found' }));
           }
-          return;
-        }
-        if (req.method === 'PUT') {
-          let body = '';
-          req.on('data', (c) => body += c);
-          req.on('end', () => {
-            mockKv.set(key, JSON.parse(body));
-            res.writeHead(200, { 'content-type': 'application/json' });
-            res.end(JSON.stringify({ ok: true }));
-          });
           return;
         }
       }
@@ -215,9 +220,13 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
     const health = await client.health();
     assert.equal(health.ok, true);
 
-    await client.setKv('test_key', { agentState: 'active' }, identity);
-    const kvData = await client.getKv('test_key');
-    assert.deepEqual(kvData.value, { agentState: 'active' });
+    await client.setKv('state', 'test_key', { agentState: 'active' });
+    const kvData = await client.getKv('state', 'test_key');
+    assert.deepEqual(kvData, { agentState: 'active' });
+
+    // Test DID profile publishing
+    const published = await client.publishDidProfile(identity);
+    assert.equal(published, true);
   });
 
   test('scout engine answers inquiries, signs headers, and updates /kv/ state continuity', async () => {
@@ -238,10 +247,10 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
     assert.match(lastPosted.content, /FLOP Scout/);
 
     // Verify /kv/ state persistence was updated
-    const savedState = await client.getKv(engine.stateKey);
-    assert.equal(savedState.value.did, identity.did);
-    assert.equal(savedState.value.totalTurns, 1);
-    assert.equal(savedState.value.handledCount, 1);
+    const savedState = await client.getKv('scout', engine.stateKey);
+    assert.equal(savedState.did, identity.did);
+    assert.equal(savedState.totalTurns, 1);
+    assert.equal(savedState.handledCount, 1);
 
     // Next turn with no new messages should be idle or status checkin
     const turn2 = await engine.runTurn({ room: 'lobby' });

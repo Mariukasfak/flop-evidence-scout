@@ -1,4 +1,4 @@
-import { signMessage } from './identity.mjs';
+import { signMessageBase64Url, singleLineSweep, getDidShardedPath } from './identity.mjs';
 
 export function parseRoomText(text) {
   if (typeof text !== 'string') return [];
@@ -32,18 +32,25 @@ export class TechnocoreClient {
     this.timeoutMs = timeoutMs;
   }
 
-  async readRoom(room = 'lobby', since = null) {
-    const query = since ? `?since=${since}` : '';
+  async readRoom(room = 'lobby', { since = null, wait = 0, limit = 50, format = 'text' } = {}) {
+    const params = new URLSearchParams();
+    if (since !== null && since !== undefined) params.set('since', String(since));
+    if (wait > 0) params.set('wait', String(Math.min(10, Math.max(0, wait))));
+    if (limit && limit !== 50) params.set('limit', String(limit));
+    if (format === 'json') params.set('format', 'json');
+
+    const query = params.toString() ? `?${params.toString()}` : '';
     const url = `${this.baseUrl}/r/${encodeURIComponent(room)}${query}`;
     
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timeout = (wait > 0 ? (wait + 5) * 1000 : this.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), timeout);
 
     try {
       const response = await this.fetch(url, {
         headers: {
-          'user-agent': 'TriAgent-FLOP-Evidence-Scout/0.1',
-          'accept': 'text/plain, application/json'
+          'user-agent': 'FLOP-Evidence-Scout/1.0',
+          'accept': format === 'json' ? 'application/json' : 'text/plain, application/json'
         },
         signal: controller.signal
       });
@@ -55,9 +62,9 @@ export class TechnocoreClient {
       }
 
       const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
+      if (contentType.includes('application/json') || format === 'json') {
         const json = await response.json();
-        return { messages: json.messages || [] };
+        return { messages: Array.isArray(json) ? json : (json.messages || []) };
       }
 
       const text = await response.text();
@@ -74,12 +81,12 @@ export class TechnocoreClient {
       throw new Error('Identity required for signed message');
     }
 
+    const sweptText = singleLineSweep(text);
     const nonce = Date.now().toString();
-    const payloadToSign = `${room}|${nonce}|${text}`;
-    const sigB64 = signMessage(payloadToSign, identity.privateKeyPem);
-    const sigB64Url = sigB64.replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+    const payloadToSign = `${room}|${nonce}|${sweptText}`;
+    const sigB64Url = signMessageBase64Url(payloadToSign, identity.privateKeyPem);
     
-    const url = `${this.baseUrl}/r/${encodeURIComponent(room)}/say-signed/${encodeURIComponent(identity.did)}/${sigB64Url}/${nonce}/${encodeURIComponent(text)}`;
+    const url = `${this.baseUrl}/r/${encodeURIComponent(room)}/say-signed/${encodeURIComponent(identity.did)}/${sigB64Url}/${nonce}/${encodeURIComponent(sweptText)}`;
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -88,7 +95,7 @@ export class TechnocoreClient {
       const response = await this.fetch(url, {
         method: 'GET',
         headers: {
-          'user-agent': 'TriAgent-FLOP-Evidence-Scout/0.1'
+          'user-agent': 'FLOP-Evidence-Scout/1.0'
         },
         signal: controller.signal
       });
@@ -112,8 +119,8 @@ export class TechnocoreClient {
     return await this.postSignedMessage(room, content, identity);
   }
 
-  async getKv(key) {
-    const url = `${this.baseUrl}/kv/${encodeURIComponent(key)}`;
+  async getKv(ns, key) {
+    const url = key ? `${this.baseUrl}/kv/${encodeURIComponent(ns)}/${encodeURIComponent(key)}` : `${this.baseUrl}/kv/${encodeURIComponent(ns)}`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
@@ -121,26 +128,32 @@ export class TechnocoreClient {
       const response = await this.fetch(url, { signal: controller.signal });
       clearTimeout(timer);
       if (!response.ok) return null;
-      return await response.json();
+      const text = await response.text();
+      try { return JSON.parse(text); } catch { return text; }
     } catch {
       clearTimeout(timer);
       return null;
     }
   }
 
-  async setKv(key, value, identity) {
-    const url = `${this.baseUrl}/kv/${encodeURIComponent(key)}`;
+  async setKv(ns, key, value, { ifValue = null, ifAbsent = false } = {}) {
+    const stringValue = typeof value === 'string' ? value : JSON.stringify(value);
+    const sweptValue = singleLineSweep(stringValue);
+    
+    const params = new URLSearchParams();
+    if (ifValue !== null) params.set('if', ifValue);
+    if (ifAbsent) params.set('if_absent', '1');
+
+    const query = params.toString() ? `?${params.toString()}` : '';
+    const url = `${this.baseUrl}/kv/${encodeURIComponent(ns)}/${encodeURIComponent(key)}/set/${encodeURIComponent(sweptValue)}${query}`;
+    
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
       const response = await this.fetch(url, {
-        method: 'PUT',
-        headers: {
-          'content-type': 'application/json',
-          ...(identity?.did ? { 'x-did': identity.did } : {})
-        },
-        body: JSON.stringify({ value, updatedAt: new Date().toISOString() }),
+        method: 'GET',
+        headers: { 'user-agent': 'FLOP-Evidence-Scout/1.0' },
         signal: controller.signal
       });
       clearTimeout(timer);
@@ -151,10 +164,21 @@ export class TechnocoreClient {
     }
   }
 
+  async publishDidProfile(identity, profile = {}) {
+    if (!identity?.did) return false;
+    const { shard, key } = getDidShardedPath(identity.did);
+    const profileText = `did: ${identity.did} | pubkey: ${identity.rawPublicKeyHex || ''} | mailbox: mb-p-scout-${key} | type: autonomous_evidence_scout | agent: FLOP Evidence Scout`;
+    return await this.setKv(shard, key, profileText);
+  }
+
+  async recordPresence(room, shortDid, seq) {
+    return await this.setKv(room, `hb-${shortDid}`, String(seq));
+  }
+
   async health() {
     try {
-      const res = await this.readRoom('lobby');
-      return { ok: true, messageCount: res.messages.length };
+      const res = await this.readRoom('lobby', { limit: 1 });
+      return { ok: true, messageCount: res.messages?.length ?? 0 };
     } catch (error) {
       return { ok: false, error: error.message };
     }

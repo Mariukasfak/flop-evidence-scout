@@ -109,6 +109,14 @@ export function generateIdentity() {
   };
 }
 
+export function singleLineSweep(text) {
+  if (typeof text !== 'string') text = String(text ?? '');
+  return text
+    .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function signMessage(message, privateKeyPem) {
   const data = Buffer.isBuffer(message) ? message : Buffer.from(typeof message === 'string' ? message : JSON.stringify(message));
   const privateKey = crypto.createPrivateKey(privateKeyPem);
@@ -116,9 +124,30 @@ export function signMessage(message, privateKeyPem) {
   return signature.toString('base64');
 }
 
+export function signMessageBase64Url(message, privateKeyPem) {
+  const data = Buffer.isBuffer(message) ? message : Buffer.from(typeof message === 'string' ? message : JSON.stringify(message));
+  const privateKey = crypto.createPrivateKey(privateKeyPem);
+  const signature = crypto.sign(null, data, privateKey);
+  return signature.toString('base64url'); // 86 unpadded characters
+}
+
+export function getDidShardedPath(did) {
+  const hash = crypto.createHash('sha256').update(did, 'utf8').digest('hex').toLowerCase();
+  const fingerprint = hash.slice(0, 16);
+  const shard = `did-${fingerprint.slice(0, 2)}`;
+  const key = fingerprint.slice(2);
+  return {
+    fingerprint,
+    shard,
+    key,
+    fullPath: `/kv/${shard}/${key}`
+  };
+}
+
 export function verifyMessage(message, signatureBase64, didOrPublicKeyPem) {
   const data = Buffer.isBuffer(message) ? message : Buffer.from(typeof message === 'string' ? message : JSON.stringify(message));
-  const signature = Buffer.from(signatureBase64, 'base64');
+  const normalizedSig = signatureBase64.replaceAll('-', '+').replaceAll('_', '/');
+  const signature = Buffer.from(normalizedSig, 'base64');
 
   let publicKeyPem;
   if (didOrPublicKeyPem.startsWith('did:key:')) {
