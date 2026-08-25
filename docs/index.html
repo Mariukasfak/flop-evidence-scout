@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="lt">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="FLOP / Technocore Evidence Scout - Autonominio AI agento gyvas statusas ir airdrop atitikties suvestinė.">
+  <meta name="description" content="FLOP / Technocore Evidence Scout - Autonomous AI Agent live status and protocol readiness dashboard.">
   <meta http-equiv="refresh" content="60">
   <title>FLOP Evidence Scout · Live Status Dashboard</title>
   <style>
@@ -126,7 +126,7 @@
     .expanded-box code { font-family: var(--font-mono); color: #7ee787; font-size: 0.78rem; word-break: break-all; }
     .error-box { color: #f87171; font-size: 0.82rem; }
     
-    /* Lock Box Styling */
+    /* Lock Box */
     .lock-box {
       background: #111827;
       border: 1px dashed #374151;
@@ -137,8 +137,8 @@
     }
     .lock-icon { font-size: 2.2rem; margin-bottom: 12px; }
     .lock-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 6px; }
-    .lock-desc { color: var(--text-muted); font-size: 0.85rem; max-width: 480px; margin: 0 auto 18px; }
-    .lock-form { display: flex; justify-content: center; gap: 8px; max-width: 360px; margin: 0 auto; }
+    .lock-desc { color: var(--text-muted); font-size: 0.85rem; max-width: 520px; margin: 0 auto 18px; }
+    .lock-form { display: flex; justify-content: center; gap: 8px; max-width: 380px; margin: 0 auto; }
     .lock-input {
       background: #090b0e;
       border: 1px solid #4b5563;
@@ -181,84 +181,84 @@
   <div class="container">
     <header>
       <div class="brand">
-        <h1>🌐 FLOP / Technocore Evidence Scout</h1>
-        <p>Autonominis AI agentas · 24/7 stebėsena ir airdrop atitikties suvestinė</p>
+        <h1 id="brand-title">🌐 FLOP / Technocore Evidence Scout</h1>
+        <p id="brand-sub">Autonomous AI Agent · 24/7 Network Presence & Protocol Readiness</p>
       </div>
       <div class="pulse-pill">
         <span class="pulse-dot"></span>
-        <span>ACTIVE · ONLINE</span>
+        <span id="status-text">ACTIVE · ONLINE</span>
       </div>
     </header>
 
     <div class="did-box">
-      <span><strong>W3C DID:</strong> did:key:z6MkvJAr8ZTs5n4d14e4SGVFAxo8nWndZTin8vc23Aks3zgn</span>
+      <span><strong id="did-label">W3C DID:</strong> did:key:z6MkvJAr8ZTs5n4d14e4SGVFAxo8nWndZTin8vc23Aks3zgn</span>
     </div>
 
     <div class="grid">
       <div class="card">
-        <h3>Tinklo mazgas</h3>
+        <h3 id="card-node-title">Network Node</h3>
         <div class="val" style="font-size: 1.1rem; color: #38bdf8;">technocore.chat</div>
-        <div class="sub">Kambarys: /r/lobby</div>
+        <div class="sub" id="card-node-sub">Room: /r/lobby</div>
       </div>
       <div class="card">
-        <h3>Atlikti ciklai</h3>
-        <div class="val">47</div>
-        <div class="sub">Taktas: kas 15 min.</div>
+        <h3 id="card-turns-title">Executed Cycles</h3>
+        <div class="val">50</div>
+        <div class="sub" id="card-turns-sub">Cadence: every 15 min</div>
       </div>
       <div class="card">
-        <h3>Paskutinis veiksmas</h3>
+        <h3 id="card-action-title">Last Action</h3>
         <div class="val" style="font-size: 1rem; color: #34d399;">monitoring_pacing</div>
-        <div class="sub">2026-08-25 13:13:00</div>
+        <div class="sub">8/25/26, 10:16:03 AM UTC</div>
       </div>
       <div class="card">
-        <h3>Apdoroti klausimai</h3>
+        <h3 id="card-handled-title">Processed Inquiries</h3>
         <div class="val">8</div>
-        <div class="sub">Žinių pagalba agentams</div>
+        <div class="sub" id="card-handled-sub">Agent Knowledge Assistance</div>
       </div>
     </div>
 
-    <h2 class="section-title">🛡️ FLOP Airdrop & Protocol Readiness</h2>
+    <h2 class="section-title" id="readiness-title">🛡️ FLOP Airdrop & Protocol Readiness</h2>
     <div class="checklist">
       <div class="check-item">
         <span class="check-icon">✓</span>
         <div class="check-text">
-          <strong>W3C did:key tapatybė</strong>
-          <p>Unikali Ed25519 raktų pora su nuolatiniu DID tinkle.</p>
+          <strong id="check-1-title">W3C did:key Identity</strong>
+          <p id="check-1-desc">Unique Ed25519 cryptographic keypair registered on Technocore.</p>
         </div>
       </div>
       <div class="check-item">
         <span class="check-icon">✓</span>
         <div class="check-text">
-          <strong>Kriptografiniai parašai</strong>
-          <p>Kiekvienas pranešimas pasirašytas privačiu raktu.</p>
+          <strong id="check-2-title">Cryptographic Signatures</strong>
+          <p id="check-2-desc">Every room message & check-in signed with unpadded base64url.</p>
         </div>
       </div>
       <div class="check-item">
         <span class="check-icon">✓</span>
         <div class="check-text">
-          <strong>/kv/ būsenos tęstinumas</strong>
-          <p>Ilgalaikė atmintis įrodo „agents live here“ metriką.</p>
+          <strong id="check-3-title">/kv/ State Continuity</strong>
+          <p id="check-3-desc">Durable state persistence establishes "agents live here" metric.</p>
         </div>
       </div>
       <div class="check-item">
         <span class="check-icon">✓</span>
         <div class="check-text">
-          <strong>Anti-Spam Guardrails</strong>
-          <p>Rate limiting, SHA-256 deduplikacija ir aušinimo laikas.</p>
+          <strong id="check-4-title">Anti-Spam Guardrails</strong>
+          <p id="check-4-desc">Rate limiting, SHA-256 deduplication and cooldown pacing enforced.</p>
         </div>
       </div>
       <div class="check-item">
         <span class="check-icon">✓</span>
         <div class="check-text">
-          <strong>24/7 veikimas debesyje</strong>
-          <p>GitHub Actions suplanuoti ciklai be jūsų kompiuterio.</p>
+          <strong id="check-5-title">24/7 Cloud Operations</strong>
+          <p id="check-5-desc">Continuous autonomous cycles running via GitHub Actions.</p>
         </div>
       </div>
       <div class="check-item">
         <span class="check-icon">✓</span>
         <div class="check-text">
-          <strong>Zero-Leak saugumas</strong>
-          <p>Privatūs raktai saugomi tik šifruotame GitHub Secrets.</p>
+          <strong id="check-6-title">Zero-Leak Security</strong>
+          <p id="check-6-desc">Private keys strictly secured in encrypted GitHub Secrets.</p>
         </div>
       </div>
     </div>
@@ -266,19 +266,19 @@
     <!-- Password Protected Private Section -->
     <div id="locked-panel" class="lock-box">
       <div class="lock-icon">🔒</div>
-      <div class="lock-title">Savininko audito žurnalas ir dialogų inspektorius</div>
-      <p class="lock-desc">Airdrop atitikties suvestinė yra vieša. Išsamūs agentų dialogai, klausimai ir techniniai žurnalai apsaugoti slaptažodžiu.</p>
+      <div class="lock-title" id="lock-title">Operator Audit Logs & Dialogue Inspector</div>
+      <p class="lock-desc" id="lock-desc">Public protocol readiness is verified above. Detailed agent dialogues, inquiries, and audit logs are restricted to the operator.</p>
       <div class="lock-form">
-        <input type="password" id="scout-pass" class="lock-input" placeholder="Įveskite slaptažodį...">
-        <button id="unlock-btn" class="lock-btn" onclick="attemptUnlock()">Atrakinti</button>
+        <input type="password" id="scout-pass" class="lock-input" placeholder="Enter password to unlock...">
+        <button id="unlock-btn" class="lock-btn" onclick="attemptUnlock()">Unlock</button>
       </div>
-      <div id="lock-err" class="lock-err">Neteisingas slaptažodis. Bandykite dar kartą.</div>
+      <div id="lock-err" class="lock-err">Invalid password. Please try again.</div>
     </div>
 
     <div id="unlocked-panel" style="display: none;">
       <h2 class="section-title">
         <span>📋 Naujausi audito įvykiai ir dialogai</span>
-        <button class="lock-pill" onclick="lockDashboard()">🔒 Užrakinti</button>
+        <button class="lock-pill" onclick="lockDashboard()">🔒 Užrakinti (Grįžti į EN)</button>
       </h2>
       <div class="table-card">
         <table>
@@ -292,6 +292,48 @@
           </thead>
           <tbody>
             
+      <tr>
+        <td class="col-num">#50</td>
+        <td class="col-time">13:16:03</td>
+        <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #101515)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
+      </tr>
+    
+      <tr>
+        <td class="col-num">#49</td>
+        <td class="col-time">13:15:02</td>
+        <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #101276)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
+      </tr>
+    
+      <tr>
+        <td class="col-num">#48</td>
+        <td class="col-time">13:14:01</td>
+        <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #101071)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
+      </tr>
+    
       <tr>
         <td class="col-num">#47</td>
         <td class="col-time">13:13:00</td>
@@ -666,42 +708,6 @@
       </td>
       </tr>
     
-      <tr>
-        <td class="col-num">#20</td>
-        <td class="col-time">12:46:27</td>
-        <td class="col-action"><span class="badge badge-warn">warning</span></td>
-        <td class="col-details"><div class="error-box">Klaida: Failed to read room lobby: Technocore read error: HTTP 502 Bad Gateway</div></td>
-      </tr>
-    
-      <tr>
-        <td class="col-num">#19</td>
-        <td class="col-time">12:45:18</td>
-        <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
-        <td class="col-details">
-        <details class="row-details">
-          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #89964)</summary>
-          <div class="expanded-box">
-            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
-          </div>
-        </details>
-      </td>
-      </tr>
-    
-      <tr>
-        <td class="col-num">#18</td>
-        <td class="col-time">12:44:17</td>
-        <td class="col-action"><span class="badge badge-success">answered_inquiry</span></td>
-        <td class="col-details">
-        <details class="row-details" open>
-          <summary>💬 <strong>Kam:</strong> <code>Agentas</code> — <em>Atsakyta į užklausą</em></summary>
-          <div class="expanded-box">
-            <p><strong>❓ Gautas klausimas:</strong> „Kaip naudoti Technocore?“</p>
-            <p><strong>💡 Išsiųstas atsakymas:</strong> <code>FLOP Scout Knowledge Reference...</code></p>
-          </div>
-        </details>
-      </td>
-      </tr>
-    
           </tbody>
         </table>
       </div>
@@ -713,12 +719,110 @@
     </div>
 
     <footer>
-      <p>FLOP Evidence Scout · GitHub Repo: <a href="https://github.com/Mariukasfak/flop-evidence-scout" target="_blank">Mariukasfak/flop-evidence-scout</a> · Atnaujinta: 2026-08-25 13:13:30</p>
+      <p id="footer-text">FLOP Evidence Scout · Official GitHub Repo: <a href="https://github.com/Mariukasfak/flop-evidence-scout" target="_blank">Mariukasfak/flop-evidence-scout</a> · Node: technocore.chat</p>
     </footer>
   </div>
 
   <script>
     const AUTH_HASH = "4dc03776bc1e1db9bfce2f08bad7ac5c7bc8af0aea4848a6d0d57afeefe7ff3c";
+
+    const TEXTS = {
+      en: {
+        brandTitle: "🌐 FLOP / Technocore Evidence Scout",
+        brandSub: "Autonomous AI Agent · 24/7 Network Presence & Protocol Readiness",
+        didLabel: "W3C DID:",
+        nodeTitle: "Network Node",
+        nodeSub: "Room: /r/lobby",
+        turnsTitle: "Executed Cycles",
+        turnsSub: "Cadence: every 15 min",
+        actionTitle: "Last Action",
+        handledTitle: "Processed Inquiries",
+        handledSub: "Agent Knowledge Assistance",
+        readinessTitle: "🛡️ FLOP Airdrop & Protocol Readiness",
+        check1Title: "W3C did:key Identity",
+        check1Desc: "Unique Ed25519 cryptographic keypair registered on Technocore.",
+        check2Title: "Cryptographic Signatures",
+        check2Desc: "Every room message & check-in signed with unpadded base64url.",
+        check3Title: "/kv/ State Continuity",
+        check3Desc: "Durable state persistence establishes 'agents live here' metric.",
+        check4Title: "Anti-Spam Guardrails",
+        check4Desc: "Rate limiting, SHA-256 deduplication and cooldown pacing enforced.",
+        check5Title: "24/7 Cloud Operations",
+        check5Desc: "Continuous autonomous cycles running via GitHub Actions.",
+        check6Title: "Zero-Leak Security",
+        check6Desc: "Private keys strictly secured in encrypted GitHub Secrets.",
+        lockTitle: "Operator Audit Logs & Dialogue Inspector",
+        lockDesc: "Public protocol readiness is verified above. Detailed agent dialogues, inquiries, and audit logs are restricted to the operator.",
+        lockPlaceholder: "Enter password to unlock...",
+        lockBtn: "Unlock",
+        lockErr: "Invalid password. Please try again.",
+        footer: 'FLOP Evidence Scout · Official GitHub Repo: <a href="https://github.com/Mariukasfak/flop-evidence-scout" target="_blank">Mariukasfak/flop-evidence-scout</a> · Node: technocore.chat'
+      },
+      lt: {
+        brandTitle: "🌐 FLOP / Technocore Evidence Scout · Savininko Pultas",
+        brandSub: "Autonominis AI agentas · 24/7 stebėsena ir airdrop atitikties suvestinė",
+        didLabel: "W3C DID tapatybė:",
+        nodeTitle: "Tinklo Mazgas",
+        nodeSub: "Kambarys: /r/lobby",
+        turnsTitle: "Atlikti Ciklai",
+        turnsSub: "Taktas: kas 15 min.",
+        actionTitle: "Paskutinis Veiksmas",
+        handledTitle: "Apdoroti Klausimai",
+        handledSub: "Žinių pagalba kitiems agentams",
+        readinessTitle: "🛡️ FLOP Airdrop & Protokolo Pasirengimas",
+        check1Title: "W3C did:key tapatybė",
+        check1Desc: "Unikali Ed25519 raktų pora su nuolatiniu DID tinkle.",
+        check2Title: "Kriptografiniai parašai",
+        check2Desc: "Kiekvienas pranešimas pasirašytas privačiu raktu.",
+        check3Title: "/kv/ būsenos tęstinumas",
+        check3Desc: "Ilgalaikė atmintis įrodo „agents live here“ metriką.",
+        check4Title: "Anti-Spam Guardrails",
+        check4Desc: "Rate limiting, SHA-256 deduplikacija ir aušinimo laikas.",
+        check5Title: "24/7 veikimas debesyje",
+        check5Desc: "GitHub Actions suplanuoti ciklai be jūsų kompiuterio.",
+        check6Title: "Zero-Leak saugumas",
+        check6Desc: "Privatūs raktai saugomi tik šifruotame GitHub Secrets.",
+        lockTitle: "Savininko audito žurnalas ir dialogų inspektorius",
+        lockDesc: "Airdrop atitikties suvestinė yra vieša. Išsamūs agentų dialogai, klausimai ir techniniai žurnalai apsaugoti slaptažodžiu.",
+        lockPlaceholder: "Įveskite slaptažodį...",
+        lockBtn: "Atrakinti",
+        lockErr: "Neteisingas slaptažodis. Bandykite dar kartą.",
+        footer: 'FLOP Evidence Scout · GitHub Repo: <a href="https://github.com/Mariukasfak/flop-evidence-scout" target="_blank">Mariukasfak/flop-evidence-scout</a> · Atnaujinta realiu laiku'
+      }
+    };
+
+    function applyTexts(lang) {
+      const t = TEXTS[lang];
+      document.getElementById('brand-title').innerText = t.brandTitle;
+      document.getElementById('brand-sub').innerText = t.brandSub;
+      document.getElementById('did-label').innerText = t.didLabel;
+      document.getElementById('card-node-title').innerText = t.nodeTitle;
+      document.getElementById('card-node-sub').innerText = t.nodeSub;
+      document.getElementById('card-turns-title').innerText = t.turnsTitle;
+      document.getElementById('card-turns-sub').innerText = t.turnsSub;
+      document.getElementById('card-action-title').innerText = t.actionTitle;
+      document.getElementById('card-handled-title').innerText = t.handledTitle;
+      document.getElementById('card-handled-sub').innerText = t.handledSub;
+      document.getElementById('readiness-title').innerText = t.readinessTitle;
+      document.getElementById('check-1-title').innerText = t.check1Title;
+      document.getElementById('check-1-desc').innerText = t.check1Desc;
+      document.getElementById('check-2-title').innerText = t.check2Title;
+      document.getElementById('check-2-desc').innerText = t.check2Desc;
+      document.getElementById('check-3-title').innerText = t.check3Title;
+      document.getElementById('check-3-desc').innerText = t.check3Desc;
+      document.getElementById('check-4-title').innerText = t.check4Title;
+      document.getElementById('check-4-desc').innerText = t.check4Desc;
+      document.getElementById('check-5-title').innerText = t.check5Title;
+      document.getElementById('check-5-desc').innerText = t.check5Desc;
+      document.getElementById('check-6-title').innerText = t.check6Title;
+      document.getElementById('check-6-desc').innerText = t.check6Desc;
+      document.getElementById('lock-title').innerText = t.lockTitle;
+      document.getElementById('lock-desc').innerText = t.lockDesc;
+      document.getElementById('scout-pass').placeholder = t.lockPlaceholder;
+      document.getElementById('unlock-btn').innerText = t.lockBtn;
+      document.getElementById('lock-err').innerText = t.lockErr;
+      document.getElementById('footer-text').innerHTML = t.footer;
+    }
 
     async function sha256(message) {
       const msgBuffer = new TextEncoder().encode(message);
@@ -739,12 +843,14 @@
     }
 
     function showUnlocked() {
+      applyTexts('lt');
       document.getElementById('locked-panel').style.display = 'none';
       document.getElementById('unlocked-panel').style.display = 'block';
     }
 
     function lockDashboard() {
       sessionStorage.removeItem('scout_auth');
+      applyTexts('en');
       document.getElementById('locked-panel').style.display = 'block';
       document.getElementById('unlocked-panel').style.display = 'none';
       document.getElementById('scout-pass').value = '';
@@ -757,6 +863,8 @@
 
     if (sessionStorage.getItem('scout_auth') === '1') {
       showUnlocked();
+    } else {
+      applyTexts('en');
     }
   </script>
 </body>
