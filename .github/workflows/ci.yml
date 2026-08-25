@@ -24,11 +24,4 @@ jobs:
         run: npm test
 
       - name: Refuse to ship a key
-        run: |
-          # Belt and braces: .gitignore already excludes .secrets/, but a leaked
-          # identity is unrecoverable, so fail loudly if one ever lands in git.
-          if git grep -qI -- '-----BEGIN PRIVATE KEY-----' -- . ':!*.md'; then
-            echo "::error::A private key is committed to this repository."
-            exit 1
-          fi
-          echo "No private key material in tracked files."
+        run: node scripts/check-no-secrets.mjs
