@@ -409,7 +409,7 @@ export function generateDashboardHtml({
         </div>
         <div class="terminal-tools">
           <button class="tool-btn" id="filter-btn" onclick="toggleMyFilter()">🔍 Show All</button>
-          <button class="tool-btn" onclick="fetchLiveRoomMessages()">🔄 Refresh</button>
+          <button class="tool-btn" onclick="refreshPageData()">🔄 Refresh</button>
         </div>
       </div>
       <div class="terminal-body" id="terminal-stream">
@@ -717,40 +717,26 @@ export function generateDashboardHtml({
       container.scrollTop = container.scrollHeight;
     }
 
-    async function fetchLiveRoomMessages() {
+    function fetchLiveRoomMessages() {
       const ind = document.getElementById('live-indicator');
-      const targetUrl = 'https://technocore.chat/r/' + encodeURIComponent(activeRoom) + '?limit=30&format=json';
-
-      // 1. Try CORS Proxy gateway
-      try {
-        const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(targetUrl);
-        const res = await fetch(proxyUrl, { cache: 'no-store' });
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data.messages)) {
-            currentMessages = data.messages;
-            INITIAL_DATA[activeRoom] = currentMessages;
-            renderMessages(currentMessages);
-            if (ind) {
-              ind.innerHTML = '● LIVE Stream (/r/' + activeRoom + ' · ' + new Date().toLocaleTimeString() + ')';
-              ind.style.color = '#10b981';
-            }
-            return;
-          }
-        }
-      } catch {
-        // Fallback to static snapshot
-      }
-
-      // 2. Fallback to bundled snapshot
       if (INITIAL_DATA[activeRoom] && INITIAL_DATA[activeRoom].length > 0) {
         currentMessages = INITIAL_DATA[activeRoom];
         renderMessages(currentMessages);
         if (ind) {
           ind.innerHTML = '● Synchronized via Node Gateway (/r/' + activeRoom + ')';
-          ind.style.color = '#38bdf8';
+          ind.style.color = '#10b981';
+        }
+      } else {
+        renderMessages([]);
+        if (ind) {
+          ind.innerHTML = '● No messages in /r/' + activeRoom;
+          ind.style.color = '#94a3b8';
         }
       }
+    }
+
+    function refreshPageData() {
+      location.reload();
     }
 
     document.getElementById('scout-pass')?.addEventListener('keyup', function(e) {
@@ -763,12 +749,8 @@ export function generateDashboardHtml({
       applyTexts('en');
     }
 
-    // Initialize with bundled snapshot immediately (0ms wait)
-    renderMessages(currentMessages);
-
-    // Poll gateway periodically
+    // Initialize with bundled snapshot immediately (0ms wait, zero CORS)
     fetchLiveRoomMessages();
-    setInterval(fetchLiveRoomMessages, 15000);
   </script>
 </body>
 </html>`;
