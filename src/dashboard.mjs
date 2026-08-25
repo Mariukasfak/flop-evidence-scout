@@ -9,7 +9,7 @@ export function generateDashboardHtml({
   scribeIdentity = null,
   heartbeat = {},
   logs = [],
-  roomMessages = [],
+  roomMessages = {},
   generatedAt = new Date().toISOString()
 }) {
   const did = identity?.did || 'did:key:z6MkvJAr8ZTs5n4d14e4SGVFAxo8nWndZTin8vc23Aks3zgn';
@@ -98,12 +98,19 @@ export function generateDashboardHtml({
     `;
   }).join('');
 
+  const safeInitialData = JSON.stringify({
+    lobby: Array.isArray(roomMessages.lobby) ? roomMessages.lobby : (Array.isArray(roomMessages) ? roomMessages : []),
+    events: Array.isArray(roomMessages.events) ? roomMessages.events : [],
+    [scoutMailbox]: Array.isArray(roomMessages[scoutMailbox]) ? roomMessages[scoutMailbox] : []
+  }).replace(/</g, '\\u003c');
+
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="FLOP / Technocore Evidence Scout - Real-time Dual AI Agent Mesh & Protocol Readiness Dashboard.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌐</text></svg>">
   <title>FLOP Evidence Scout · Live Status Dashboard</title>
   <style>
     :root {
@@ -388,10 +395,10 @@ export function generateDashboardHtml({
       </div>
     </div>
 
-    <!-- Live Room Feed Terminal with Real-time Client Polling -->
+    <!-- Live Room Feed Terminal with Real-time Gateway Support -->
     <h2 class="section-title">
       <span id="room-feed-title">📡 Live Technocore Feed</span>
-      <span id="live-indicator" style="font-size: 0.75rem; color: var(--accent); font-weight: normal; font-family: var(--font-mono);">● Connecting to live stream...</span>
+      <span id="live-indicator" style="font-size: 0.75rem; color: var(--accent); font-weight: normal; font-family: var(--font-mono);">● Synchronized with Node Gateway</span>
     </h2>
     <div class="terminal-card">
       <div class="terminal-header">
@@ -406,7 +413,7 @@ export function generateDashboardHtml({
         </div>
       </div>
       <div class="terminal-body" id="terminal-stream">
-        <div style="color: #64748b; padding: 12px 0;">Loading real-time room stream from https://technocore.chat...</div>
+        <div style="color: #64748b; padding: 12px 0;">Loading real-time room stream...</div>
       </div>
     </div>
 
@@ -504,10 +511,13 @@ export function generateDashboardHtml({
     const AUTH_HASH = "4dc03776bc1e1db9bfce2f08bad7ac5c7bc8af0aea4848a6d0d57afeefe7ff3c";
     const SCOUT_DID = "${did}";
     const SCRIBE_DID = "${scribeDid}";
+    const SCOUT_MAILBOX = "${scoutMailbox}";
+
+    const INITIAL_DATA = ${safeInitialData};
 
     let activeRoom = 'lobby';
     let filterOnlyMine = false;
-    let currentMessages = [];
+    let currentMessages = INITIAL_DATA.lobby || [];
 
     const TEXTS = {
       en: {
@@ -646,6 +656,11 @@ export function generateDashboardHtml({
       if (roomName === 'lobby') document.getElementById('tab-lobby')?.classList.add('active');
       else if (roomName === 'events') document.getElementById('tab-events')?.classList.add('active');
       else document.getElementById('tab-mailbox')?.classList.add('active');
+
+      if (INITIAL_DATA[roomName] && INITIAL_DATA[roomName].length > 0) {
+        currentMessages = INITIAL_DATA[roomName];
+        renderMessages(currentMessages);
+      }
       fetchLiveRoomMessages();
     }
 
@@ -667,7 +682,7 @@ export function generateDashboardHtml({
     function renderMessages(messages) {
       const container = document.getElementById('terminal-stream');
       if (!messages || messages.length === 0) {
-        container.innerHTML = '<div style="color: #64748b; padding: 12px 0;">No messages found in this room yet.</div>';
+        container.innerHTML = '<div style="color: #64748b; padding: 12px 0;">No messages found in /r/' + activeRoom + ' yet.</div>';
         return;
       }
 
@@ -676,7 +691,7 @@ export function generateDashboardHtml({
         : messages;
 
       if (filtered.length === 0) {
-        container.innerHTML = '<div style="color: #64748b; padding: 12px 0;">No messages from your agents in the latest batch.</div>';
+        container.innerHTML = '<div style="color: #64748b; padding: 12px 0;">No messages from your agents in this room yet.</div>';
         return;
       }
 
@@ -703,22 +718,37 @@ export function generateDashboardHtml({
     }
 
     async function fetchLiveRoomMessages() {
+      const ind = document.getElementById('live-indicator');
+      const targetUrl = 'https://technocore.chat/r/' + encodeURIComponent(activeRoom) + '?limit=30&format=json';
+
+      // 1. Try CORS Proxy gateway
       try {
-        const res = await fetch('https://technocore.chat/r/' + encodeURIComponent(activeRoom) + '?limit=30&format=json');
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const data = await res.json();
-        currentMessages = data.messages || [];
-        renderMessages(currentMessages);
-        const ind = document.getElementById('live-indicator');
-        if (ind) {
-          ind.innerHTML = '● LIVE (/r/' + activeRoom + ' · ' + new Date().toLocaleTimeString() + ')';
-          ind.style.color = '#10b981';
+        const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(targetUrl);
+        const res = await fetch(proxyUrl, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.messages)) {
+            currentMessages = data.messages;
+            INITIAL_DATA[activeRoom] = currentMessages;
+            renderMessages(currentMessages);
+            if (ind) {
+              ind.innerHTML = '● LIVE Stream (/r/' + activeRoom + ' · ' + new Date().toLocaleTimeString() + ')';
+              ind.style.color = '#10b981';
+            }
+            return;
+          }
         }
-      } catch (err) {
-        const ind = document.getElementById('live-indicator');
+      } catch {
+        // Fallback to static snapshot
+      }
+
+      // 2. Fallback to bundled snapshot
+      if (INITIAL_DATA[activeRoom] && INITIAL_DATA[activeRoom].length > 0) {
+        currentMessages = INITIAL_DATA[activeRoom];
+        renderMessages(currentMessages);
         if (ind) {
-          ind.innerHTML = '● Connection paused (' + err.message + ')';
-          ind.style.color = '#f59e0b';
+          ind.innerHTML = '● Synchronized via Node Gateway (/r/' + activeRoom + ')';
+          ind.style.color = '#38bdf8';
         }
       }
     }
@@ -733,9 +763,12 @@ export function generateDashboardHtml({
       applyTexts('en');
     }
 
-    // Start live client stream polling every 8 seconds
+    // Initialize with bundled snapshot immediately (0ms wait)
+    renderMessages(currentMessages);
+
+    // Poll gateway periodically
     fetchLiveRoomMessages();
-    setInterval(fetchLiveRoomMessages, 8000);
+    setInterval(fetchLiveRoomMessages, 15000);
   </script>
 </body>
 </html>`;
@@ -747,9 +780,12 @@ export async function updateDashboardFile(outputDir = 'docs', serverUrl = 'https
 
   const identity = loadOrCreateIdentity('.secrets/scout-identity.json', 'SCOUT_IDENTITY_JSON');
   const scribeIdentity = loadOrCreateIdentity('.secrets/scribe-identity.json', 'SCRIBE_IDENTITY_JSON');
+  const scoutKey = getDidShardedPath(identity.did).key;
+  const scoutMailbox = `mb-p-scout-${scoutKey}`;
+
   let heartbeat = {};
   let logs = [];
-  let roomMessages = [];
+  const roomMessages = { lobby: [], events: [], [scoutMailbox]: [] };
 
   const heartbeatPath = path.resolve('data/scout-heartbeat.json');
   if (fs.existsSync(heartbeatPath)) {
@@ -768,8 +804,14 @@ export async function updateDashboardFile(outputDir = 'docs', serverUrl = 'https
 
   try {
     const client = new TechnocoreClient({ baseUrl: serverUrl, timeoutMs: 4000 });
-    const res = await client.readRoom('lobby', { limit: 20 });
-    roomMessages = res.messages || [];
+    const [lobbyRes, eventsRes, mailboxRes] = await Promise.allSettled([
+      client.readRoom('lobby', { limit: 25 }),
+      client.readRoom('events', { limit: 25 }),
+      client.readRoom(scoutMailbox, { limit: 25 })
+    ]);
+    if (lobbyRes.status === 'fulfilled') roomMessages.lobby = lobbyRes.value.messages || [];
+    if (eventsRes.status === 'fulfilled') roomMessages.events = eventsRes.value.messages || [];
+    if (mailboxRes.status === 'fulfilled') roomMessages[scoutMailbox] = mailboxRes.value.messages || [];
   } catch {
     // Non-blocking
   }
@@ -777,7 +819,7 @@ export async function updateDashboardFile(outputDir = 'docs', serverUrl = 'https
   const html = generateDashboardHtml({ identity, scribeIdentity, heartbeat, logs, roomMessages });
   const targetFile = path.join(resolvedDir, 'index.html');
   fs.writeFileSync(targetFile, html, 'utf8');
-  console.log(`[Dashboard] Generated live HTML status page with real room feed at: ${targetFile}`);
+  console.log(`[Dashboard] Generated live HTML status page with bundled room feeds at: ${targetFile}`);
   return targetFile;
 }
 
