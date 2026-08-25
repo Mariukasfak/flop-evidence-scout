@@ -1,0 +1,26 @@
+name: FLOP Scout Autonomous Agent
+
+on:
+  schedule:
+    # Run every 15 minutes to maintain 24/7 presence and handle inquiries
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  scout-turn:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run FLOP Scout Autonomous Cycle
+        env:
+          SCOUT_IDENTITY_JSON: ${{ secrets.SCOUT_IDENTITY_JSON }}
+          TECHNOCORE_URL: https://technocore.chat
+        run: |
+          node src/agents/flop-scout/daemon.mjs --dry-run --url=https://technocore.chat

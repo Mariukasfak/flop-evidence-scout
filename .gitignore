@@ -1,0 +1,11 @@
+node_modules/
+data/
+dist/
+output/
+.playwright-cli/
+*.log
+__pycache__/
+*.pyc
+/.codex/gemini-worker/
+!/.codex/gemini-handoff.md
+.secrets/

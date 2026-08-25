@@ -1,0 +1,20 @@
+{
+  "name": "triagent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "dev": "node --watch src/server.mjs",
+    "test": "node --test",
+    "build": "node scripts/build.mjs",
+    "check:connections": "node tools/check-connection.mjs",
+    "scout": "node src/agents/flop-scout/daemon.mjs --url=https://technocore.chat",
+    "scout:live": "node src/agents/flop-scout/daemon.mjs --url=https://technocore.chat",
+    "scout:monitor": "node src/agents/flop-scout/monitor.mjs",
+    "check": "npm test && npm run build"
+  }
+}
