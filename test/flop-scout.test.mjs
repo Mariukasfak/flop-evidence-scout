@@ -274,4 +274,23 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
 
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
+
+  test('generateDashboardHtml creates responsive status page with DID and metrics', async () => {
+    const { generateDashboardHtml, updateDashboardFile } = await import('../src/dashboard.mjs');
+    const html = generateDashboardHtml({
+      identity: { did: 'did:key:z6MkTestDid' },
+      heartbeat: { status: 'active', turns: 42, handledCount: 5, lastAction: 'answered_inquiry' },
+      logs: [{ timestamp: new Date().toISOString(), action: 'answered_inquiry' }]
+    });
+
+    assert.match(html, /did:key:z6MkTestDid/);
+    assert.match(html, /ONLINE/);
+    assert.match(html, /42/);
+    assert.match(html, /Airdrop & Protocol Readiness/);
+
+    const tmpDocs = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-docs-'));
+    const generatedPath = updateDashboardFile(tmpDocs);
+    assert.equal(fs.existsSync(generatedPath), true);
+    fs.rmSync(tmpDocs, { recursive: true, force: true });
+  });
 });

@@ -6,6 +6,7 @@ import { loadOrCreateIdentity } from './identity.mjs';
 import { TechnocoreClient } from './technocore-client.mjs';
 import { Guardrails } from './guardrails.mjs';
 import { ScoutEngine } from './scout-engine.mjs';
+import { updateDashboardFile } from './dashboard.mjs';
 
 function parseArgs(argv) {
   const options = {
@@ -78,6 +79,7 @@ export async function runScoutDaemon(options = {}) {
         handledCount: lastResult.handledCount ?? engine.localState.handledCount,
         lastSeenSeq: lastResult.lastSeenSeq ?? engine.localState.lastSeenSeq
       }, null, 2), 'utf8');
+      updateDashboardFile();
     } catch {
       // ignore
     }

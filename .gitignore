@@ -8,7 +8,6 @@ __pycache__/
 *.pyc
 .secrets/
 .codex/
-docs/
 tools/
 web/
 scripts/

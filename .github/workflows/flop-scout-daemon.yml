@@ -1,4 +1,4 @@
-name: FLOP Scout Autonomous Agent
+name: FLOP Scout Autonomous Agent & Live Dashboard
 
 on:
   schedule:
@@ -6,8 +6,11 @@ on:
     - cron: '*/15 * * * *'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
-  scout-turn:
+  scout-cycle:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -18,9 +21,17 @@ jobs:
         with:
           node-version: 22
 
-      - name: Run FLOP Scout Autonomous Cycle
+      - name: Run FLOP Scout Autonomous Cycle & Generate Dashboard
         env:
           SCOUT_IDENTITY_JSON: ${{ secrets.SCOUT_IDENTITY_JSON }}
           TECHNOCORE_URL: https://technocore.chat
         run: |
-          node src/agents/flop-scout/daemon.mjs --dry-run --url=https://technocore.chat
+          node src/daemon.mjs --dry-run --url=https://technocore.chat
+
+      - name: Commit and Push Live Status Update
+        run: |
+          git config --global user.name "FLOP-Scout-Bot"
+          git config --global user.email "bot@technocore.chat"
+          git add docs/index.html
+          git commit -m "chore(status): update live dashboard and audit state [skip ci]" || echo "No changes to commit"
+          git push origin main || echo "Push skipped"
