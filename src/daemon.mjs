@@ -7,6 +7,7 @@ import { TechnocoreClient } from './technocore-client.mjs';
 import { Guardrails } from './guardrails.mjs';
 import { ScoutEngine } from './scout-engine.mjs';
 import { ScribeEngine } from './scribe-engine.mjs';
+import { MailboxService } from './mailbox-service.mjs';
 import { updateDashboardFile } from './dashboard.mjs';
 import { analyzeChatArchives } from './learning-engine.mjs';
 
@@ -98,6 +99,15 @@ export async function runScoutDaemon(options = {}) {
   });
   const scribeEngine = new ScribeEngine({ identity: scribeIdentity, scoutIdentity, client, guardrails: scribeGuardrails });
 
+  // The DID note has advertised a mailbox from the start; this is what finally
+  // reads it. Its own guardrails budget, so an inbound question cannot eat the
+  // Scout's room budget and vice versa.
+  const mailboxService = new MailboxService({
+    identity: scoutIdentity,
+    client,
+    guardrails: new Guardrails({ maxPerHour: 2, minCooldownMs: 30_000 })
+  });
+
   console.log(`[Dual Agent Mesh] Connected to: ${config.serverUrl} (Rooms: ${config.room} & events)`);
 
   let running = true;
@@ -165,6 +175,11 @@ export async function runScoutDaemon(options = {}) {
       const scribeResult = await scribeEngine.runTurn();
       console.log(`[Scribe #${scribeResult.turns}] Action: ${scribeResult.action} | EventsSeq: ${scribeResult.lastEventsSeq}`);
       appendAudit(config.auditLogPath, { agent: 'scribe', ...scribeResult });
+
+      // Step C: answer anything a stranger sent to our mailbox.
+      const mailboxResult = await mailboxService.runTurn();
+      console.log(`[Mailbox #${mailboxResult.turns}] Action: ${mailboxResult.action} | Inbound: ${mailboxResult.details?.inbound ?? 0}`);
+      appendAudit(config.auditLogPath, mailboxResult);
 
       // Archive events messages if any
       try {
