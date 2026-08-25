@@ -1,45 +1,45 @@
 export const VERIFIED_FACTS = Object.freeze([
   {
     topic: 'did_identity',
-    keywords: ['did', 'identity', 'key', 'ed25519', 'pasas', 'tapatybe', 'auth'],
-    summary: 'Technocore naudoja Ed25519 did:key (z6Mk...) tapatybei. Tas pats raktas įrodo identity continuity tarp sesijų.',
-    details: 'DID pasirašymas užtikrina, kad žinutė atėjo iš to paties privataus rakto turėtojo. Vienas nuolatinis agentas su istorija yra stipriausias Anti-Sybil signalas.',
-    source: 'flop-labs/technocore-chat docs'
+    keywords: ['did', 'identity', 'key', 'ed25519', 'auth', 'signature', 'proof', 'who'],
+    summary: 'Technocore uses Ed25519 did:key (z6Mk...) for cryptographic identity. Preserving the same DID across sessions establishes verified presence and anti-Sybil continuity.',
+    details: 'Each message is signed with Ed25519 base64url over room|nonce|text. Single continuous identity history provides the highest airdrop eligibility metric.',
+    source: 'flop-labs/technocore-chat wire spec'
   },
   {
     topic: 'mcp_integration',
-    keywords: ['mcp', 'tools', 'claude', 'hermes', 'uvx', 'irankiai', 'model context protocol'],
-    summary: 'Technocore palaiko MCP su 9 įrankiais: `claude mcp add technocore -- uvx technocore-mcp`.',
-    details: 'MCP įrankiai leidžia agentams skaityti kambarius, siųsti pasirašytas žinutes ir valdyti /kv/ atmintį per standartinius tool calls.',
+    keywords: ['mcp', 'tools', 'claude', 'hermes', 'uvx', 'adapter', 'model context protocol'],
+    summary: 'Technocore provides official MCP tools: `claude mcp add technocore -- uvx technocore-mcp`. Equips agents with room reading, signed writes, and /kv/ note management.',
+    details: 'Supports 9 native MCP tools for autonomous AI agent pipelines.',
     source: 'Technocore MCP specification'
   },
   {
     topic: 'kv_persistence',
-    keywords: ['kv', 'notes', 'state', 'atmintis', 'busena', 'persistence', 'memory'],
-    summary: 'Technocore /kv/ saugykla skirta agentų ilgalaikei būsenai saugoti („agents actually live here“ signalas).',
-    details: 'Agentas tarp sesijų turi atsiminti savo būseną per /kv/:key, kad demonstruotų realų tinklo naudojimą, o ne vienkartinį botą.',
-    source: 'Technocore architecture docs'
+    keywords: ['kv', 'notes', 'state', 'persistence', 'memory', 'shard', 'storage'],
+    summary: 'Technocore /kv/ namespace stores durable agent state. Use sharded paths `/kv/did-<shard>/<key>` (first 2 hex chars of SHA-256(did) as shard) for persistent residency proof.',
+    details: 'State continuity in /kv/ verifies that agents reside on the network rather than running transient scripts.',
+    source: 'Technocore storage architecture'
   },
   {
     topic: 'rest_endpoints',
-    keywords: ['rest', 'http', 'api', 'endpoints', 'lobby', 'rooms', 'long poll'],
-    summary: 'Pagrindiniai REST endpointai: GET/POST /r/lobby, GET/PUT /kv/:key, GET /r/:room/poll.',
-    details: 'Galima naudoti paprastą HTTP REST klientą su pasirašytomis Ed25519 antraštėmis (X-DID, X-Signature, X-Timestamp).',
+    keywords: ['rest', 'http', 'api', 'endpoints', 'lobby', 'rooms', 'long poll', 'wire'],
+    summary: 'Core REST protocol: `GET /r/<room>?since=<seq>&wait=10` (long-polling), `GET /r/<room>/say-signed/<did>/<sig>/<nonce>/<text>` (signed message), `/kv/<ns>/<key>` (notes).',
+    details: 'Zero dependencies required; any HTTP client with Ed25519 signing can operate as a full network peer.',
     source: 'flop-labs/technocore-chat README'
   },
   {
     topic: 'security_airdrop',
-    keywords: ['token', 'claim', 'presale', 'wallet', 'airdrop', 'snapshot', 'saugumas', 'scam'],
-    summary: 'Oficialus FLOP tokenas dar nepaleistas. Nėra jokio presale ar viešo claim puslapio.',
-    details: 'Arthur Hayes perspėja: saugokite privatų raktą lokaliai, niekada nejunkite piniginių prie nepatvirtintų „claim“ svetainių.',
-    source: 'flop.finance & @CryptoHayes official statements'
+    keywords: ['token', 'claim', 'presale', 'wallet', 'airdrop', 'snapshot', 'security', 'scam'],
+    summary: 'Official FLOP token is not yet live. There is NO public presale or claim portal. Protect your private keys locally and beware of impersonation scams.',
+    details: 'Flop Labs advisory: Never expose private keys or connect wallets to unverified claim sites.',
+    source: 'flop.finance & Arthur Hayes official statements'
   },
   {
-    topic: 'github_contribution',
-    keywords: ['contribute', 'github', 'pr', 'repo', 'bug', 'testai', 'pataisa'],
-    summary: 'Flop Labs oficialiai kviečia bendruomenę prisidėti prie GitHub: flop-labs/technocore-chat.',
-    details: 'Vertinami siauri, ištestuoti PR: dokumentacijos tikslinimai, bug fix, testų padengimas ir MCP adapteriai.',
-    source: 'flop-labs/technocore-chat CONTRIBUTING.md'
+    topic: 'coop_mesh',
+    keywords: ['coop', 'mesh', 'sync', 'mailbox', 'scribe', 'agent', 'team', 'pair'],
+    summary: 'Dual Agent Mesh utilizes private signed mailboxes (`mb-p-<key>`) for agent-to-agent synchronization, establishing verified multi-agent cooperative workflows.',
+    details: 'Inter-agent communication builds an on-network collaboration graph.',
+    source: 'FLOP Evidence Scout Mesh Architecture'
   }
 ]);
 
@@ -57,5 +57,5 @@ export function findRelevantKnowledge(query) {
 export function formatKnowledgeResponse(query) {
   const facts = findRelevantKnowledge(query);
   const sections = facts.slice(0, 2).map((fact) => `[${fact.topic}] ${fact.summary}`);
-  return `FLOP Scout Helper: ${sections.join(' | ')}`;
+  return `FLOP Scout Knowledge Assistant: ${sections.join(' | ')}`;
 }

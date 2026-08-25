@@ -94,7 +94,7 @@ describe('FLOP Scout Knowledge & Guardrails', () => {
     assert.equal(facts.some((f) => f.topic === 'did_identity'), true);
 
     const formatted = formatKnowledgeResponse('kas yra /kv/ notes?');
-    assert.match(formatted, /FLOP Scout Helper/);
+    assert.match(formatted, /FLOP Scout Knowledge Assistant/);
     assert.match(formatted, /kv_persistence/);
   });
 
