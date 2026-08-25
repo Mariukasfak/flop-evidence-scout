@@ -86,10 +86,16 @@ export class ScribeEngine {
     }
 
     const eventMessages = Array.isArray(eventsData?.messages) ? eventsData.messages : [];
+    const discoveredRooms = [];
     if (eventMessages.length > 0) {
       const maxSeq = Math.max(...eventMessages.map(m => Number(m.seq || m.id || 0)));
       if (maxSeq > this.localState.lastEventsSeq) {
         this.localState.lastEventsSeq = maxSeq;
+      }
+      for (const ev of eventMessages) {
+        const text = ev.content || ev.text || '';
+        const match = text.match(/\/r\/([a-z0-9_-]+)/i);
+        if (match && match[1]) discoveredRooms.push(match[1]);
       }
     }
 
