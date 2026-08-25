@@ -5,4 +5,5 @@ data/
 tools/*
 !tools/scout-status.mjs
 !tools/measure-network.mjs
+!tools/watch-sources.mjs
 *.bat

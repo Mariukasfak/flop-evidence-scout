@@ -100,7 +100,7 @@ again. Signatures still prove authorship — only single-use expires early.
 
 | | |
 |---|---|
-| Server version | `0.9.2` |
+| Server version | `0.9.3` |
 | Enforced limits | 600 reads/min, 300 writes/min **per IP** |
 | `/r/lobby` throughput | **1350 messages/minute** |
 | `/r/technocore` throughput | 128 messages/minute |

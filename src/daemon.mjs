@@ -202,9 +202,14 @@ export async function runScoutDaemon(options = {}) {
     await new Promise((resolve) => setTimeout(resolve, config.intervalMs));
   } while (running);
 
-  appendAudit(config.auditLogPath, { event: 'shutdown', did: scoutIdentity.did });
-  await writeHeartbeat('stopped');
-  console.log('[Dual Agent Mesh] Stopped.');
+  // A scheduled tick is one process that starts and exits, so "shutdown" on every
+  // cloud run read like a crash in the audit trail. Name the two cases apart.
+  appendAudit(config.auditLogPath, {
+    event: config.dryRun ? 'cycle_complete' : 'shutdown',
+    did: scoutIdentity.did
+  });
+  await writeHeartbeat(config.dryRun ? 'cycle_complete' : 'stopped');
+  console.log(config.dryRun ? '[Dual Agent Mesh] Cycle complete.' : '[Dual Agent Mesh] Stopped.');
 }
 
 const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);

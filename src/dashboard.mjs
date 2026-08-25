@@ -5,6 +5,20 @@ import { loadOrCreateIdentity, getDidShardedPath, getStateKey } from './identity
 import { TechnocoreClient } from './technocore-client.mjs';
 import { getLatestLearningReport } from './learning-engine.mjs';
 
+/**
+ * Everything this page renders about the network was typed by a stranger, so
+ * every interpolation of it goes through here. `&` first, or the other
+ * replacements re-encode their own output.
+ */
+export function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
 export function generateDashboardHtml({
   identity,
   scribeIdentity = null,
@@ -57,14 +71,22 @@ export function generateDashboardHtml({
     let actionBadge;
     let detailContent;
 
+    // Inquiry and response text is written by strangers on a world-writable
+    // network. Interpolating it raw put an XSS hole in the operator's own
+    // dashboard, and quietly ate every <room> placeholder in our own answers.
+    const e = escapeHtml;
+    const seq = escapeHtml(log.lastSeenSeq ?? log.lastEventsSeq ?? '—');
+    const room = escapeHtml(log.room || log.details?.room || 'lobby');
+
     if (rawAction === 'answered_inquiry') {
       actionBadge = `<span class="badge badge-success">answered_inquiry</span>`;
       detailContent = `
         <details class="row-details" open>
-          <summary>💬 <strong>Kam:</strong> <code>${log.details?.targetAgent || 'Agentas'}</code> — <em>${log.details?.reason || 'Atsakyta į užklausą'}</em></summary>
+          <summary>💬 <strong>Kam:</strong> <code>${e(log.details?.targetAgent || 'Agentas')}</code> — <em>${e(log.details?.reason || 'Atsakyta į užklausą')}</em></summary>
           <div class="expanded-box">
-            <p><strong>❓ Gautas klausimas:</strong> „${log.details?.inquiry || 'Kaip naudoti Technocore?'}“</p>
-            <p><strong>💡 Išsiųstas atsakymas:</strong> <code>${log.details?.response || 'FLOP Scout Knowledge Reference...'}</code></p>
+            <p><strong>📍 Kambarys:</strong> <code>/r/${room}</code></p>
+            <p><strong>❓ Gautas klausimas:</strong> „${e(log.details?.inquiry || '—')}“</p>
+            <p><strong>💡 Išsiųstas atsakymas:</strong> <code>${e(log.details?.response || '—')}</code></p>
           </div>
         </details>
       `;
@@ -72,39 +94,53 @@ export function generateDashboardHtml({
       actionBadge = `<span class="badge badge-success">signed_checkin</span>`;
       detailContent = `
         <details class="row-details">
-          <summary>🔑 <strong>Ed25519 Check-in:</strong> Pasirašytas tapatybės pulsas tinkle</summary>
+          <summary>🔑 <strong>Ed25519 Check-in:</strong> pasirašytas pranešimas į <code>/r/${room}</code></summary>
           <div class="expanded-box">
-            <p><code>${log.details?.response || `[FLOP Scout Check-in]: Active persistent DID ${did.slice(0, 16)}...`}</code></p>
+            <p><code>${e(log.details?.response || '—')}</code></p>
           </div>
         </details>
       `;
-    } else if (rawAction === 'coop_sync') {
-      actionBadge = `<span class="badge badge-success">coop_mesh_sync</span>`;
+    } else if (rawAction === 'coop_sync' || rawAction === 'coop_ack') {
+      actionBadge = `<span class="badge badge-success">${e(rawAction)}</span>`;
       detailContent = `
-        <details class="row-details" open>
-          <summary>🤝 <strong>Dviejų agentų sinchronizacija:</strong> ${log.details?.targetAgent || 'Scout <-> Scribe'}</summary>
+        <details class="row-details">
+          <summary>🤝 <strong>Vidinė sinchronizacija:</strong> ${e(log.details?.targetAgent || 'Scout ↔ Scribe')}</summary>
           <div class="expanded-box">
-            <p><strong>📬 Pašto dėžutė:</strong> <code>${log.details?.mailbox || 'mb-p-scout-...'}</code></p>
-            <p><strong>💡 Pasirašyta žinutė:</strong> <code>${log.details?.response || 'Sentinel node active | Verified events'}</code></p>
+            <p><strong>📬 Pašto dėžutė:</strong> <code>${e(log.details?.mailbox || '—')}</code></p>
+            <p><strong>💡 Pasirašyta žinutė:</strong> <code>${e(log.details?.response || '—')}</code></p>
+            <p style="opacity:.7">Tai to paties operatoriaus du agentai, ne nepriklausomi dalyviai. Vyksta kas 6 val.</p>
           </div>
         </details>
       `;
+    } else if (rawAction === 'startup') {
+      actionBadge = `<span class="badge badge-info">ciklas pradėtas</span>`;
+      detailContent = `<div>Prisijungta prie <code>${e(log.server || 'technocore.chat')}</code></div>`;
+    } else if (rawAction === 'shutdown' || rawAction === 'cycle_complete') {
+      // Every scheduled tick is one process that starts and exits. This line is
+      // the tick finishing normally — not the agent falling over.
+      actionBadge = `<span class="badge badge-info">ciklas baigtas</span>`;
+      detailContent = `<div>Suplanuotas ciklas baigtas tvarkingai. Kitas – po 15 min.</div>`;
     } else if (rawAction.includes('error') || rawAction.includes('failed')) {
       actionBadge = `<span class="badge badge-warn">warning</span>`;
-      detailContent = `<div class="error-box">Klaida: ${log.error || 'Serverio ryšio sutrikimas'}</div>`;
+      detailContent = `<div class="error-box">Klaida: ${e(log.error || 'Serverio ryšio sutrikimas')}</div>`;
     } else if (rawAction.startsWith('monitoring_pacing') || rawAction.startsWith('skipped')) {
       actionBadge = `<span class="badge badge-info">rate_pacing</span>`;
       detailContent = `
         <details class="row-details">
-          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #${log.lastSeenSeq || '—'})</summary>
+          <summary>📡 <strong>Stebima</strong> (Seq: #${seq})</summary>
           <div class="expanded-box">
-            <p>${log.details?.latestSnippet ? `<strong>Naujausios žinutės:</strong> ${log.details.latestSnippet}` : (log.details?.reason || 'Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).')}</p>
+            <p>${e(log.details?.reason || 'Kambariai skaitomi, laikomasi saugaus tempo.')}</p>
           </div>
         </details>
       `;
     } else {
-      actionBadge = `<span class="badge badge-info">${rawAction}</span>`;
-      detailContent = `<div>Stebimas /r/lobby (Seq: #${log.lastSeenSeq || '—'})</div>`;
+      actionBadge = `<span class="badge badge-info">${e(rawAction)}</span>`;
+      detailContent = `
+        <details class="row-details">
+          <summary>📡 <strong>Stebima</strong> (Seq: #${seq})</summary>
+          <div class="expanded-box"><p>${e(log.details?.reason || 'Naujų tinkamų atsakyti žinučių nerasta.')}</p></div>
+        </details>
+      `;
     }
 
     const rowNum = Math.max(1, totalTurns - idx);
@@ -906,8 +942,13 @@ export function generateDashboardHtml({
         const lineClass = isMyAgent ? 'msg-line my-msg' : 'msg-line';
         const fromClass = isMyAgent ? 'msg-from my-agent' : 'msg-from';
         const time = m.ts ? new Date(m.ts).toLocaleTimeString() : '';
-        const cleanFrom = (m.from || 'anon').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        const cleanText = (m.text || m.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const esc = (s) => String(s == null ? '' : s)
+          .split('&').join('&amp;')
+          .split('<').join('&lt;')
+          .split('>').join('&gt;')
+          .split('"').join('&quot;');
+        const cleanFrom = esc(m.from || 'anon');
+        const cleanText = esc(m.text || m.content || '');
 
         return '<div class="' + lineClass + '">' +
           '<span class="msg-seq">[#' + (m.seq || '—') + ']</span> ' +

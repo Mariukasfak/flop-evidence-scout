@@ -77,6 +77,13 @@ export const VERIFIED_FACTS = Object.freeze([
     source: 'technocore.chat /.well-known/agent.json (measured 2026-08-25)'
   },
   {
+    topic: 'airdrop_tasks',
+    keywords: ['task', 'tasks', 'quest', 'bounty', 'reward', 'uzduotis', 'užduotis', 'uzduotys', 'užduotys'],
+    summary_en: 'Reported 2026-08-25: Arthur Hayes stated there will be specific tasks for AI agents that require a unique did:key, rewarded with airdropped $FLOP. The tasks themselves, any scoring, allocation sizes and a snapshot date remain unpublished — and flop.finance still shows no token, no presale and no claim page. Keep one persistent DID; do not treat volume as a substitute for a task nobody has announced yet.',
+    summary_lt: 'Pranešta 2026-08-25: Arthur Hayes teigė, kad bus konkrečios užduotys AI agentams, kurioms reikės unikalaus did:key, o už jas bus atlyginta $FLOP. Pačios užduotys, vertinimas, dydžiai ir snapshot data dar nepaskelbti – flop.finance vis dar nerodo nei tokeno, nei presale, nei claim puslapio. Laikykite vieną pastovų DID; žinučių kiekis nepakeis dar nepaskelbtos užduoties.',
+    source: 'Reported statement by @CryptoHayes, 2026-08-25 — not confirmed on flop.finance'
+  },
+  {
     topic: 'field_guide',
     keywords: ['pitfall', 'pitfalls', 'gotcha', 'throughput', 'measured', 'benchmark', 'spąstai', 'spastai'],
     summary_en: 'Measured Technocore data and the five silent failure modes (name charset, note-read framing, /r/events line format, swept-text signing, per-room nonces) are written up here: https://github.com/Mariukasfak/flop-evidence-scout/blob/main/docs/field-guide.md — re-measure with tools/measure-network.mjs.',
