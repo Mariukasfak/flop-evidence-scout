@@ -26,15 +26,16 @@
     <text x="58" y="86.0" class="tick tick-y">1.5k</text>
     <line x1="68" y1="24.0" x2="696" y2="24.0" class="grid"/>
     <text x="58" y="28.0" class="tick tick-y">2.0k</text>
-  <path d="M68.0,156.2 L317.2,99.4 L686.0,196.3 L696.0,209.0 L696.0,256.0 L68.0,256.0 Z" class="fill"/>
+  <path d="M68.0,156.2 L315.7,99.4 L682.4,196.3 L692.3,209.0 L696.0,195.0 L696.0,256.0 L68.0,256.0 Z" class="fill"/>
   
-  <path d="M68.0,156.2 L317.2,99.4 L686.0,196.3 L696.0,209.0" class="series"/>
-  <circle cx="68.0" cy="156.2" r="3.5" class="dot"><title>14:00 — 860/min</title></circle><circle cx="317.2" cy="99.4" r="3.5" class="dot"><title>17:20 — 1,350/min</title></circle><circle cx="686.0" cy="196.3" r="3.5" class="dot"><title>22:16 — 515/min</title></circle><circle cx="696.0" cy="209.0" r="5" class="dot dot-last"><title>22:24 — 405/min</title></circle>
-  <text x="696.0" y="195.0" class="end-label" text-anchor="end">405/min</text>
+  <path d="M68.0,156.2 L315.7,99.4 L682.4,196.3 L692.3,209.0 L696.0,195.0" class="series"/>
+  <circle cx="68.0" cy="156.2" r="3.5" class="dot"><title>14:00 — 860/min</title></circle><circle cx="315.7" cy="99.4" r="3.5" class="dot"><title>17:20 — 1,350/min</title></circle><circle cx="682.4" cy="196.3" r="3.5" class="dot"><title>22:16 — 515/min</title></circle><circle cx="692.3" cy="209.0" r="3.5" class="dot"><title>22:24 — 405/min</title></circle><circle cx="696.0" cy="195.0" r="5" class="dot dot-last"><title>22:27 — 526/min</title></circle>
+  <text x="696.0" y="181.0" class="end-label" text-anchor="end">526/min</text>
   <line x1="68" y1="256" x2="696" y2="256" class="axis"/>
   
     <text x="68.0" y="278" class="tick tick-x">14:00</text>
-    <text x="317.2" y="278" class="tick tick-x">17:20</text>
-    <text x="686.0" y="278" class="tick tick-x">22:16</text>
-    <text x="696.0" y="278" class="tick tick-x">22:24</text>
+    <text x="315.7" y="278" class="tick tick-x">17:20</text>
+    <text x="682.4" y="278" class="tick tick-x">22:16</text>
+    <text x="692.3" y="278" class="tick tick-x">22:24</text>
+    <text x="696.0" y="278" class="tick tick-x">22:27</text>
 </svg>

@@ -26,18 +26,19 @@
     <text x="58" y="86.0" class="tick tick-y">300k</text>
     <line x1="68" y1="24.0" x2="696" y2="24.0" class="grid"/>
     <text x="58" y="28.0" class="tick tick-y">400k</text>
-  <path d="M68.0,208.8 L317.2,193.6 L435.6,184.9 L686.0,175.0 L696.0,175.0 L696.0,256.0 L68.0,256.0 Z" class="fill"/>
+  <path d="M68.0,208.8 L315.7,193.6 L433.4,184.9 L682.4,175.0 L692.3,175.0 L696.0,174.8 L696.0,256.0 L68.0,256.0 Z" class="fill"/>
   
     <line x1="68" y1="65.9" x2="696" y2="65.9" class="cap"/>
     <text x="696" y="58.9" class="cap-label" text-anchor="end">cap 328k</text>
-  <path d="M68.0,208.8 L317.2,193.6 L435.6,184.9 L686.0,175.0 L696.0,175.0" class="series"/>
-  <circle cx="68.0" cy="208.8" r="3.5" class="dot"><title>14:00 — 81,349</title></circle><circle cx="317.2" cy="193.6" r="3.5" class="dot"><title>17:20 — 107,620</title></circle><circle cx="435.6" cy="184.9" r="3.5" class="dot"><title>18:55 — 122,600</title></circle><circle cx="686.0" cy="175.0" r="3.5" class="dot"><title>22:16 — 139,593</title></circle><circle cx="696.0" cy="175.0" r="5" class="dot dot-last"><title>22:24 — 139,663</title></circle>
-  <text x="696.0" y="161.0" class="end-label" text-anchor="end">139,663</text>
+  <path d="M68.0,208.8 L315.7,193.6 L433.4,184.9 L682.4,175.0 L692.3,175.0 L696.0,174.8" class="series"/>
+  <circle cx="68.0" cy="208.8" r="3.5" class="dot"><title>14:00 — 81,349</title></circle><circle cx="315.7" cy="193.6" r="3.5" class="dot"><title>17:20 — 107,620</title></circle><circle cx="433.4" cy="184.9" r="3.5" class="dot"><title>18:55 — 122,600</title></circle><circle cx="682.4" cy="175.0" r="3.5" class="dot"><title>22:16 — 139,593</title></circle><circle cx="692.3" cy="175.0" r="3.5" class="dot"><title>22:24 — 139,663</title></circle><circle cx="696.0" cy="174.8" r="5" class="dot dot-last"><title>22:27 — 140,052</title></circle>
+  <text x="696.0" y="160.8" class="end-label" text-anchor="end">140,052</text>
   <line x1="68" y1="256" x2="696" y2="256" class="axis"/>
   
     <text x="68.0" y="278" class="tick tick-x">14:00</text>
-    <text x="317.2" y="278" class="tick tick-x">17:20</text>
-    <text x="435.6" y="278" class="tick tick-x">18:55</text>
-    <text x="686.0" y="278" class="tick tick-x">22:16</text>
-    <text x="696.0" y="278" class="tick tick-x">22:24</text>
+    <text x="315.7" y="278" class="tick tick-x">17:20</text>
+    <text x="433.4" y="278" class="tick tick-x">18:55</text>
+    <text x="682.4" y="278" class="tick tick-x">22:16</text>
+    <text x="692.3" y="278" class="tick tick-x">22:24</text>
+    <text x="696.0" y="278" class="tick tick-x">22:27</text>
 </svg>
