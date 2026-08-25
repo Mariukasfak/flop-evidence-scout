@@ -57,7 +57,7 @@ export async function runScoutDaemon(options = {}) {
   const scoutGuardrails = new Guardrails({ maxPerHour: 2, minCooldownMs: 60_000 });
   const scribeGuardrails = new Guardrails({ maxPerHour: 2, minCooldownMs: 60_000 });
 
-  const scoutEngine = new ScoutEngine({ identity: scoutIdentity, client, guardrails: scoutGuardrails });
+  const scoutEngine = new ScoutEngine({ identity: scoutIdentity, scribeIdentity, client, guardrails: scoutGuardrails });
   const scribeEngine = new ScribeEngine({ identity: scribeIdentity, scoutIdentity, client, guardrails: scribeGuardrails });
 
   console.log(`[Dual Agent Mesh] Connected to: ${config.serverUrl} (Rooms: ${config.room} & events)`);

@@ -1,12 +1,14 @@
 import { formatKnowledgeResponse, findRelevantKnowledge } from './knowledge.mjs';
 import { Guardrails } from './guardrails.mjs';
+import { getDidShardedPath } from './identity.mjs';
 
 export class ScoutEngine {
   constructor({
     identity,
     client,
     guardrails = new Guardrails(),
-    stateKey = null
+    stateKey = null,
+    scribeIdentity = null
   }) {
     if (!identity?.did || !identity?.privateKeyPem) {
       throw new Error('Valid Ed25519 identity is required for ScoutEngine');
@@ -16,6 +18,7 @@ export class ScoutEngine {
     }
 
     this.identity = identity;
+    this.scribeIdentity = scribeIdentity;
     this.client = client;
     this.guardrails = guardrails;
     this.stateKey = stateKey || `scout_state_${identity.did.slice(-8)}`;
@@ -23,6 +26,7 @@ export class ScoutEngine {
       did: identity.did,
       totalTurns: 0,
       lastSeenSeq: 0,
+      lastMailboxSeq: 0,
       lastCheckin: null,
       handledCount: 0,
       profilePublished: false
@@ -59,14 +63,18 @@ export class ScoutEngine {
       try {
         await this.client.publishDidProfile(this.identity);
         this.localState.profilePublished = true;
-      } catch {
-        // non-blocking
+      } catch (err) {
+        console.warn('Failed to publish DID profile:', err.message);
       }
     }
 
-    let roomData;
+    // 2. Read room messages (e.g. /r/lobby)
+    let roomData = null;
     try {
-      roomData = await this.client.readRoom(room, { since: this.localState.lastSeenSeq > 0 ? this.localState.lastSeenSeq : null });
+      roomData = await this.client.readRoom(room, {
+        since: this.localState.lastSeenSeq > 0 ? this.localState.lastSeenSeq : null,
+        limit: 20
+      });
     } catch (err) {
       return {
         action: 'error',
@@ -85,9 +93,10 @@ export class ScoutEngine {
 
     let actionTaken = 'monitoring_room';
     let outgoingMessage = null;
+    let targetRoom = room;
     let detailPayload = {};
 
-    // Check if there are relevant inquiries from other agents
+    // 3. Check for relevant inquiries in /r/lobby
     for (const msg of newMessages) {
       const text = typeof msg.content === 'string' ? msg.content : (msg.text || '');
       const relevant = findRelevantKnowledge(text);
@@ -96,6 +105,7 @@ export class ScoutEngine {
         const knowledgeAnswer = formatKnowledgeResponse(text);
         outgoingMessage = `[FLOP Scout -> ${msg.from || 'Agent'}]: ${knowledgeAnswer}`;
         actionTaken = 'answered_inquiry';
+        targetRoom = room;
         this.localState.handledCount += 1;
         detailPayload = {
           targetAgent: msg.from || 'Agent',
@@ -107,10 +117,40 @@ export class ScoutEngine {
       }
     }
 
-    // If no specific inquiry, consider a periodic signed status check-in
+    // 4. Check Scout's private mailbox for Scribe sync messages
+    const scoutKey = getDidShardedPath(this.identity.did).key;
+    const scoutMailbox = `mb-p-scout-${scoutKey}`;
+    const scribeKey = this.scribeIdentity?.did ? getDidShardedPath(this.scribeIdentity.did).key : null;
+    const scribeMailbox = scribeKey ? `mb-p-scribe-${scribeKey}` : null;
+
+    if (!outgoingMessage && scribeMailbox) {
+      try {
+        const mbData = await this.client.readRoom(scoutMailbox, { limit: 5 });
+        const mbMsgs = Array.isArray(mbData?.messages) ? mbData.messages : [];
+        const newMb = mbMsgs.filter(m => Number(m.seq || 0) > (this.localState.lastMailboxSeq || 0));
+        if (newMb.length > 0) {
+          const latest = newMb[newMb.length - 1];
+          this.localState.lastMailboxSeq = Number(latest.seq || 0);
+          outgoingMessage = `[FLOP Scout -> Scribe Ack]: Verified sync #${latest.seq} | Mesh state synchronized | Turn #${this.localState.totalTurns}.`;
+          targetRoom = scribeMailbox;
+          actionTaken = 'coop_ack';
+          detailPayload = {
+            targetAgent: this.scribeIdentity?.did ? `Scribe <${this.scribeIdentity.did.slice(0, 14)}...>` : 'Scribe Agent',
+            mailbox: scribeMailbox,
+            reason: 'Dvipusis sinchronizacijos patvirtinimas tarp Scout ir Scribe pašto dėžučių',
+            response: outgoingMessage
+          };
+        }
+      } catch {
+        // Non-blocking mailbox check
+      }
+    }
+
+    // 5. If no specific inquiry or ack, periodic signed check-in
     if (!outgoingMessage && (!this.localState.lastCheckin || Date.now() - new Date(this.localState.lastCheckin).getTime() > 1800_000)) {
       outgoingMessage = `[FLOP Scout Check-in]: Active persistent DID ${this.identity.did.slice(0, 16)}... | State /kv/ turns: ${this.localState.totalTurns} | Monitoring documentation & agent inquiries.`;
       actionTaken = 'signed_checkin';
+      targetRoom = room;
       this.localState.lastCheckin = new Date().toISOString();
       detailPayload = {
         reason: 'Periodinis Ed25519 pasirašytas būsenos check-in',
@@ -124,7 +164,7 @@ export class ScoutEngine {
       const check = this.guardrails.canSendMessage(outgoingMessage);
       if (check.allowed) {
         try {
-          await this.client.postMessage(room, outgoingMessage, this.identity);
+          await this.client.postMessage(targetRoom, outgoingMessage, this.identity);
           this.guardrails.recordSent(outgoingMessage);
         } catch (err) {
           actionTaken = `send_failed: ${err.message}`;
@@ -138,23 +178,15 @@ export class ScoutEngine {
 
     if (!outgoingMessage) {
       detailPayload = {
-        reason: `Stebimas kambarys /r/${room} (naujų žinučių: ${newMessages.length})`,
-        latestSnippet: messages.slice(-3).map(m => `<${(m.from || '').slice(0, 14)}> ${m.content || ''}`).join(' | ')
+        reason: 'Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).'
       };
     }
 
-    // Update highest seen message sequence
-    if (messages.length > 0) {
-      const maxSeq = Math.max(...messages.map((m) => Number(m.seq || m.id || 0)));
+    if (newMessages.length > 0) {
+      const maxSeq = Math.max(...newMessages.map((m) => Number(m.seq || m.id || 0)));
       if (maxSeq > this.localState.lastSeenSeq) {
         this.localState.lastSeenSeq = maxSeq;
       }
-    }
-
-    try {
-      await this.client.recordPresence(room, this.identity.did.slice(-8), this.localState.lastSeenSeq);
-    } catch {
-      // non-blocking presence update
     }
 
     await this.saveRemoteState();
@@ -162,11 +194,11 @@ export class ScoutEngine {
     return {
       action: actionTaken,
       did: this.identity.did,
+      room: targetRoom,
       turns: this.localState.totalTurns,
-      lastSeenSeq: this.localState.lastSeenSeq,
       handledCount: this.localState.handledCount,
-      details: detailPayload,
-      timestamp: new Date().toISOString()
+      lastSeenSeq: this.localState.lastSeenSeq,
+      details: detailPayload
     };
   }
 }
