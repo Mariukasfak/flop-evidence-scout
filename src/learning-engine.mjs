@@ -190,7 +190,52 @@ export function getLatestLearningReport(outputDir = 'data/learning') {
   return null;
 }
 
+export function pruneOldArchives({
+  chatsDir = 'data/chats',
+  maxKeepPerRoom = 200,
+  deleteAll = false
+} = {}) {
+  const resolvedChats = path.resolve(chatsDir);
+  if (!fs.existsSync(resolvedChats)) return { prunedFiles: 0, removedLines: 0 };
+
+  let prunedFiles = 0;
+  let removedLines = 0;
+
+  const files = fs.readdirSync(resolvedChats).filter((f) => f.endsWith('.jsonl'));
+  for (const file of files) {
+    const filePath = path.join(resolvedChats, file);
+    try {
+      if (deleteAll) {
+        fs.unlinkSync(filePath);
+        prunedFiles++;
+      } else {
+        const lines = fs.readFileSync(filePath, 'utf8').split('\n').filter(Boolean);
+        if (lines.length > maxKeepPerRoom) {
+          const keepLines = lines.slice(-maxKeepPerRoom);
+          removedLines += (lines.length - keepLines.length);
+          fs.writeFileSync(filePath, keepLines.join('\n') + '\n', 'utf8');
+          prunedFiles++;
+        }
+      }
+    } catch {}
+  }
+
+  if (deleteAll) {
+    console.log(`[Archive Pruner] Deleted all ${prunedFiles} chat archive files after training.`);
+  } else {
+    console.log(`[Archive Pruner] Pruned ${prunedFiles} chat archives, removed ${removedLines} old lines. Retained newest ${maxKeepPerRoom} per room.`);
+  }
+  return { prunedFiles, removedLines };
+}
+
 const isDirectRun = process.argv[1] && process.argv[1].endsWith('learning-engine.mjs');
 if (isDirectRun) {
+  const shouldPrune = process.argv.includes('--prune');
+  const shouldDeleteAll = process.argv.includes('--clean') || process.argv.includes('--delete-all');
+  
   analyzeChatArchives();
+  
+  if (shouldPrune || shouldDeleteAll) {
+    pruneOldArchives({ deleteAll: shouldDeleteAll });
+  }
 }
