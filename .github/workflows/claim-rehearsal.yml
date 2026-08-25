@@ -1,0 +1,56 @@
+name: Claim rehearsal
+
+# The second machine. The identities live in GitHub Secrets and this runner has
+# never seen the operator's disk, so a pass here proves the secrets alone are
+# sufficient to prove control of both DIDs — which is what a claim will ask for.
+#
+# Weekly, because the failure it catches is silent: a secret rotated, truncated
+# or pasted with a mangled newline stays undetected until the day it matters.
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: claim-rehearsal
+  cancel-in-progress: false
+
+jobs:
+  rehearse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Prove control of both DIDs from GitHub Secrets alone
+        id: rehearse
+        env:
+          SCOUT_IDENTITY_JSON: ${{ secrets.SCOUT_IDENTITY_JSON }}
+          SCRIBE_IDENTITY_JSON: ${{ secrets.SCRIBE_IDENTITY_JSON }}
+        run: node tools/claim-rehearsal.mjs --receipt=docs/claim-rehearsal-receipt.json
+
+      - name: Raise an issue if the rehearsal failed
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --title "Claim rehearsal FAILED — an identity cannot prove control of its DID" \
+            --body "The weekly rehearsal could not verify a signature against the DID it belongs to, running from GitHub Secrets. Either a secret is wrong, truncated or mangled, or an identity has changed. Check SCOUT_IDENTITY_JSON and SCRIBE_IDENTITY_JSON, and confirm the local .secrets/ files still match the DIDs published on technocore.chat. Do not rotate keys to make this pass — a new key has no history. Run: node tools/claim-rehearsal.mjs"
+
+      - name: Publish the receipt
+        if: success()
+        run: |
+          git config --global user.name "FLOP-Scout-Bot"
+          git config --global user.email "bot@technocore.chat"
+          git add docs/claim-rehearsal-receipt.json
+          git commit -m "chore(rehearsal): weekly proof of DID control [skip ci]" || echo "No change."
+          git pull --rebase origin main
+          git push origin main

@@ -1,0 +1,21 @@
+{
+  "rehearsedAt": "2026-08-25T18:39:12.076Z",
+  "host": "local",
+  "identitySource": "live",
+  "challenge": "flop-claim-rehearsal|2026-08-25|3ea661fdfac2b2a989575fd1da6a09ee",
+  "results": [
+    {
+      "agent": "Scout",
+      "did": "did:key:z6MkvJAr8ZTs5n4d14e4SGVFAxo8nWndZTin8vc23Aks3zgn",
+      "signature": "nMYp_U-bzIYxElOrBUW7xMnSAZ5UMG2i3l8WEb-pIv4eg6BGuU_SaWcqIzHpLCbry9yCpMf0gw7VQSmtfSgDCQ",
+      "verified": true
+    },
+    {
+      "agent": "Scribe",
+      "did": "did:key:z6Mkfdd1cRSrTaA1yuUC45a2dXpHe4zPf4cE1DC3DmCpELvW",
+      "signature": "ZHVuRnhAsjM-C1BFK-rc9HK917DAtGvJw9pcalBAERCB7Liqi4DjxrX21uGzeRAPvdCBgtR1qUCm41JrhSw8AA",
+      "verified": true
+    }
+  ],
+  "allPassed": true
+}

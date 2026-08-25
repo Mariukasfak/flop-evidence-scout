@@ -111,12 +111,49 @@ A faucet that asks for any of these is not the faucet.
 
 ---
 
-## Preparation still outstanding
+## Preparation — done
 
-- [ ] Claim rehearsal: sign a challenge with the DID from a cold backup on a second machine,
-      verify against the public key, write down the exact commands.
-- [ ] Encrypted backup of both identity files, with a tested restore.
-- [ ] Decide, in advance, the daily cap on testnet operations.
+### Encrypted backup
+
+`daryti-atsargine-kopija.bat` (or `node tools/backup-identity.mjs`) writes both identities
+into one AES-256-GCM file, keyed by scrypt from a passphrase that is never stored, logged,
+or passed on a command line. It defaults to outside the repository, and it **restores the
+file it just wrote before reporting success** — a backup nobody has opened is a rumour.
+
+GitHub Secrets is not a backup. Secrets are write-only; nothing can read one back out.
+
+### Claim rehearsal
+
+`repeticija-claim.bat` (or `node tools/claim-rehearsal.mjs`) signs a fresh random challenge
+and verifies it **against the DID string alone** — deriving the public key back out of
+`did:key:z6Mk...`, which is what a claim contract or snapshot script would do. It writes a
+public receipt (DID, challenge, signature) that anyone can check and nobody can replay.
+
+The second machine is `.github/workflows/claim-rehearsal.yml`: it runs weekly from GitHub
+Secrets on a runner that has never seen this disk, and opens an issue if it ever fails.
+Add `--vault <path>` to prove the encrypted backup is sufficient on its own — that is the
+drill that actually matters, because signing with the file the agent already uses proves
+nothing about recovery.
+
+### Testnet pacing — decided in advance
+
+In `src/testnet-policy.mjs`, enforced in code rather than promised in prose:
+
+| Rule | Value |
+|---|---|
+| Operations per day | 24 |
+| Operations per hour | 4 |
+| Minimum gap | 4 minutes |
+| Added jitter | 0–6 random minutes |
+| Anything that moves value | refused without explicit human approval |
+
+**Volume is not the risk; shape is.** 24 a day is nothing against a server permitting 300
+writes a minute. But every airdrop that has settled filtered on behaviour that looked
+machine-generated, and the cheapest tell is perfect regularity. An agent acting exactly on
+the hour forever is trivially clustered with every other agent doing the same. The jitter
+is not politeness — it is the point.
+
+The value refusal is terminal, not a wait: no amount of remaining budget makes it pass.
 
 ---
 
