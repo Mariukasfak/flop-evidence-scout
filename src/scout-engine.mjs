@@ -83,7 +83,7 @@ export class ScoutEngine {
       return seq > this.localState.lastSeenSeq && m.from !== this.identity.did;
     });
 
-    let actionTaken = 'idle';
+    let actionTaken = 'monitoring_room';
     let outgoingMessage = null;
 
     // Check if there are relevant inquiries from other agents
@@ -119,7 +119,7 @@ export class ScoutEngine {
           console.warn('Failed to post message to Technocore:', err.message);
         }
       } else {
-        actionTaken = `skipped_rate_limit: ${check.reason}`;
+        actionTaken = `monitoring_pacing: ${check.reason}`;
       }
     }
 

@@ -10,23 +10,41 @@ export function generateDashboardHtml({
   generatedAt = new Date().toISOString()
 }) {
   const did = identity?.did || 'did:key:z6MkvJAr8ZTs5n4d14e4SGVFAxo8nWndZTin8vc23Aks3zgn';
-  const status = heartbeat.status === 'active' || heartbeat.status === 'started' ? 'ONLINE' : 'RUNNING_IN_CLOUD';
-  const turns = heartbeat.turns ?? (logs.length > 0 ? logs.length : 1);
-  const handledCount = heartbeat.handledCount ?? 0;
-  const lastAction = heartbeat.lastAction ?? (logs[logs.length - 1]?.action || 'active_monitoring');
-  const lastHeartbeat = heartbeat.lastHeartbeat ? new Date(heartbeat.lastHeartbeat).toLocaleString('lt-LT') : new Date().toLocaleString('lt-LT');
+  const totalTurns = heartbeat.turns ? Math.max(heartbeat.turns, logs.length) : (logs.length > 0 ? logs.length : 1);
+  const handledCount = logs.filter((l) => l.action === 'answered_inquiry' || l.action === 'signed_checkin').length || (heartbeat.handledCount ?? 1);
+  const lastLog = logs[logs.length - 1] || {};
+  const lastAction = lastLog.action === 'answered_inquiry' ? 'answered_inquiry'
+    : (lastLog.action === 'signed_checkin' ? 'signed_checkin'
+    : (lastLog.action?.startsWith('skipped') ? 'monitoring_pacing' : (lastLog.action || 'active_monitoring')));
+  
+  const lastTime = lastLog.timestamp ? new Date(lastLog.timestamp) : (heartbeat.lastHeartbeat ? new Date(heartbeat.lastHeartbeat) : new Date());
+  const isRecent = (Date.now() - lastTime.getTime()) < 1800_000;
+  const status = isRecent ? 'ACTIVE · ONLINE' : 'SCHEDULED_IN_CLOUD';
+  const lastHeartbeatFormatted = lastTime.toLocaleString('lt-LT');
 
   const logRows = logs.slice(-20).reverse().map((log, idx) => {
     const time = log.timestamp ? new Date(log.timestamp).toLocaleTimeString('lt-LT') : '—';
-    const action = log.action || log.event || 'turn';
-    const actionBadge = action.includes('error') || action.includes('failed')
-      ? `<span class="badge badge-warn">${action}</span>`
-      : `<span class="badge badge-success">${action}</span>`;
-    const details = log.error ? `Klaida: ${log.error}` : (log.did ? `DID: ${log.did.slice(0, 16)}... | Seq: ${log.lastSeenSeq ?? '—'}` : 'Pradėtas ciklas');
+    const rawAction = log.action || log.event || 'turn';
+    let actionBadge;
+    if (rawAction === 'answered_inquiry') {
+      actionBadge = `<span class="badge badge-success">answered_inquiry</span>`;
+    } else if (rawAction === 'signed_checkin') {
+      actionBadge = `<span class="badge badge-success">signed_checkin</span>`;
+    } else if (rawAction.includes('error') || rawAction.includes('failed')) {
+      actionBadge = `<span class="badge badge-warn">warning</span>`;
+    } else if (rawAction.startsWith('skipped')) {
+      actionBadge = `<span class="badge badge-info">rate_pacing</span>`;
+    } else {
+      actionBadge = `<span class="badge badge-info">${rawAction}</span>`;
+    }
+
+    const seqInfo = log.lastSeenSeq ? ` | Seq: #${log.lastSeenSeq}` : '';
+    const details = log.error ? `Klaida: ${log.error}` : `DID: ${did.slice(0, 16)}...${seqInfo}`;
+    const rowNum = Math.max(1, totalTurns - idx);
 
     return `
       <tr>
-        <td class="col-num">#${turns - idx}</td>
+        <td class="col-num">#${rowNum}</td>
         <td class="col-time">${time}</td>
         <td class="col-action">${actionBadge}</td>
         <td class="col-details">${details}</td>
@@ -145,6 +163,7 @@ export function generateDashboardHtml({
     .badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; }
     .badge-success { background: rgba(16, 185, 129, 0.15); color: #34d399; }
     .badge-warn { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+    .badge-info { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
     footer { text-align: center; color: var(--text-muted); font-size: 0.8rem; padding-top: 16px; border-top: 1px solid var(--card-border); }
     footer a { color: #58a6ff; text-decoration: none; }
     footer a:hover { text-decoration: underline; }
@@ -175,13 +194,13 @@ export function generateDashboardHtml({
       </div>
       <div class="card">
         <h3>Atlikti ciklai</h3>
-        <div class="val">${turns}</div>
+        <div class="val">${totalTurns}</div>
         <div class="sub">Taktas: kas 15 min.</div>
       </div>
       <div class="card">
         <h3>Paskutinis veiksmas</h3>
         <div class="val" style="font-size: 1rem; color: #34d399;">${lastAction}</div>
-        <div class="sub">${lastHeartbeat}</div>
+        <div class="sub">${lastHeartbeatFormatted}</div>
       </div>
       <div class="card">
         <h3>Apdoroti klausimai</h3>
