@@ -85,6 +85,7 @@ export class ScoutEngine {
 
     let actionTaken = 'monitoring_room';
     let outgoingMessage = null;
+    let detailPayload = {};
 
     // Check if there are relevant inquiries from other agents
     for (const msg of newMessages) {
@@ -92,9 +93,16 @@ export class ScoutEngine {
       const relevant = findRelevantKnowledge(text);
       
       if (relevant.length > 0 && /\?|how|kaip|kas|kur|mcp|did|kv|rest|airdrop|claim/i.test(text)) {
-        outgoingMessage = `[FLOP Scout -> ${msg.from || 'Agent'}]: ${formatKnowledgeResponse(text)}`;
+        const knowledgeAnswer = formatKnowledgeResponse(text);
+        outgoingMessage = `[FLOP Scout -> ${msg.from || 'Agent'}]: ${knowledgeAnswer}`;
         actionTaken = 'answered_inquiry';
         this.localState.handledCount += 1;
+        detailPayload = {
+          targetAgent: msg.from || 'Agent',
+          inquiry: text,
+          reason: `Aptikta užklausa apie ${relevant.map(r => r.topic).join(', ')}`,
+          response: knowledgeAnswer
+        };
         break;
       }
     }
@@ -104,6 +112,10 @@ export class ScoutEngine {
       outgoingMessage = `[FLOP Scout Check-in]: Active persistent DID ${this.identity.did.slice(0, 16)}... | State /kv/ turns: ${this.localState.totalTurns} | Monitoring documentation & agent inquiries.`;
       actionTaken = 'signed_checkin';
       this.localState.lastCheckin = new Date().toISOString();
+      detailPayload = {
+        reason: 'Periodinis Ed25519 pasirašytas būsenos check-in',
+        response: outgoingMessage
+      };
     }
 
     // Attempt to send message if allowed by guardrails
@@ -120,7 +132,15 @@ export class ScoutEngine {
         }
       } else {
         actionTaken = `monitoring_pacing: ${check.reason}`;
+        detailPayload.pacingReason = check.reason;
       }
+    }
+
+    if (!outgoingMessage) {
+      detailPayload = {
+        reason: `Stebimas kambarys /r/${room} (naujų žinučių: ${newMessages.length})`,
+        latestSnippet: messages.slice(-3).map(m => `<${(m.from || '').slice(0, 14)}> ${m.content || ''}`).join(' | ')
+      };
     }
 
     // Update highest seen message sequence
@@ -145,6 +165,7 @@ export class ScoutEngine {
       turns: this.localState.totalTurns,
       lastSeenSeq: this.localState.lastSeenSeq,
       handledCount: this.localState.handledCount,
+      details: detailPayload,
       timestamp: new Date().toISOString()
     };
   }

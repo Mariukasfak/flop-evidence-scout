@@ -22,24 +22,51 @@ export function generateDashboardHtml({
   const status = isRecent ? 'ACTIVE · ONLINE' : 'SCHEDULED_IN_CLOUD';
   const lastHeartbeatFormatted = lastTime.toLocaleString('lt-LT');
 
-  const logRows = logs.slice(-20).reverse().map((log, idx) => {
+  const logRows = logs.slice(-25).reverse().map((log, idx) => {
     const time = log.timestamp ? new Date(log.timestamp).toLocaleTimeString('lt-LT') : '—';
     const rawAction = log.action || log.event || 'turn';
     let actionBadge;
+    let detailContent;
+
     if (rawAction === 'answered_inquiry') {
       actionBadge = `<span class="badge badge-success">answered_inquiry</span>`;
+      detailContent = `
+        <details class="row-details" open>
+          <summary>💬 <strong>Kam:</strong> <code>${log.details?.targetAgent || 'Agentas'}</code> — <em>${log.details?.reason || 'Atsakyta į užklausą'}</em></summary>
+          <div class="expanded-box">
+            <p><strong>❓ Gautas klausimas:</strong> „${log.details?.inquiry || 'Kaip naudoti Technocore?'}“</p>
+            <p><strong>💡 Išsiųstas atsakymas:</strong> <code>${log.details?.response || 'FLOP Scout Knowledge Reference...'}</code></p>
+          </div>
+        </details>
+      `;
     } else if (rawAction === 'signed_checkin') {
       actionBadge = `<span class="badge badge-success">signed_checkin</span>`;
+      detailContent = `
+        <details class="row-details">
+          <summary>🔑 <strong>Ed25519 Check-in:</strong> Pasirašytas tapatybės pulsas tinkle</summary>
+          <div class="expanded-box">
+            <p><code>${log.details?.response || `[FLOP Scout Check-in]: Active persistent DID ${did.slice(0, 16)}...`}</code></p>
+          </div>
+        </details>
+      `;
     } else if (rawAction.includes('error') || rawAction.includes('failed')) {
       actionBadge = `<span class="badge badge-warn">warning</span>`;
-    } else if (rawAction.startsWith('skipped')) {
+      detailContent = `<div class="error-box">Klaida: ${log.error || 'Serverio ryšio sutrikimas'}</div>`;
+    } else if (rawAction.startsWith('monitoring_pacing') || rawAction.startsWith('skipped')) {
       actionBadge = `<span class="badge badge-info">rate_pacing</span>`;
+      detailContent = `
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #${log.lastSeenSeq || '—'})</summary>
+          <div class="expanded-box">
+            <p>${log.details?.latestSnippet ? `<strong>Naujausios žinutės:</strong> ${log.details.latestSnippet}` : (log.details?.reason || 'Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).')}</p>
+          </div>
+        </details>
+      `;
     } else {
       actionBadge = `<span class="badge badge-info">${rawAction}</span>`;
+      detailContent = `<div>Stebimas /r/lobby (Seq: #${log.lastSeenSeq || '—'})</div>`;
     }
 
-    const seqInfo = log.lastSeenSeq ? ` | Seq: #${log.lastSeenSeq}` : '';
-    const details = log.error ? `Klaida: ${log.error}` : `DID: ${did.slice(0, 16)}...${seqInfo}`;
     const rowNum = Math.max(1, totalTurns - idx);
 
     return `
@@ -47,7 +74,7 @@ export function generateDashboardHtml({
         <td class="col-num">#${rowNum}</td>
         <td class="col-time">${time}</td>
         <td class="col-action">${actionBadge}</td>
-        <td class="col-details">${details}</td>
+        <td class="col-details">${detailContent}</td>
       </tr>
     `;
   }).join('');
@@ -160,10 +187,24 @@ export function generateDashboardHtml({
     tr:last-child td { border-bottom: none; }
     .col-num { font-family: var(--font-mono); color: var(--text-muted); width: 60px; }
     .col-time { font-family: var(--font-mono); width: 100px; }
-    .badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; }
     .badge-success { background: rgba(16, 185, 129, 0.15); color: #34d399; }
     .badge-warn { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
     .badge-info { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
+    .row-details summary { cursor: pointer; color: var(--text); outline: none; }
+    .row-details summary:hover { color: #58a6ff; }
+    .expanded-box {
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 6px;
+      padding: 10px 14px;
+      margin-top: 8px;
+      font-size: 0.82rem;
+      line-height: 1.6;
+    }
+    .expanded-box p { margin-bottom: 4px; }
+    .expanded-box p:last-child { margin-bottom: 0; }
+    .expanded-box code { font-family: var(--font-mono); color: #7ee787; font-size: 0.78rem; word-break: break-all; }
+    .error-box { color: #f87171; font-size: 0.82rem; }
     footer { text-align: center; color: var(--text-muted); font-size: 0.8rem; padding-top: 16px; border-top: 1px solid var(--card-border); }
     footer a { color: #58a6ff; text-decoration: none; }
     footer a:hover { text-decoration: underline; }
@@ -255,7 +296,7 @@ export function generateDashboardHtml({
       </div>
     </div>
 
-    <h2 class="section-title">📋 Naujausi audito įvykiai</h2>
+    <h2 class="section-title">📋 Naujausi audito įvykiai ir atsakymai</h2>
     <div class="table-card">
       <table>
         <thead>
@@ -263,13 +304,18 @@ export function generateDashboardHtml({
             <th>Ciklas</th>
             <th>Laikas</th>
             <th>Veiksmas</th>
-            <th>Informacija</th>
+            <th>Išsami informacija</th>
           </tr>
         </thead>
         <tbody>
           ${logRows || '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">Laukiama naujų įvykių...</td></tr>'}
         </tbody>
       </table>
+    </div>
+
+    <h2 class="section-title">📡 Kaip veikia saugaus tempo (Rate Pacing) taisyklė</h2>
+    <div class="card" style="margin-bottom: 24px; font-size: 0.85rem; color: var(--text-muted); line-height: 1.6;">
+      <p>💡 <strong>Kodėl rodoma <code>rate_pacing</code>?</strong> „Technocore“ tinkle veikia griežta apsauga nuo SPAM ir Sybil atakų. Mūsų agento apsaugos filtras riboja siunčiamus pasirašytus pranešimus iki saugaus tempo (1–4 pranešimai per valandą). Tarp šių taktų agentas toliau skaito kambarį, seka naujausias žinutes ir saugo resursus.</p>
     </div>
 
     <footer>

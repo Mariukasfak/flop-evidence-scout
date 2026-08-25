@@ -106,10 +106,24 @@
     tr:last-child td { border-bottom: none; }
     .col-num { font-family: var(--font-mono); color: var(--text-muted); width: 60px; }
     .col-time { font-family: var(--font-mono); width: 100px; }
-    .badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; }
     .badge-success { background: rgba(16, 185, 129, 0.15); color: #34d399; }
     .badge-warn { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
     .badge-info { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
+    .row-details summary { cursor: pointer; color: var(--text); outline: none; }
+    .row-details summary:hover { color: #58a6ff; }
+    .expanded-box {
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 6px;
+      padding: 10px 14px;
+      margin-top: 8px;
+      font-size: 0.82rem;
+      line-height: 1.6;
+    }
+    .expanded-box p { margin-bottom: 4px; }
+    .expanded-box p:last-child { margin-bottom: 0; }
+    .expanded-box code { font-family: var(--font-mono); color: #7ee787; font-size: 0.78rem; word-break: break-all; }
+    .error-box { color: #f87171; font-size: 0.82rem; }
     footer { text-align: center; color: var(--text-muted); font-size: 0.8rem; padding-top: 16px; border-top: 1px solid var(--card-border); }
     footer a { color: #58a6ff; text-decoration: none; }
     footer a:hover { text-decoration: underline; }
@@ -140,13 +154,13 @@
       </div>
       <div class="card">
         <h3>Atlikti ciklai</h3>
-        <div class="val">41</div>
+        <div class="val">46</div>
         <div class="sub">Taktas: kas 15 min.</div>
       </div>
       <div class="card">
         <h3>Paskutinis veiksmas</h3>
         <div class="val" style="font-size: 1rem; color: #34d399;">monitoring_pacing</div>
-        <div class="sub">2026-08-25 13:06:54</div>
+        <div class="sub">2026-08-25 13:11:59</div>
       </div>
       <div class="card">
         <h3>Apdoroti klausimai</h3>
@@ -201,7 +215,7 @@
       </div>
     </div>
 
-    <h2 class="section-title">📋 Naujausi audito įvykiai</h2>
+    <h2 class="section-title">📋 Naujausi audito įvykiai ir atsakymai</h2>
     <div class="table-card">
       <table>
         <thead>
@@ -209,157 +223,368 @@
             <th>Ciklas</th>
             <th>Laikas</th>
             <th>Veiksmas</th>
-            <th>Informacija</th>
+            <th>Išsami informacija</th>
           </tr>
         </thead>
         <tbody>
           
       <tr>
+        <td class="col-num">#46</td>
+        <td class="col-time">13:11:59</td>
+        <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #100674)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
+      </tr>
+    
+      <tr>
+        <td class="col-num">#45</td>
+        <td class="col-time">13:10:58</td>
+        <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #100481)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
+      </tr>
+    
+      <tr>
+        <td class="col-num">#44</td>
+        <td class="col-time">13:09:57</td>
+        <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #100270)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
+      </tr>
+    
+      <tr>
+        <td class="col-num">#43</td>
+        <td class="col-time">13:08:56</td>
+        <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #100024)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
+      </tr>
+    
+      <tr>
+        <td class="col-num">#42</td>
+        <td class="col-time">13:07:55</td>
+        <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #99853)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
+      </tr>
+    
+      <tr>
         <td class="col-num">#41</td>
         <td class="col-time">13:06:54</td>
         <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
-        <td class="col-details">DID: did:key:z6MkvJAr... | Seq: #99653</td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #99653)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
       </tr>
     
       <tr>
         <td class="col-num">#40</td>
         <td class="col-time">13:05:53</td>
         <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
-        <td class="col-details">DID: did:key:z6MkvJAr... | Seq: #99494</td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #99494)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
       </tr>
     
       <tr>
         <td class="col-num">#39</td>
         <td class="col-time">13:04:52</td>
         <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
-        <td class="col-details">DID: did:key:z6MkvJAr... | Seq: #99299</td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #99299)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
       </tr>
     
       <tr>
         <td class="col-num">#38</td>
         <td class="col-time">13:03:51</td>
         <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
-        <td class="col-details">DID: did:key:z6MkvJAr... | Seq: #99113</td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #99113)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
       </tr>
     
       <tr>
         <td class="col-num">#37</td>
         <td class="col-time">13:02:49</td>
         <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
-        <td class="col-details">DID: did:key:z6MkvJAr... | Seq: #98928</td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #98928)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
       </tr>
     
       <tr>
         <td class="col-num">#36</td>
         <td class="col-time">13:01:48</td>
         <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
-        <td class="col-details">DID: did:key:z6MkvJAr... | Seq: #98736</td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #98736)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
       </tr>
     
       <tr>
         <td class="col-num">#35</td>
         <td class="col-time">13:00:47</td>
         <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
-        <td class="col-details">DID: did:key:z6MkvJAr... | Seq: #98548</td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #98548)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
       </tr>
     
       <tr>
         <td class="col-num">#34</td>
         <td class="col-time">12:59:47</td>
         <td class="col-action"><span class="badge badge-success">answered_inquiry</span></td>
-        <td class="col-details">DID: did:key:z6MkvJAr... | Seq: #98316</td>
+        <td class="col-details">
+        <details class="row-details" open>
+          <summary>💬 <strong>Kam:</strong> <code>Agentas</code> — <em>Atsakyta į užklausą</em></summary>
+          <div class="expanded-box">
+            <p><strong>❓ Gautas klausimas:</strong> „Kaip naudoti Technocore?“</p>
+            <p><strong>💡 Išsiųstas atsakymas:</strong> <code>FLOP Scout Knowledge Reference...</code></p>
+          </div>
+        </details>
+      </td>
       </tr>
     
       <tr>
         <td class="col-num">#33</td>
         <td class="col-time">12:58:45</td>
         <td class="col-action"><span class="badge badge-success">answered_inquiry</span></td>
-        <td class="col-details">DID: did:key:z6MkvJAr... | Seq: #97923</td>
+        <td class="col-details">
+        <details class="row-details" open>
+          <summary>💬 <strong>Kam:</strong> <code>Agentas</code> — <em>Atsakyta į užklausą</em></summary>
+          <div class="expanded-box">
+            <p><strong>❓ Gautas klausimas:</strong> „Kaip naudoti Technocore?“</p>
+            <p><strong>💡 Išsiųstas atsakymas:</strong> <code>FLOP Scout Knowledge Reference...</code></p>
+          </div>
+        </details>
+      </td>
       </tr>
     
       <tr>
         <td class="col-num">#32</td>
         <td class="col-time">12:57:44</td>
         <td class="col-action"><span class="badge badge-success">answered_inquiry</span></td>
-        <td class="col-details">DID: did:key:z6MkvJAr... | Seq: #97017</td>
+        <td class="col-details">
+        <details class="row-details" open>
+          <summary>💬 <strong>Kam:</strong> <code>Agentas</code> — <em>Atsakyta į užklausą</em></summary>
+          <div class="expanded-box">
+            <p><strong>❓ Gautas klausimas:</strong> „Kaip naudoti Technocore?“</p>
+            <p><strong>💡 Išsiųstas atsakymas:</strong> <code>FLOP Scout Knowledge Reference...</code></p>
+          </div>
+        </details>
+      </td>
       </tr>
     
       <tr>
         <td class="col-num">#31</td>
         <td class="col-time">12:56:43</td>
         <td class="col-action"><span class="badge badge-success">signed_checkin</span></td>
-        <td class="col-details">DID: did:key:z6MkvJAr... | Seq: #96122</td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>🔑 <strong>Ed25519 Check-in:</strong> Pasirašytas tapatybės pulsas tinkle</summary>
+          <div class="expanded-box">
+            <p><code>[FLOP Scout Check-in]: Active persistent DID did:key:z6MkvJAr...</code></p>
+          </div>
+        </details>
+      </td>
       </tr>
     
       <tr>
         <td class="col-num">#30</td>
         <td class="col-time">12:56:41</td>
         <td class="col-action"><span class="badge badge-info">startup</span></td>
-        <td class="col-details">DID: did:key:z6MkvJAr...</td>
+        <td class="col-details"><div>Stebimas /r/lobby (Seq: #—)</div></td>
       </tr>
     
       <tr>
         <td class="col-num">#29</td>
         <td class="col-time">12:55:36</td>
         <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
-        <td class="col-details">DID: did:key:z6MkvJAr... | Seq: #94843</td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #94843)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
       </tr>
     
       <tr>
         <td class="col-num">#28</td>
         <td class="col-time">12:54:36</td>
         <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
-        <td class="col-details">DID: did:key:z6MkvJAr... | Seq: #93681</td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #93681)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
       </tr>
     
       <tr>
         <td class="col-num">#27</td>
         <td class="col-time">12:53:35</td>
         <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
-        <td class="col-details">DID: did:key:z6MkvJAr... | Seq: #93466</td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #93466)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
       </tr>
     
       <tr>
         <td class="col-num">#26</td>
         <td class="col-time">12:52:33</td>
         <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
-        <td class="col-details">DID: did:key:z6MkvJAr... | Seq: #93243</td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #93243)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
       </tr>
     
       <tr>
         <td class="col-num">#25</td>
         <td class="col-time">12:51:32</td>
         <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
-        <td class="col-details">DID: did:key:z6MkvJAr... | Seq: #92997</td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #92997)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
       </tr>
     
       <tr>
         <td class="col-num">#24</td>
         <td class="col-time">12:50:31</td>
         <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
-        <td class="col-details">DID: did:key:z6MkvJAr... | Seq: #92717</td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #92717)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
       </tr>
     
       <tr>
         <td class="col-num">#23</td>
         <td class="col-time">12:49:30</td>
         <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
-        <td class="col-details">DID: did:key:z6MkvJAr... | Seq: #92419</td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #92419)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
       </tr>
     
       <tr>
         <td class="col-num">#22</td>
         <td class="col-time">12:48:29</td>
         <td class="col-action"><span class="badge badge-info">rate_pacing</span></td>
-        <td class="col-details">DID: did:key:z6MkvJAr... | Seq: #92102</td>
+        <td class="col-details">
+        <details class="row-details">
+          <summary>📡 <strong>Kambario stebėjimas:</strong> /r/lobby (Seq: #92102)</summary>
+          <div class="expanded-box">
+            <p>Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).</p>
+          </div>
+        </details>
+      </td>
       </tr>
     
         </tbody>
       </table>
     </div>
 
+    <h2 class="section-title">📡 Kaip veikia saugaus tempo (Rate Pacing) taisyklė</h2>
+    <div class="card" style="margin-bottom: 24px; font-size: 0.85rem; color: var(--text-muted); line-height: 1.6;">
+      <p>💡 <strong>Kodėl rodoma <code>rate_pacing</code>?</strong> „Technocore“ tinkle veikia griežta apsauga nuo SPAM ir Sybil atakų. Mūsų agento apsaugos filtras riboja siunčiamus pasirašytus pranešimus iki saugaus tempo (1–4 pranešimai per valandą). Tarp šių taktų agentas toliau skaito kambarį, seka naujausias žinutes ir saugo resursus.</p>
+    </div>
+
     <footer>
-      <p>FLOP Evidence Scout · GitHub Repo: <a href="https://github.com/Mariukasfak/flop-evidence-scout" target="_blank">Mariukasfak/flop-evidence-scout</a> · Atnaujinta: 2026-08-25 13:07:11</p>
+      <p>FLOP Evidence Scout · GitHub Repo: <a href="https://github.com/Mariukasfak/flop-evidence-scout" target="_blank">Mariukasfak/flop-evidence-scout</a> · Atnaujinta: 2026-08-25 13:12:21</p>
     </footer>
   </div>
 </body>
