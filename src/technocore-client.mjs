@@ -1,4 +1,25 @@
-import { signMessageBase64Url, singleLineSweep, getDidShardedPath } from './identity.mjs';
+import {
+  signMessageBase64Url,
+  singleLineSweep,
+  getDidShardedPath,
+  getShortId,
+  isValidTechnocoreName
+} from './identity.mjs';
+
+/**
+ * Fail loudly and locally instead of sending a request the server will answer
+ * with `400 bad name`. Silent 400s are how the /kv/ state persistence stayed
+ * broken while the dashboard reported it as working.
+ */
+export function assertValidName(kind, name) {
+  if (!isValidTechnocoreName(name)) {
+    throw new Error(
+      `Invalid Technocore ${kind} "${name}": must match /^[a-z0-9][a-z0-9_-]{0,47}$/ ` +
+      '(lowercase letters, digits, - and _, 1-48 chars).'
+    );
+  }
+  return name;
+}
 
 export function parseRoomText(text) {
   if (typeof text !== 'string') return [];
@@ -80,6 +101,7 @@ export class TechnocoreClient {
     if (!identity?.did || !identity?.privateKeyPem) {
       throw new Error('Identity required for signed message');
     }
+    assertValidName('room', room);
 
     const sweptText = singleLineSweep(text);
     const nonce = Date.now().toString();
@@ -137,9 +159,12 @@ export class TechnocoreClient {
   }
 
   async setKv(ns, key, value, { ifValue = null, ifAbsent = false } = {}) {
+    assertValidName('namespace', ns);
+    assertValidName('key', key);
+
     const stringValue = typeof value === 'string' ? value : JSON.stringify(value);
     const sweptValue = singleLineSweep(stringValue);
-    
+
     const params = new URLSearchParams();
     if (ifValue !== null) params.set('if', ifValue);
     if (ifAbsent) params.set('if_absent', '1');
@@ -157,22 +182,81 @@ export class TechnocoreClient {
         signal: controller.signal
       });
       clearTimeout(timer);
-      return response.ok;
-    } catch {
+      if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        throw new Error(`Technocore note write failed: HTTP ${response.status} ${body.slice(0, 160)}`);
+      }
+      return true;
+    } catch (err) {
       clearTimeout(timer);
-      return false;
+      throw err;
     }
   }
 
   async publishDidProfile(identity, profile = {}) {
     if (!identity?.did) return false;
     const { shard, key } = getDidShardedPath(identity.did);
-    const profileText = `did: ${identity.did} | pubkey: ${identity.rawPublicKeyHex || ''} | mailbox: mb-p-scout-${key} | type: autonomous_evidence_scout | agent: FLOP Evidence Scout`;
+    const {
+      mailbox = `mb-p-scout-${key}`,
+      type = 'autonomous_evidence_scout',
+      agent = 'FLOP Evidence Scout',
+      operator = 'github.com/Mariukasfak/flop-evidence-scout'
+    } = profile;
+    const profileText =
+      `did: ${identity.did} | pubkey: ${identity.rawPublicKeyHex || ''} | mailbox: ${mailbox} ` +
+      `| type: ${type} | agent: ${agent} | operator: ${operator}`;
     return await this.setKv(shard, key, profileText);
   }
 
-  async recordPresence(room, shortDid, seq) {
-    return await this.setKv(room, `hb-${shortDid}`, String(seq));
+  /**
+   * Presence convention: /kv/<room>/hb-<nick>/set/<last seq seen>.
+   * Accepts a did:key (converted to a spec-valid short id) or a ready short id.
+   */
+  async recordPresence(room, didOrShortId, seq) {
+    const shortId = String(didOrShortId).startsWith('did:key:')
+      ? getShortId(didOrShortId)
+      : String(didOrShortId).toLowerCase();
+    return await this.setKv(room, `hb-${shortId}`, String(seq ?? 0));
+  }
+
+  /**
+   * Claim a d-<name> room as its owner: a signed, if_absent note in room-owners.
+   * Signature covers `room-owners|d-<room>|<nonce>|<the same did:key>`.
+   */
+  async claimRoomOwnership(roomName, identity, { nonce = Date.now() } = {}) {
+    const room = roomName.startsWith('d-') ? roomName : `d-${roomName}`;
+    assertValidName('room', room);
+    if (!identity?.did || !identity?.privateKeyPem) {
+      throw new Error('Identity required to claim room ownership');
+    }
+
+    const payloadToSign = `room-owners|${room}|${nonce}|${identity.did}`;
+    const sig = signMessageBase64Url(payloadToSign, identity.privateKeyPem);
+    const url =
+      `${this.baseUrl}/kv/room-owners/${room}/set-signed/${encodeURIComponent(identity.did)}` +
+      `/${sig}/${nonce}/${encodeURIComponent(identity.did)}?if_absent=1`;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await this.fetch(url, {
+        method: 'GET',
+        headers: { 'user-agent': 'FLOP-Evidence-Scout/1.0' },
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      const body = await response.text().catch(() => '');
+      // 409 means someone already owns it — that is an answer, not a crash.
+      return { ok: response.ok, status: response.status, room, body: body.slice(0, 200) };
+    } catch (err) {
+      clearTimeout(timer);
+      return { ok: false, status: 0, room, body: err.message };
+    }
+  }
+
+  /** Reserved, world-writable topic note rendered next to the room in /rooms. */
+  async setRoomTopic(room, topic) {
+    return await this.setKv('topic', room, topic);
   }
 
   async health() {

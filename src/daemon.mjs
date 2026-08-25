@@ -18,6 +18,7 @@ function parseArgs(argv) {
     scribeIdentityPath: path.resolve('.secrets/scribe-identity.json'),
     serverUrl: process.env.TECHNOCORE_URL || 'https://technocore.chat',
     room: 'lobby',
+    watchRooms: null,
     auditLogPath: path.resolve('data/scout-audit.jsonl'),
     docsDir: 'docs'
   };
@@ -29,6 +30,7 @@ function parseArgs(argv) {
     else if (arg.startsWith('--identity=')) options.identityPath = path.resolve(arg.slice(11));
     else if (arg.startsWith('--url=')) options.serverUrl = arg.slice(6);
     else if (arg.startsWith('--room=')) options.room = arg.slice(7);
+    else if (arg.startsWith('--rooms=')) options.watchRooms = arg.slice(8).split(',').map((r) => r.trim()).filter(Boolean);
     else if (arg.startsWith('--docs-dir=')) options.docsDir = arg.slice(11);
   }
 
@@ -87,7 +89,13 @@ export async function runScoutDaemon(options = {}) {
   const scoutGuardrails = new Guardrails({ maxPerHour: 2, minCooldownMs: 60_000 });
   const scribeGuardrails = new Guardrails({ maxPerHour: 2, minCooldownMs: 60_000 });
 
-  const scoutEngine = new ScoutEngine({ identity: scoutIdentity, scribeIdentity, client, guardrails: scoutGuardrails });
+  const scoutEngine = new ScoutEngine({
+    identity: scoutIdentity,
+    scribeIdentity,
+    client,
+    guardrails: scoutGuardrails,
+    ...(config.watchRooms ? { watchRooms: config.watchRooms } : {})
+  });
   const scribeEngine = new ScribeEngine({ identity: scribeIdentity, scoutIdentity, client, guardrails: scribeGuardrails });
 
   console.log(`[Dual Agent Mesh] Connected to: ${config.serverUrl} (Rooms: ${config.room} & events)`);
@@ -116,8 +124,14 @@ export async function runScoutDaemon(options = {}) {
         lastHeartbeat: new Date().toISOString(),
         turns: lastResult.turns ?? scoutEngine.localState.totalTurns,
         lastAction: lastResult.action ?? status,
-        handledCount: (scoutEngine.localState.handledCount || 0) + (scribeEngine.localState.syncedWithScoutCount || 0),
-        lastSeenSeq: lastResult.lastSeenSeq ?? scoutEngine.localState.lastSeenSeq
+        handledCount: scoutEngine.localState.handledCount || 0,
+        coopSyncs: scribeEngine.localState.syncedWithScoutCount || 0,
+        lastSeenSeq: lastResult.lastSeenSeq ?? scoutEngine.localState.lastSeenSeq,
+        watchRooms: scoutEngine.watchRooms,
+        faucetDiscovered: Boolean(scribeEngine.localState.faucetDiscovered),
+        faucetHits: scribeEngine.localState.faucetHits || [],
+        stateOk: !scoutEngine.lastStateError && !scribeEngine.lastStateError,
+        stateError: scoutEngine.lastStateError || scribeEngine.lastStateError || null
       }, null, 2), 'utf8');
       
       // Auto-analyze chats and refresh dashboard

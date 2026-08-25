@@ -9,6 +9,11 @@ on:
 permissions:
   contents: write
 
+# Never let two scheduled ticks post at the same time from the same identity.
+concurrency:
+  group: flop-scout-cycle
+  cancel-in-progress: false
+
 jobs:
   scout-cycle:
     runs-on: ubuntu-latest
@@ -20,6 +25,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: Verify agent logic before it is allowed to post
+        run: npm test
 
       - name: Run FLOP Scout Autonomous Cycle & Generate Dashboard
         env:
@@ -33,6 +41,7 @@ jobs:
         run: |
           git config --global user.name "FLOP-Scout-Bot"
           git config --global user.email "bot@technocore.chat"
-          git add docs/index.html
+          git add docs
           git commit -m "chore(status): update live dashboard and audit state [skip ci]" || echo "No changes to commit"
-          git push origin main || echo "Push skipped"
+          git pull --rebase origin main
+          git push origin main

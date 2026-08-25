@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { loadOrCreateIdentity, getDidShardedPath } from './identity.mjs';
+import { loadOrCreateIdentity, getDidShardedPath, getStateKey } from './identity.mjs';
 import { TechnocoreClient } from './technocore-client.mjs';
 import { getLatestLearningReport } from './learning-engine.mjs';
 
@@ -19,6 +19,24 @@ export function generateDashboardHtml({
   const scoutKey = getDidShardedPath(did).key;
   const scribeKey = getDidShardedPath(scribeDid).key;
   const scoutMailbox = `mb-p-scout-${scoutKey}`;
+  const scoutProfilePath = getDidShardedPath(did).fullPath;
+  const scribeProfilePath = getDidShardedPath(scribeDid).fullPath;
+  const scoutStateKey = getStateKey(did, 'scout');
+
+  // Only messages the agent actually signed and the server accepted.
+  const signedMessages = logs.filter((l) =>
+    ['answered_inquiry', 'signed_checkin', 'coop_sync', 'coop_ack'].includes(l.action)
+  ).length;
+
+  const faucetHits = logs.flatMap((l) => l.details?.faucetAlerts || l.faucetAlerts || []);
+  const faucetBanner = faucetHits.length > 0
+    ? `<div class="scorecard-banner" style="border-color:#f59e0b;">
+      <div class="score-left">
+        <h2>🚨 TESTNET FAUCET RADAR — HIT</h2>
+        <p>Rooms matching faucet/testnet appeared on /r/events: <code>${faucetHits.map((h) => h.room).join(', ')}</code>. Verify against official Flop Labs channels before interacting — an unofficial "faucet" room is a phishing vector.</p>
+      </div>
+    </div>`
+    : `<div class="mesh-box"><h3 style="font-size:0.85rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;">🛰️ Testnet faucet radar</h3><p style="font-size:0.82rem;margin-top:8px;">Scanning <code>/r/events</code> for room names matching faucet · testnet · drip · tap. Status: <strong>clear</strong> — no faucet room announced yet.</p></div>`;
 
   const totalTurns = heartbeat.turns ? Math.max(heartbeat.turns, logs.length) : (logs.length > 0 ? logs.length : 1);
   const handledCount = logs.filter((l) => l.action === 'answered_inquiry' || l.action === 'signed_checkin' || l.action === 'coop_sync').length || (heartbeat.handledCount ?? 1);
@@ -424,17 +442,29 @@ export function generateDashboardHtml({
       </div>
     </header>
 
-    <!-- Airdrop Scorecard Banner -->
+    <!-- Independently verifiable evidence (no self-assigned scores) -->
     <div class="scorecard-banner">
       <div class="score-left">
-        <h2 id="score-title">🏆 FLOP Airdrop Readiness Score</h2>
-        <p id="score-sub">Verified against Arthur Hayes & Flop Labs PoUI specifications.</p>
+        <h2 id="score-title">🔍 Independently Verifiable Evidence</h2>
+        <p id="score-sub">Flop Labs has published no scoring formula or tiers. Every claim below can be checked with one plain GET against technocore.chat.</p>
       </div>
       <div class="score-badge">
-        100/100
-        <span id="score-tier">TIER 1 ELIGIBLE</span>
+        ${signedMessages}
+        <span id="score-tier">SIGNED MESSAGES</span>
       </div>
     </div>
+
+    <div class="mesh-box">
+      <h3 style="font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;" id="evidence-title">🔗 Check it yourself</h3>
+      <ul style="margin: 10px 0 0 0; padding-left: 18px; font-size: 0.82rem; line-height: 1.9;">
+        <li>Scout DID note: <a href="https://technocore.chat${scoutProfilePath}" target="_blank" rel="noopener">technocore.chat${scoutProfilePath}</a></li>
+        <li>Scribe DID note: <a href="https://technocore.chat${scribeProfilePath}" target="_blank" rel="noopener">technocore.chat${scribeProfilePath}</a></li>
+        <li>Persistent state note: <a href="https://technocore.chat/kv/scout/${scoutStateKey}" target="_blank" rel="noopener">/kv/scout/${scoutStateKey}</a></li>
+        <li>Source code: <a href="https://github.com/Mariukasfak/flop-evidence-scout" target="_blank" rel="noopener">github.com/Mariukasfak/flop-evidence-scout</a></li>
+      </ul>
+    </div>
+
+    ${faucetBanner}
 
     <!-- Dual Agent Mesh Visualizer -->
     <div class="mesh-box">
@@ -633,9 +663,9 @@ export function generateDashboardHtml({
       en: {
         brandTitle: "🌐 FLOP / Technocore Evidence Scout",
         brandSub: "Autonomous Dual Agent Mesh · 24/7 Network Presence & Protocol Readiness",
-        scoreTitle: "🏆 FLOP Airdrop Readiness Score",
-        scoreSub: "Verified against Arthur Hayes & Flop Labs PoUI specifications.",
-        scoreTier: "TIER 1 ELIGIBLE",
+        scoreTitle: "🔍 Independently Verifiable Evidence",
+        scoreSub: "Flop Labs has published no scoring formula or tiers. Every claim below can be checked with one plain GET against technocore.chat.",
+        scoreTier: "SIGNED MESSAGES",
         meshTitle: "🤝 Autonomous Dual-Agent Collaboration Mesh",
         nodeTitle: "Network Node",
         nodeSub: "Rooms: /r/lobby & /r/events",
@@ -668,9 +698,9 @@ export function generateDashboardHtml({
       lt: {
         brandTitle: "🌐 FLOP / Technocore Evidence Scout · Savininko Pultas",
         brandSub: "Autonominis 2 agentų tinklas · 24/7 stebėsena ir airdrop atitikties suvestinė",
-        scoreTitle: "🏆 FLOP Airdrop Pasirengimo Įvertinimas",
-        scoreSub: "Patikrinta pagal Arthur Hayes ir Flop Labs PoUI specifikacijas.",
-        scoreTier: "TIER 1 PASIRENGIMAS (100%)",
+        scoreTitle: "🔍 Nepriklausomai patikrinami įrodymai",
+        scoreSub: "Flop Labs nėra paskelbę jokios vertinimo formulės ar pakopų. Kiekvieną teiginį galima patikrinti viena GET užklausa.",
+        scoreTier: "PASIRAŠYTOS ŽINUTĖS",
         meshTitle: "🤝 Autonominis Dviejų Agentų Bendradarbiavimo Tinklas",
         nodeTitle: "Tinklo Mazgas",
         nodeSub: "Kambariai: /r/lobby ir /r/events",
@@ -971,8 +1001,39 @@ export async function updateDashboardFile(outputDir = 'docs', serverUrl = 'https
     // Non-blocking
   }
 
+  // data/ is gitignored, so a cloud run starts with an empty audit file. Keep a
+  // committed rolling history in docs/ so the dashboard shows real continuity
+  // instead of only the single tick that just executed.
+  const historyPath = path.join(resolvedDir, 'audit-history.json');
+  let history = [];
+  if (fs.existsSync(historyPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(historyPath, 'utf8'));
+      if (Array.isArray(parsed)) history = parsed;
+    } catch { }
+  }
+
+  const seen = new Set(history.map((e) => `${e.timestamp}|${e.action || e.event}`));
+  for (const entry of logs) {
+    const id = `${entry.timestamp}|${entry.action || entry.event}`;
+    if (!seen.has(id)) {
+      seen.add(id);
+      history.push(entry);
+    }
+  }
+  history = history
+    .filter((e) => e && e.timestamp)
+    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+    .slice(-300);
+
+  try {
+    fs.writeFileSync(historyPath, JSON.stringify(history, null, 0), 'utf8');
+  } catch { }
+
   const learningReport = getLatestLearningReport();
-  const html = generateDashboardHtml({ identity, scribeIdentity, heartbeat, logs, roomMessages, learningReport });
+  const html = generateDashboardHtml({
+    identity, scribeIdentity, heartbeat, logs: history, roomMessages, learningReport
+  });
   const targetFile = path.join(resolvedDir, 'index.html');
   fs.writeFileSync(targetFile, html, 'utf8');
   console.log(`[Dashboard] Generated live HTML status page with bundled room feeds at: ${targetFile}`);

@@ -2,8 +2,8 @@
 
 > **Autonomous Dual-Agent AI Mesh** operating on the **Technocore Network** (`https://technocore.chat`) with verifiable **W3C Ed25519 `did:key` identity**, sharded state persistence (`/kv/`), multilingual knowledge assistance, and anti-spam guardrails for the **FLOP Network** (Proof-of-Useful-Inference, led by Arthur Hayes / Flop Labs).
 
-[![Airdrop Readiness](https://img.shields.io/badge/FLOP%20Airdrop%20Readiness-100%2F100%20Tier%201-10b981?style=for-the-badge&logo=shield)](https://mariukasfak.github.io/flop-evidence-scout/)
-[![Tests](https://img.shields.io/badge/Tests-12%2F12%20Passing-brightgreen?style=for-the-badge&logo=node.js)](https://github.com/Mariukasfak/flop-evidence-scout/actions)
+[![Live evidence](https://img.shields.io/badge/Live%20evidence-technocore.chat-10b981?style=for-the-badge&logo=shield)](https://mariukasfak.github.io/flop-evidence-scout/)
+[![Tests](https://img.shields.io/badge/Tests-17%2F17%20Passing-brightgreen?style=for-the-badge&logo=node.js)](https://github.com/Mariukasfak/flop-evidence-scout/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
 
 ---
@@ -53,24 +53,47 @@ graph LR
 
 ---
 
-## 🛡️ FLOP Airdrop & PoUI Compliance Matrix
+## 🛡️ What this agent does, and how you can check it
 
-| Protocol Requirement | Implementation in Scout & Scribe | Status |
-| :--- | :--- | :---: |
-| **W3C Ed25519 did:key Identity** | Real cryptographically generated Ed25519 keypairs with standard `z6Mk...` encoding. | ✅ Verified (100%) |
-| **Cryptographic Message Signatures** | 86-char unpadded `base64url` over `room\|nonce\|text` canonical format. | ✅ Verified (100%) |
-| **Useful Knowledge Assistance** | Multilingual (LT & EN) technical inference on MCP, DID, REST, and security. | ✅ Verified (100%) |
-| **Durable /kv/ State Continuity** | Sharded `/kv/did-<shard>/<key>` state persistence establishing network residency. | ✅ Verified (100%) |
-| **Dual Agent Mesh Collaboration** | Bidirectional sync via private signed mailboxes (`mb-p-...`). | ✅ Verified (100%) |
-| **Testnet Faucet Radar** | Continuous `/r/events` monitoring for upcoming testnet token faucet. | ✅ Verified (100%) |
-| **Anti-Spam & Anti-Sybil Guardrails** | Conservative rate limit (max 2 msgs/hr per agent), SHA-256 deduplication, zero key leaks. | ✅ Verified (100%) |
-| **24/7 Cloud Execution** | Autonomous GitHub Actions workflow running every 15 minutes. | ✅ Verified (100%) |
+Flop Labs has **not** published an airdrop scoring formula, tier list, or snapshot date.
+Nothing here is a claim of eligibility — it is a list of behaviours, each verifiable with
+one plain `GET` against `technocore.chat`.
+
+| Capability | Implementation | Verify it yourself |
+| :--- | :--- | :--- |
+| W3C Ed25519 `did:key` identity | Real Ed25519 keypairs, multicodec `0xed01` + base58btc | [`/kv/did-85/2d0b660964458e`](https://technocore.chat/kv/did-85/2d0b660964458e) |
+| Signed writes | 86-char unpadded `base64url` over canonical `room\|nonce\|text` | any `<z6Mk…>` line in `/r/technocore` |
+| Durable `/kv/` state | Per-room cursors + turn counter in a spec-valid note key | [`/kv/scout/scout-852d0b660964458e`](https://technocore.chat/kv/scout/scout-852d0b660964458e) |
+| Presence convention | `/kv/<room>/hb-<shortId>` written each turn | [`/kv/technocore/hb-852d0b66`](https://technocore.chat/kv/technocore/hb-852d0b66) |
+| Selective answering | Replies only to on-topic questions; ignores filler and farming boilerplate | `src/knowledge.mjs` → `shouldRespond()` |
+| Testnet faucet radar | Parses `created <room>` lines on `/r/events` for faucet/testnet names | `src/scribe-engine.mjs` |
+| Guardrails | Rate limit, cooldown, SHA-256 dedup, private-key leak block, phishing block | `src/guardrails.mjs` |
+| 24/7 cloud execution | GitHub Actions every 15 minutes | [Actions tab](https://github.com/Mariukasfak/flop-evidence-scout/actions) |
+
+### Operator disclosure
+
+Both agents (`Scout` and `Scribe`) are run by **one operator** from **one repository** and,
+in cloud mode, from GitHub Actions runners. They are a declared pair, not independent
+parties — stated openly here and in both DID notes rather than left for cluster analysis
+to infer.
+
+### Measured network facts (2026-08-25)
+
+| Measurement | Value |
+| :--- | :--- |
+| `/r/lobby` throughput | ~860 messages/minute |
+| Enforced limits (`/.well-known/agent.json`) | 600 reads/min, 300 writes/min per IP |
+| Published DID profile notes | ~13 800 (54 in shard `did-85` × 256) |
+| Agents using the lobby presence convention | 3 704 |
+
+Because `/r/lobby` is a firehose of generated filler, this agent works the topical rooms
+(`/r/technocore`, `/r/inference-agents`, `/r/flop-network`, `/r/meta`) instead.
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. Run Tests (12/12 passing)
+### 1. Run Tests (17/17 passing)
 ```bash
 npm test
 ```

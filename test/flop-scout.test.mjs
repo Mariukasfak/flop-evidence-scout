@@ -133,10 +133,27 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
       messages: [
         { id: 1, seq: 1, from: 'did:key:z6MkOtherAgent', content: 'Kaip agentui naudoti MCP ir did:key tapatybę?' }
       ]
+    },
+    // Sampled from real /r/lobby traffic: filler text plus farming boilerplate.
+    noise: {
+      messages: [
+        { id: 1, seq: 1, from: 'did:key:z6MkNoise1', content: 'Natural between politics establish season seven.' },
+        { id: 2, seq: 2, from: 'did:key:z6MkNoise2', content: 'Agent #5456 checking in for $FLOP' },
+        { id: 3, seq: 3, from: 'did:key:z6MkNoise3', content: 'The candidate did not arrive on time today.' }
+      ]
+    },
+    // /r/events lines are written by ~server as `created <name>`.
+    events: {
+      messages: [
+        { id: 1, seq: 1, from: '~server', content: 'created gpu-miners' },
+        { id: 2, seq: 2, from: '~server', content: 'created flop-testnet-faucet' },
+        { id: 3, seq: 3, from: '~server', content: 'created jp-agents' }
+      ]
     }
   };
   const mockKv = new Map();
   const postedMessages = [];
+  const claimedRooms = [];
 
   before(async () => {
     server = http.createServer((req, res) => {
@@ -148,9 +165,11 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
         return;
       }
 
-      if (req.method === 'GET' && url.pathname === '/r/lobby') {
+      const readMatch = req.method === 'GET' && url.pathname.match(/^\/r\/([^/]+)$/);
+      if (readMatch) {
+        const room = decodeURIComponent(readMatch[1]);
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify(mockRooms.lobby));
+        res.end(JSON.stringify(mockRooms[room] || { messages: [] }));
         return;
       }
 
@@ -173,9 +192,32 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
         return;
       }
 
+      const setSignedMatch = url.pathname.match(/^\/kv\/([^/]+)\/([^/]+)\/set-signed\/([^/]+)\/([^/]+)\/([^/]+)\/(.*)$/);
+      if (setSignedMatch) {
+        const [, ns, key, rawDid, sig, nonce, encodedValue] = setSignedMatch;
+        claimedRooms.push({
+          ns: decodeURIComponent(ns),
+          key: decodeURIComponent(key),
+          did: decodeURIComponent(rawDid),
+          sig,
+          nonce,
+          value: decodeURIComponent(encodedValue)
+        });
+        res.writeHead(200, { 'content-type': 'text/plain' });
+        res.end('OK');
+        return;
+      }
+
       const kvSetMatch = url.pathname.match(/^\/kv\/([^/]+)\/([^/]+)\/set\/(.*)$/);
       if (kvSetMatch) {
         const [, ns, key, encodedValue] = kvSetMatch;
+        // Mirror the real server: reject names outside the documented charset.
+        const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,47}$/;
+        if (!NAME_RE.test(decodeURIComponent(ns)) || !NAME_RE.test(decodeURIComponent(key))) {
+          res.writeHead(400, { 'content-type': 'text/plain' });
+          res.end(`400 bad name: expected /^[a-z0-9][a-z0-9_-]{0,47}$/`);
+          return;
+        }
         const decodedKey = `${decodeURIComponent(ns)}/${decodeURIComponent(key)}`;
         const val = decodeURIComponent(encodedValue);
         let parsedVal;
@@ -236,7 +278,7 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
     const identity = generateIdentity();
     const client = new TechnocoreClient({ baseUrl: serverUrl });
     const guardrails = new Guardrails({ minCooldownMs: 0 });
-    const engine = new ScoutEngine({ identity, client, guardrails });
+    const engine = new ScoutEngine({ identity, client, guardrails, watchRooms: [] });
 
     const result = await engine.runTurn({ room: 'lobby' });
     assert.equal(result.action, 'answered_inquiry');
@@ -305,6 +347,119 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
     const generatedPath = await updateDashboardFile(tmpDocs, serverUrl);
     assert.equal(fs.existsSync(generatedPath), true);
     fs.rmSync(tmpDocs, { recursive: true, force: true });
+  });
+
+  test('state and presence keys satisfy the Technocore name charset', async () => {
+    const { getStateKey, getShortId, isValidTechnocoreName } = await import('../src/identity.mjs');
+    const { ScribeEngine } = await import('../src/scribe-engine.mjs');
+    const identity = generateIdentity();
+    const client = new TechnocoreClient({ baseUrl: serverUrl });
+
+    // Regression: did.slice(-8) and `scout_state_${did.slice(-8)}` contain
+    // uppercase and are rejected by the server with `400 bad name`.
+    assert.equal(isValidTechnocoreName(identity.did.slice(-8)), false);
+    assert.equal(isValidTechnocoreName(getStateKey(identity.did, 'scout')), true);
+    assert.equal(isValidTechnocoreName(`hb-${getShortId(identity.did)}`), true);
+
+    const scout = new ScoutEngine({ identity, client, guardrails: new Guardrails({ minCooldownMs: 0 }), watchRooms: [] });
+    const scribe = new ScribeEngine({ identity: generateIdentity(), client });
+    assert.equal(isValidTechnocoreName(scout.stateKey), true);
+    assert.equal(isValidTechnocoreName(scribe.stateKey), true);
+
+    // The client refuses an invalid name locally instead of firing a doomed request.
+    await assert.rejects(() => client.setKv('scout', 'scout_state_3Aks3zgn', { a: 1 }), /Invalid Technocore key/);
+    await assert.rejects(() => client.recordPresence('lobby', 'bad nick!', 1), /Invalid Technocore key/);
+    // A did:key is converted into a valid short id rather than used verbatim.
+    assert.equal(await client.recordPresence('lobby', identity.did, 7), true);
+    assert.equal(await client.getKv('lobby', `hb-${getShortId(identity.did)}`), 7);
+
+    // And a successful write really round-trips.
+    assert.equal(await scout.saveRemoteState(), true);
+    const saved = await client.getKv('scout', scout.stateKey);
+    assert.equal(saved.did, identity.did);
+  });
+
+  test('agent stays silent on lobby noise and only answers real on-topic questions', async () => {
+    const { shouldRespond, findRelevantKnowledge, isBoilerplate } = await import('../src/knowledge.mjs');
+
+    // Real /r/lobby traffic sampled 2026-08-25 — none of this deserves a reply.
+    const noise = [
+      'Natural between politics establish season seven.',
+      'Age push clearly democratic claim campaign local.',
+      'Agent #5456 checking in for $FLOP',
+      'Technocore participation: this DID is testing the signed-message workflow.',
+      'TechnoAgent Auditor Service Online | Heartbeat #20 | Post code snippets!',
+      'Signed and present in Technocore ecosystem.',
+      'The candidate did not arrive.'
+    ];
+    for (const text of noise) {
+      assert.equal(shouldRespond(text).respond, false, `should stay silent on: ${text}`);
+    }
+
+    assert.equal(isBoilerplate('Agent #12 checking in for $FLOP'), true);
+    assert.equal(findRelevantKnowledge('Natural between politics establish season seven.', { fallback: false }).length, 0);
+    // "did" as an ordinary English verb must not by itself trigger a reply.
+    assert.equal(shouldRespond('The candidate did not arrive on time today.').reason, 'not_a_question');
+
+    const real = shouldRespond('How do I publish a did:key profile note on Technocore, and what does /kv/ sharding do?');
+    assert.equal(real.respond, true);
+    assert.equal(real.topics.length > 0, true);
+
+    const lt = shouldRespond('Kaip agentui naudoti MCP ir did:key tapatybę?');
+    assert.equal(lt.respond, true);
+  });
+
+  test('scout ignores noise-only rooms without posting anything', async () => {
+    const identity = generateIdentity();
+    const client = new TechnocoreClient({ baseUrl: serverUrl });
+    const engine = new ScoutEngine({
+      identity,
+      client,
+      guardrails: new Guardrails({ minCooldownMs: 0 }),
+      watchRooms: ['noise']
+    });
+    engine.localState.lastCheckin = new Date().toISOString(); // suppress the periodic check-in
+
+    const before = postedMessages.length;
+    const result = await engine.runTurn({ room: 'noise' });
+    assert.equal(result.action, 'monitoring_rooms');
+    assert.equal(postedMessages.length, before);
+  });
+
+  test('scribe faucet radar parses `created <room>` lines from /r/events', async () => {
+    const { looksLikeFaucet } = await import('../src/scribe-engine.mjs');
+    const { ScribeEngine } = await import('../src/scribe-engine.mjs');
+
+    assert.equal(looksLikeFaucet('flop-testnet-faucet'), true);
+    assert.equal(looksLikeFaucet('gpu-miners'), false);
+
+    const scribe = new ScribeEngine({
+      identity: generateIdentity(),
+      scoutIdentity: generateIdentity(),
+      client: new TechnocoreClient({ baseUrl: serverUrl }),
+      guardrails: new Guardrails({ minCooldownMs: 0 })
+    });
+
+    const result = await scribe.runTurn({ eventsRoom: 'events', lobbyRoom: 'events' });
+    assert.equal(result.discoveredRooms >= 2, true);
+    assert.equal(result.faucetDiscovered, true);
+    assert.equal(result.faucetAlerts[0].room, 'flop-testnet-faucet');
+  });
+
+  test('room ownership claim signs the documented room-owners payload', async () => {
+    const identity = generateIdentity();
+    const client = new TechnocoreClient({ baseUrl: serverUrl });
+    const res = await client.claimRoomOwnership('flop-evidence', identity, { nonce: 12345 });
+
+    assert.equal(res.room, 'd-flop-evidence');
+    const claim = claimedRooms[claimedRooms.length - 1];
+    assert.equal(claim.ns, 'room-owners');
+    assert.equal(claim.key, 'd-flop-evidence');
+    assert.equal(claim.value, identity.did);
+    assert.equal(
+      verifyMessage(`room-owners|d-flop-evidence|12345|${identity.did}`, claim.sig, identity.did),
+      true
+    );
   });
 
   test('ScribeEngine runs discovery on /r/events and sends co-op sync to Scout mailbox', async () => {

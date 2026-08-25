@@ -1,6 +1,20 @@
-import { getDidShardedPath, singleLineSweep } from './identity.mjs';
+import { getDidShardedPath, getStateKey, singleLineSweep } from './identity.mjs';
 import { Guardrails } from './guardrails.mjs';
-import { formatKnowledgeResponse, findRelevantKnowledge } from './knowledge.mjs';
+
+/** What a testnet faucet room would plausibly be called when it appears. */
+export const FAUCET_PATTERNS = [/faucet/i, /testnet/i, /\bdrip\b/i, /\btap\b/i];
+
+export function looksLikeFaucet(value) {
+  const text = String(value || '');
+  return FAUCET_PATTERNS.some((re) => re.test(text));
+}
+
+/**
+ * Signed peer sync between this operator's own two agents. Kept deliberately
+ * rare: two bots acknowledging each other every few minutes is self-dealing,
+ * which is exactly the pattern sybil clustering looks for.
+ */
+const COOP_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 export class ScribeEngine {
   constructor({
@@ -21,7 +35,7 @@ export class ScribeEngine {
     this.scoutIdentity = scoutIdentity;
     this.client = client;
     this.guardrails = guardrails;
-    this.stateKey = stateKey || `scribe_state_${identity.did.slice(-8)}`;
+    this.stateKey = stateKey || getStateKey(identity.did, 'scribe');
     this.localState = {
       did: identity.did,
       totalTurns: 0,
@@ -30,8 +44,10 @@ export class ScribeEngine {
       lastCheckin: null,
       syncedWithScoutCount: 0,
       faucetDiscovered: false,
+      faucetHits: [],
       profilePublished: false
     };
+    this.lastStateError = null;
   }
 
   async loadRemoteState() {
@@ -40,8 +56,8 @@ export class ScribeEngine {
       if (remote && typeof remote === 'object') {
         this.localState = { ...this.localState, ...remote };
       }
-    } catch {
-      // Non-blocking
+    } catch (err) {
+      this.lastStateError = err.message;
     }
     return this.localState;
   }
@@ -50,8 +66,12 @@ export class ScribeEngine {
     try {
       this.localState.lastActive = new Date().toISOString();
       await this.client.setKv('scribe', this.stateKey, this.localState);
+      this.lastStateError = null;
+      return true;
     } catch (err) {
-      console.warn('Failed to persist scribe state to /kv/:', err.message);
+      this.lastStateError = err.message;
+      console.warn('[Scribe] /kv/ state write failed:', err.message);
+      return false;
     }
   }
 
@@ -104,6 +124,7 @@ export class ScribeEngine {
 
     const eventMessages = Array.isArray(eventsData?.messages) ? eventsData.messages : [];
     const discoveredRooms = [];
+    const faucetAlerts = [];
     if (eventMessages.length > 0) {
       const maxSeq = Math.max(...eventMessages.map(m => Number(m.seq || m.id || 0)));
       if (maxSeq > this.localState.lastEventsSeq) {
@@ -111,11 +132,16 @@ export class ScribeEngine {
       }
       for (const ev of eventMessages) {
         const text = ev.content || ev.text || '';
-        const match = text.match(/\/r\/([a-z0-9_-]+)/i);
+        // /r/events lines are literally `created <name>` written by ~server.
+        const match = text.match(/created\s+([a-z0-9][a-z0-9_-]{0,47})/i) || text.match(/\/r\/([a-z0-9_-]+)/i);
         if (match && match[1]) {
-          discoveredRooms.push(match[1]);
-          if (/faucet|drip|testnet/i.test(match[1])) {
+          const roomName = match[1];
+          discoveredRooms.push(roomName);
+          if (looksLikeFaucet(roomName)) {
             this.localState.faucetDiscovered = true;
+            const hit = { room: roomName, seq: Number(ev.seq || 0), at: new Date().toISOString() };
+            this.localState.faucetHits = [...(this.localState.faucetHits || []), hit].slice(-10);
+            faucetAlerts.push(hit);
           }
         }
       }
@@ -125,21 +151,33 @@ export class ScribeEngine {
     const scoutKey = this.scoutIdentity?.did ? getDidShardedPath(this.scoutIdentity.did).key : null;
     const scoutMailbox = scoutKey ? `mb-p-scout-${scoutKey}` : null;
 
-    if (scoutMailbox && (!this.localState.lastCheckin || Date.now() - new Date(this.localState.lastCheckin).getTime() > 1800_000)) {
+    const sinceCoop = this.localState.lastCoopSync
+      ? Date.now() - new Date(this.localState.lastCoopSync).getTime()
+      : Infinity;
+    const sinceCheckin = this.localState.lastCheckin
+      ? Date.now() - new Date(this.localState.lastCheckin).getTime()
+      : Infinity;
+
+    if (scoutMailbox && sinceCoop > COOP_SYNC_INTERVAL_MS) {
       targetRoom = scoutMailbox;
-      outgoingMessage = `[FLOP Scribe -> Scout Sync]: Sentinel node active | Verified events seq: #${this.localState.lastEventsSeq} | State /kv/ intact.`;
+      outgoingMessage = `[FLOP Scribe -> Scout Sync]: Sentinel node active | Verified events seq: #${this.localState.lastEventsSeq} | Faucet radar: ${this.localState.faucetDiscovered ? 'HIT' : 'clear'}.`;
       actionTaken = 'coop_sync';
       this.localState.syncedWithScoutCount += 1;
-      this.localState.lastCheckin = new Date().toISOString();
+      this.localState.lastCoopSync = new Date().toISOString();
       detailPayload = {
         targetAgent: this.scoutIdentity?.did ? `Scout <${this.scoutIdentity.did.slice(0, 14)}...>` : 'Scout Agent',
         mailbox: scoutMailbox,
         reason: 'Dviejų agentų tinklo sinchronizacija per privačią pasirašytą pašto dėžutę (Co-op Mesh)',
         response: outgoingMessage
       };
-    } else if (!outgoingMessage && (!this.localState.lastCheckin || Date.now() - new Date(this.localState.lastCheckin).getTime() > 3600_000)) {
+    } else if (!outgoingMessage && sinceCheckin > 4 * 60 * 60 * 1000) {
+      // A digest of what actually happened is worth reading; "I am online" is not.
       targetRoom = lobbyRoom;
-      outgoingMessage = `[FLOP Scribe Check-in]: Sentinel Scribe online (DID: ${this.identity.did.slice(0, 16)}...) | Monitoring /r/events and network registry.`;
+      const sample = discoveredRooms.slice(0, 3).join(', ') || 'none in this window';
+      outgoingMessage =
+        `[FLOP Sentinel] /r/events digest at seq #${this.localState.lastEventsSeq}: ` +
+        `${discoveredRooms.length} new rooms this window (${sample}) | faucet radar: ` +
+        `${this.localState.faucetDiscovered ? 'HIT' : 'clear'} | open source: github.com/Mariukasfak/flop-evidence-scout`;
       actionTaken = 'signed_checkin';
       this.localState.lastCheckin = new Date().toISOString();
       detailPayload = {
@@ -173,12 +211,19 @@ export class ScribeEngine {
       };
     }
 
-    // 5. Record presence convention
+    // 5. Presence convention: the nick must be a lowercase, spec-valid short id.
+    let presenceError = null;
     try {
-      await this.client.recordPresence('events', this.identity.did.slice(-8), this.localState.lastEventsSeq);
-    } catch {
-      // Non-blocking
+      await this.client.recordPresence(eventsRoom, this.identity.did, this.localState.lastEventsSeq);
+    } catch (err) {
+      presenceError = err.message;
     }
+
+    if (faucetAlerts.length > 0) {
+      detailPayload.faucetAlerts = faucetAlerts;
+      detailPayload.reason = `⚠️ FAUCET RADAR: aptikti kambariai ${faucetAlerts.map((h) => h.room).join(', ')}`;
+    }
+    if (presenceError) detailPayload.presenceError = presenceError;
 
     await this.saveRemoteState();
 
@@ -190,6 +235,10 @@ export class ScribeEngine {
       turns: this.localState.totalTurns,
       lastEventsSeq: this.localState.lastEventsSeq,
       syncedWithScoutCount: this.localState.syncedWithScoutCount,
+      discoveredRooms: discoveredRooms.length,
+      faucetAlerts,
+      faucetDiscovered: Boolean(this.localState.faucetDiscovered),
+      stateError: this.lastStateError,
       details: detailPayload,
       timestamp: new Date().toISOString()
     };

@@ -144,6 +144,29 @@ export function getDidShardedPath(did) {
   };
 }
 
+/**
+ * Technocore enforces /^[a-z0-9][a-z0-9_-]{0,47}$/ on <room>, <nick>, <ns> and <key>.
+ * Raw did:key strings contain uppercase, so they can never be used directly as a
+ * note key or a presence nick — derive a lowercase hex id from the DID instead.
+ */
+export const TECHNOCORE_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,47}$/;
+
+export function isValidTechnocoreName(name) {
+  return typeof name === 'string' && TECHNOCORE_NAME_PATTERN.test(name);
+}
+
+/** Stable, spec-valid /kv/ key for an agent's own state note. */
+export function getStateKey(did, prefix = 'state') {
+  const { fingerprint } = getDidShardedPath(did);
+  return `${prefix}-${fingerprint}`;
+}
+
+/** Stable, spec-valid short id used for presence heartbeats (hb-<shortId>). */
+export function getShortId(did, length = 8) {
+  const { fingerprint } = getDidShardedPath(did);
+  return fingerprint.slice(0, length);
+}
+
 export function verifyMessage(message, signatureBase64, didOrPublicKeyPem) {
   const data = Buffer.isBuffer(message) ? message : Buffer.from(typeof message === 'string' ? message : JSON.stringify(message));
   const normalizedSig = signatureBase64.replaceAll('-', '+').replaceAll('_', '/');

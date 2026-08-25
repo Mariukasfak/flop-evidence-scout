@@ -1,6 +1,17 @@
-import { formatKnowledgeResponse, findRelevantKnowledge } from './knowledge.mjs';
+import { formatKnowledgeResponse, shouldRespond } from './knowledge.mjs';
 import { Guardrails } from './guardrails.mjs';
-import { getDidShardedPath } from './identity.mjs';
+import { getDidShardedPath, getStateKey } from './identity.mjs';
+
+/** Topical rooms carry real conversation; /r/lobby is a ~860 msg/min firehose. */
+export const DEFAULT_WATCH_ROOMS = Object.freeze([
+  'technocore',
+  'inference-agents',
+  'flop-network',
+  'meta'
+]);
+
+const CHECKIN_INTERVAL_MS = 2 * 60 * 60 * 1000;
+const SAME_AUTHOR_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 
 export class ScoutEngine {
   constructor({
@@ -8,7 +19,9 @@ export class ScoutEngine {
     client,
     guardrails = new Guardrails(),
     stateKey = null,
-    scribeIdentity = null
+    scribeIdentity = null,
+    watchRooms = DEFAULT_WATCH_ROOMS,
+    repoUrl = 'github.com/Mariukasfak/flop-evidence-scout'
   }) {
     if (!identity?.did || !identity?.privateKeyPem) {
       throw new Error('Valid Ed25519 identity is required for ScoutEngine');
@@ -21,16 +34,25 @@ export class ScoutEngine {
     this.scribeIdentity = scribeIdentity;
     this.client = client;
     this.guardrails = guardrails;
-    this.stateKey = stateKey || `scout_state_${identity.did.slice(-8)}`;
+    this.repoUrl = repoUrl;
+    this.watchRooms = [...watchRooms];
+    // Must satisfy /^[a-z0-9][a-z0-9_-]{0,47}$/ — a raw did:key never does.
+    this.stateKey = stateKey || getStateKey(identity.did, 'scout');
     this.localState = {
       did: identity.did,
       totalTurns: 0,
       lastSeenSeq: 0,
-      lastMailboxSeq: 0,
+      roomCursors: {},
+      answeredAuthors: {},
       lastCheckin: null,
       handledCount: 0,
       profilePublished: false
     };
+    this.lastStateError = null;
+  }
+
+  get mailbox() {
+    return `mb-p-scout-${getDidShardedPath(this.identity.did).key}`;
   }
 
   async loadRemoteState() {
@@ -39,8 +61,8 @@ export class ScoutEngine {
       if (remote && typeof remote === 'object') {
         this.localState = { ...this.localState, ...remote };
       }
-    } catch {
-      // If remote /kv/ is not yet available, keep local state
+    } catch (err) {
+      this.lastStateError = err.message;
     }
     return this.localState;
   }
@@ -49,119 +71,151 @@ export class ScoutEngine {
     try {
       this.localState.lastActive = new Date().toISOString();
       await this.client.setKv('scout', this.stateKey, this.localState);
+      this.lastStateError = null;
+      return true;
     } catch (err) {
-      console.warn('Failed to persist state to Technocore /kv/:', err.message);
+      // Surfaced in the turn result and the audit log — never swallowed.
+      this.lastStateError = err.message;
+      console.warn('[Scout] /kv/ state write failed:', err.message);
+      return false;
     }
+  }
+
+  /** Reads one room and returns the messages this agent has not seen yet. */
+  async collectNewMessages(room) {
+    const cursor = Number(this.localState.roomCursors?.[room] || 0);
+    const data = await this.client.readRoom(room, {
+      since: cursor > 0 ? cursor : null,
+      limit: 20
+    });
+
+    const messages = Array.isArray(data?.messages) ? data.messages : [];
+    const fresh = messages.filter((m) => {
+      const seq = Number(m.seq || m.id || 0);
+      return seq > cursor && m.from !== this.identity.did;
+    });
+
+    const maxSeq = messages.reduce((acc, m) => Math.max(acc, Number(m.seq || m.id || 0)), cursor);
+    return { fresh, maxSeq };
+  }
+
+  answeredRecently(author) {
+    const last = this.localState.answeredAuthors?.[author];
+    if (!last) return false;
+    return Date.now() - new Date(last).getTime() < SAME_AUTHOR_COOLDOWN_MS;
   }
 
   async runTurn({ room = 'lobby' } = {}) {
     await this.loadRemoteState();
     this.localState.totalTurns += 1;
+    this.localState.roomCursors = this.localState.roomCursors || {};
+    this.localState.answeredAuthors = this.localState.answeredAuthors || {};
 
-    // 1. Ensure sharded DID profile is published
     if (!this.localState.profilePublished) {
       try {
-        await this.client.publishDidProfile(this.identity);
+        await this.client.publishDidProfile(this.identity, {
+          mailbox: this.mailbox,
+          type: 'autonomous_evidence_scout',
+          agent: 'FLOP Evidence Scout'
+        });
         this.localState.profilePublished = true;
       } catch (err) {
-        console.warn('Failed to publish DID profile:', err.message);
+        console.warn('[Scout] DID profile publish failed:', err.message);
       }
     }
 
-    // 2. Read room messages (e.g. /r/lobby)
-    let roomData = null;
-    try {
-      roomData = await this.client.readRoom(room, {
-        since: this.localState.lastSeenSeq > 0 ? this.localState.lastSeenSeq : null,
-        limit: 20
-      });
-    } catch (err) {
+    // Topical rooms first: a question there is real, in lobby it is usually noise.
+    const rooms = [...new Set([...this.watchRooms, room])];
+    const roomErrors = {};
+    let candidate = null;
+    let scanned = 0;
+    let primaryReadFailed = false;
+
+    for (const target of rooms) {
+      let result;
+      try {
+        result = await this.collectNewMessages(target);
+      } catch (err) {
+        roomErrors[target] = err.message;
+        if (target === room) primaryReadFailed = true;
+        continue;
+      }
+
+      this.localState.roomCursors[target] = result.maxSeq;
+      if (target === room) this.localState.lastSeenSeq = result.maxSeq;
+      scanned += result.fresh.length;
+
+      if (candidate) continue;
+
+      for (const msg of result.fresh) {
+        const text = typeof msg.content === 'string' ? msg.content : (msg.text || '');
+        const author = msg.from || 'unknown';
+        if (this.answeredRecently(author)) continue;
+
+        const verdict = shouldRespond(text, { selfDid: this.identity.did });
+        if (verdict.respond) {
+          candidate = { room: target, author, text, topics: verdict.topics, reason: verdict.reason };
+          break;
+        }
+      }
+    }
+
+    if (!candidate && primaryReadFailed && Object.keys(roomErrors).length === rooms.length) {
+      await this.saveRemoteState();
       return {
         action: 'error',
-        error: `Failed to read room ${room}: ${err.message}`,
+        error: `Failed to read room ${room}: ${roomErrors[room]}`,
         did: this.identity.did,
         turns: this.localState.totalTurns,
-        lastSeenSeq: this.localState.lastSeenSeq
+        lastSeenSeq: this.localState.lastSeenSeq,
+        stateError: this.lastStateError
       };
     }
 
-    const messages = Array.isArray(roomData?.messages) ? roomData.messages : [];
-    const newMessages = messages.filter((m) => {
-      const seq = Number(m.seq || m.id || 0);
-      return seq > this.localState.lastSeenSeq && m.from !== this.identity.did;
-    });
-
-    let actionTaken = 'monitoring_room';
+    let actionTaken = 'monitoring_rooms';
     let outgoingMessage = null;
     let targetRoom = room;
-    let detailPayload = {};
+    let detailPayload = {
+      reason: `Peržiūrėti kambariai: ${rooms.join(', ')} (naujų žinučių: ${scanned}, tinkamų atsakyti: 0)`
+    };
 
-    // 3. Check for relevant inquiries in /r/lobby
-    for (const msg of newMessages) {
-      const text = typeof msg.content === 'string' ? msg.content : (msg.text || '');
-      const relevant = findRelevantKnowledge(text);
-      
-      if (relevant.length > 0 && /\?|how|kaip|kas|kur|mcp|did|kv|rest|airdrop|claim/i.test(text)) {
-        const knowledgeAnswer = formatKnowledgeResponse(text);
-        outgoingMessage = `[FLOP Scout -> ${msg.from || 'Agent'}]: ${knowledgeAnswer}`;
-        actionTaken = 'answered_inquiry';
-        targetRoom = room;
-        this.localState.handledCount += 1;
-        detailPayload = {
-          targetAgent: msg.from || 'Agent',
-          inquiry: text,
-          reason: `Aptikta užklausa apie ${relevant.map(r => r.topic).join(', ')}`,
-          response: knowledgeAnswer
-        };
-        break;
-      }
-    }
-
-    // 4. Check Scout's private mailbox for Scribe sync messages
-    const scoutKey = getDidShardedPath(this.identity.did).key;
-    const scoutMailbox = `mb-p-scout-${scoutKey}`;
-    const scribeKey = this.scribeIdentity?.did ? getDidShardedPath(this.scribeIdentity.did).key : null;
-    const scribeMailbox = scribeKey ? `mb-p-scribe-${scribeKey}` : null;
-
-    if (!outgoingMessage && scribeMailbox) {
-      try {
-        const mbData = await this.client.readRoom(scoutMailbox, { limit: 5 });
-        const mbMsgs = Array.isArray(mbData?.messages) ? mbData.messages : [];
-        const newMb = mbMsgs.filter(m => Number(m.seq || 0) > (this.localState.lastMailboxSeq || 0));
-        if (newMb.length > 0) {
-          const latest = newMb[newMb.length - 1];
-          this.localState.lastMailboxSeq = Number(latest.seq || 0);
-          outgoingMessage = `[FLOP Scout -> Scribe Ack]: Verified sync #${latest.seq} | Mesh state synchronized | Turn #${this.localState.totalTurns}.`;
-          targetRoom = scribeMailbox;
-          actionTaken = 'coop_ack';
-          detailPayload = {
-            targetAgent: this.scribeIdentity?.did ? `Scribe <${this.scribeIdentity.did.slice(0, 14)}...>` : 'Scribe Agent',
-            mailbox: scribeMailbox,
-            reason: 'Dvipusis sinchronizacijos patvirtinimas tarp Scout ir Scribe pašto dėžučių',
-            response: outgoingMessage
-          };
-        }
-      } catch {
-        // Non-blocking mailbox check
-      }
-    }
-
-    // 5. If no specific inquiry or ack, periodic signed check-in
-    if (!outgoingMessage && (!this.localState.lastCheckin || Date.now() - new Date(this.localState.lastCheckin).getTime() > 1800_000)) {
-      outgoingMessage = `[FLOP Scout Check-in]: Active persistent DID ${this.identity.did.slice(0, 16)}... | State /kv/ turns: ${this.localState.totalTurns} | Monitoring documentation & agent inquiries.`;
+    if (candidate) {
+      const answer = formatKnowledgeResponse(candidate.text);
+      outgoingMessage = `[FLOP Scout -> ${candidate.author}]: ${answer}`;
+      actionTaken = 'answered_inquiry';
+      targetRoom = candidate.room;
+      this.localState.handledCount += 1;
+      this.localState.answeredAuthors[candidate.author] = new Date().toISOString();
+      detailPayload = {
+        targetAgent: candidate.author,
+        room: candidate.room,
+        inquiry: candidate.text,
+        reason: `Klausimas apie ${candidate.topics.map((t) => t.topic).join(', ')} (${candidate.reason})`,
+        response: answer
+      };
+    } else if (
+      !this.localState.lastCheckin ||
+      Date.now() - new Date(this.localState.lastCheckin).getTime() > CHECKIN_INTERVAL_MS
+    ) {
+      const cursorSummary = rooms
+        .map((r) => `${r}#${this.localState.roomCursors[r] || 0}`)
+        .join(' ');
+      outgoingMessage =
+        `[FLOP Evidence Scout] turn ${this.localState.totalTurns} | answers given ${this.localState.handledCount} ` +
+        `| watching ${cursorSummary} | open source: ${this.repoUrl} | ask me about the Technocore wire protocol.`;
       actionTaken = 'signed_checkin';
-      targetRoom = room;
+      targetRoom = this.watchRooms[0] || room;
       this.localState.lastCheckin = new Date().toISOString();
       detailPayload = {
-        reason: 'Periodinis Ed25519 pasirašytas būsenos check-in',
+        room: targetRoom,
+        reason: 'Periodinis Ed25519 pasirašytas būsenos pranešimas (kas 2 val.)',
         response: outgoingMessage
       };
     }
 
-    // Attempt to send message if allowed by guardrails
     if (outgoingMessage) {
       outgoingMessage = outgoingMessage.replace(/[\r\n\t]+/g, ' ').trim();
-      const isPriority = actionTaken === 'answered_inquiry' || actionTaken === 'coop_ack';
+      const isPriority = actionTaken === 'answered_inquiry';
       const check = this.guardrails.canSendMessage(outgoingMessage, { isPriorityInquiry: isPriority });
       if (check.allowed) {
         try {
@@ -169,7 +223,7 @@ export class ScoutEngine {
           this.guardrails.recordSent(outgoingMessage);
         } catch (err) {
           actionTaken = `send_failed: ${err.message}`;
-          console.warn('Failed to post message to Technocore:', err.message);
+          console.warn('[Scout] Failed to post message:', err.message);
         }
       } else {
         actionTaken = `monitoring_pacing: ${check.reason}`;
@@ -177,18 +231,17 @@ export class ScoutEngine {
       }
     }
 
-    if (!outgoingMessage) {
-      detailPayload = {
-        reason: 'Kambarys skaitomas realiu laiku, palaikomas saugus tempas (anti-spam).'
-      };
-    }
-
-    if (newMessages.length > 0) {
-      const maxSeq = Math.max(...newMessages.map((m) => Number(m.seq || m.id || 0)));
-      if (maxSeq > this.localState.lastSeenSeq) {
-        this.localState.lastSeenSeq = maxSeq;
+    // Presence convention — /kv/<room>/hb-<shortId>. 3704 agents follow it in lobby.
+    for (const target of rooms) {
+      if (roomErrors[target]) continue;
+      try {
+        await this.client.recordPresence(target, this.identity.did, this.localState.roomCursors[target] || 0);
+      } catch (err) {
+        roomErrors[`presence:${target}`] = err.message;
       }
     }
+
+    if (Object.keys(roomErrors).length > 0) detailPayload.roomErrors = roomErrors;
 
     await this.saveRemoteState();
 
@@ -199,6 +252,8 @@ export class ScoutEngine {
       turns: this.localState.totalTurns,
       handledCount: this.localState.handledCount,
       lastSeenSeq: this.localState.lastSeenSeq,
+      scanned,
+      stateError: this.lastStateError,
       details: detailPayload
     };
   }
