@@ -172,6 +172,24 @@ export async function runScoutDaemon(options = {}) {
         if (eventsData.messages) archiveRoomMessages('events', eventsData.messages);
       } catch {}
 
+      // A faucet room appearing is the one event worth waking a human for, so it
+      // is written where the CI job can see it and raise a GitHub issue.
+      if (Array.isArray(scribeResult.faucetAlerts) && scribeResult.faucetAlerts.length > 0) {
+        try {
+          const alertPath = path.resolve('data/faucet-alert.json');
+          fs.mkdirSync(path.dirname(alertPath), { recursive: true });
+          fs.writeFileSync(alertPath, JSON.stringify({
+            detectedAt: new Date().toISOString(),
+            rooms: scribeResult.faucetAlerts,
+            eventsSeq: scribeResult.lastEventsSeq,
+            note: 'Unverified: a room name is a string a stranger chose. Confirm against official Flop Labs channels before interacting.'
+          }, null, 2), 'utf8');
+          console.log('[FAUCET RADAR] Hit:', scribeResult.faucetAlerts.map((h) => h.room).join(', '));
+        } catch (err) {
+          console.warn('[FAUCET RADAR] Could not write alert file:', err.message);
+        }
+      }
+
       await writeHeartbeat('active', scoutResult);
     } catch (err) {
       console.error('[Mesh Error]:', err.message);

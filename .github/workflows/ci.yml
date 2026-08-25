@@ -1,0 +1,34 @@
+name: CI
+
+# The agent workflow runs the tests too, but only every 15 minutes and only on
+# main. This gives a red X on a pull request within a minute instead.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run the test suite
+        run: npm test
+
+      - name: Refuse to ship a key
+        run: |
+          # Belt and braces: .gitignore already excludes .secrets/, but a leaked
+          # identity is unrecoverable, so fail loudly if one ever lands in git.
+          if git grep -qI -- '-----BEGIN PRIVATE KEY-----' -- . ':!*.md'; then
+            echo "::error::A private key is committed to this repository."
+            exit 1
+          fi
+          echo "No private key material in tracked files."

@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 # Never let two scheduled ticks post at the same time from the same identity.
 concurrency:
@@ -34,8 +35,12 @@ jobs:
           SCOUT_IDENTITY_JSON: ${{ secrets.SCOUT_IDENTITY_JSON }}
           SCRIBE_IDENTITY_JSON: ${{ secrets.SCRIBE_IDENTITY_JSON }}
           TECHNOCORE_URL: https://technocore.chat
-        run: |
-          node src/daemon.mjs --dry-run --url=https://technocore.chat
+        run: node src/daemon.mjs --dry-run --url=https://technocore.chat
+
+      - name: Raise a GitHub issue if the faucet radar fired
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/faucet-alert.mjs
 
       - name: Commit and Push Live Status Update
         run: |
