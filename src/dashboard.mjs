@@ -102,7 +102,8 @@ export function generateDashboardHtml({
   const safeInitialData = JSON.stringify({
     lobby: Array.isArray(roomMessages.lobby) ? roomMessages.lobby : (Array.isArray(roomMessages) ? roomMessages : []),
     events: Array.isArray(roomMessages.events) ? roomMessages.events : [],
-    [scoutMailbox]: Array.isArray(roomMessages[scoutMailbox]) ? roomMessages[scoutMailbox] : []
+    mailbox: Array.isArray(roomMessages[scoutMailbox]) ? roomMessages[scoutMailbox] : (Array.isArray(roomMessages.mailbox) ? roomMessages.mailbox : []),
+    [scoutMailbox]: Array.isArray(roomMessages[scoutMailbox]) ? roomMessages[scoutMailbox] : (Array.isArray(roomMessages.mailbox) ? roomMessages.mailbox : [])
   }).replace(/</g, '\\u003c');
 
   const safeLogsJson = JSON.stringify(logs).replace(/</g, '\\u003c');
@@ -771,10 +772,9 @@ export function generateDashboardHtml({
       else if (roomName === 'events') document.getElementById('tab-events')?.classList.add('active');
       else document.getElementById('tab-mailbox')?.classList.add('active');
 
-      if (INITIAL_DATA[roomName] && INITIAL_DATA[roomName].length > 0) {
-        currentMessages = INITIAL_DATA[roomName];
-        renderMessages(currentMessages);
-      }
+      const dataKey = (roomName === 'mailbox' || roomName === SCOUT_MAILBOX) ? 'mailbox' : roomName;
+      currentMessages = INITIAL_DATA[dataKey] || INITIAL_DATA[roomName] || [];
+      renderMessages(currentMessages);
       fetchLiveRoomMessages();
     }
 
@@ -800,7 +800,8 @@ export function generateDashboardHtml({
         return;
       }
 
-      const filtered = filterOnlyMine
+      const isEvents = activeRoom === 'events';
+      const filtered = (filterOnlyMine && !isEvents)
         ? messages.filter(m => (m.from && (m.from.includes(SCOUT_DID.slice(-8)) || m.from.includes(SCRIBE_DID.slice(-8)) || m.from === SCOUT_DID || m.from === SCRIBE_DID)))
         : messages;
 
