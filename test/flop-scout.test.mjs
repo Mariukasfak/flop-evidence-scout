@@ -298,8 +298,28 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
     assert.match(html, /Airdrop & Protocol Readiness/);
 
     const tmpDocs = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-docs-'));
-    const generatedPath = updateDashboardFile(tmpDocs);
+    const generatedPath = await updateDashboardFile(tmpDocs, serverUrl);
     assert.equal(fs.existsSync(generatedPath), true);
     fs.rmSync(tmpDocs, { recursive: true, force: true });
+  });
+
+  test('ScribeEngine runs discovery on /r/events and sends co-op sync to Scout mailbox', async () => {
+    const { ScribeEngine } = await import('../src/scribe-engine.mjs');
+    const scoutIdentity = generateIdentity();
+    const scribeIdentity = generateIdentity();
+    const client = new TechnocoreClient({ baseUrl: serverUrl });
+    const guardrails = new Guardrails({ minCooldownMs: 0 });
+
+    const scribe = new ScribeEngine({
+      identity: scribeIdentity,
+      scoutIdentity,
+      client,
+      guardrails
+    });
+
+    const result = await scribe.runTurn({ eventsRoom: 'lobby', lobbyRoom: 'lobby' });
+    assert.equal(result.agent, 'scribe');
+    assert.equal(result.action, 'coop_sync');
+    assert.equal(result.syncedWithScoutCount, 1);
   });
 });

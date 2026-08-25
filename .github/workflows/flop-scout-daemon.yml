@@ -24,6 +24,7 @@ jobs:
       - name: Run FLOP Scout Autonomous Cycle & Generate Dashboard
         env:
           SCOUT_IDENTITY_JSON: ${{ secrets.SCOUT_IDENTITY_JSON }}
+          SCRIBE_IDENTITY_JSON: ${{ secrets.SCRIBE_IDENTITY_JSON }}
           TECHNOCORE_URL: https://technocore.chat
         run: |
           node src/daemon.mjs --dry-run --url=https://technocore.chat

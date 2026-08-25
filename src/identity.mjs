@@ -161,10 +161,10 @@ export function verifyMessage(message, signatureBase64, didOrPublicKeyPem) {
   return crypto.verify(null, data, publicKey, signature);
 }
 
-export function loadOrCreateIdentity(storagePath) {
-  if (process.env.SCOUT_IDENTITY_JSON) {
+export function loadOrCreateIdentity(storagePath, envVarName = 'SCOUT_IDENTITY_JSON') {
+  if (envVarName && process.env[envVarName]) {
     try {
-      const parsed = JSON.parse(process.env.SCOUT_IDENTITY_JSON);
+      const parsed = JSON.parse(process.env[envVarName]);
       if (parsed.did && parsed.privateKeyPem) return parsed;
     } catch {
       // fallback to file

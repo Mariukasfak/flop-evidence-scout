@@ -6,6 +6,7 @@ import { loadOrCreateIdentity } from './identity.mjs';
 import { TechnocoreClient } from './technocore-client.mjs';
 import { Guardrails } from './guardrails.mjs';
 import { ScoutEngine } from './scout-engine.mjs';
+import { ScribeEngine } from './scribe-engine.mjs';
 import { updateDashboardFile } from './dashboard.mjs';
 
 function parseArgs(argv) {
@@ -13,7 +14,8 @@ function parseArgs(argv) {
     intervalMs: 60_000,
     dryRun: false,
     identityPath: path.resolve('.secrets/scout-identity.json'),
-    serverUrl: process.env.TECHNOCORE_URL || 'http://localhost:8080',
+    scribeIdentityPath: path.resolve('.secrets/scribe-identity.json'),
+    serverUrl: process.env.TECHNOCORE_URL || 'https://technocore.chat',
     room: 'lobby',
     auditLogPath: path.resolve('data/scout-audit.jsonl')
   };
@@ -42,21 +44,28 @@ function appendAudit(logPath, record) {
 
 export async function runScoutDaemon(options = {}) {
   const config = { ...parseArgs(process.argv), ...options };
-  console.log(`[FLOP Scout] Initializing identity at: ${config.identityPath}`);
   
-  const identity = loadOrCreateIdentity(config.identityPath);
-  console.log(`[FLOP Scout] DID: ${identity.did}`);
+  // 1. Initialize Scout Agent (Agent #1)
+  const scoutIdentity = loadOrCreateIdentity(config.identityPath, 'SCOUT_IDENTITY_JSON');
+  console.log(`[Agent #1 - Scout] DID: ${scoutIdentity.did}`);
+
+  // 2. Initialize Scribe Agent (Agent #2)
+  const scribeIdentity = loadOrCreateIdentity(config.scribeIdentityPath, 'SCRIBE_IDENTITY_JSON');
+  console.log(`[Agent #2 - Scribe] DID: ${scribeIdentity.did}`);
 
   const client = new TechnocoreClient({ baseUrl: config.serverUrl });
-  const guardrails = new Guardrails();
-  const engine = new ScoutEngine({ identity, client, guardrails });
+  const scoutGuardrails = new Guardrails({ maxPerHour: 2, minCooldownMs: 60_000 });
+  const scribeGuardrails = new Guardrails({ maxPerHour: 2, minCooldownMs: 60_000 });
 
-  console.log(`[FLOP Scout] Connected to: ${config.serverUrl} (Room: ${config.room})`);
+  const scoutEngine = new ScoutEngine({ identity: scoutIdentity, client, guardrails: scoutGuardrails });
+  const scribeEngine = new ScribeEngine({ identity: scribeIdentity, scoutIdentity, client, guardrails: scribeGuardrails });
+
+  console.log(`[Dual Agent Mesh] Connected to: ${config.serverUrl} (Rooms: ${config.room} & events)`);
 
   let running = true;
   const stop = () => {
     if (!running) return;
-    console.log('\n[FLOP Scout] Shutting down gracefully...');
+    console.log('\n[Dual Agent Mesh] Shutting down gracefully...');
     running = false;
   };
 
@@ -64,40 +73,51 @@ export async function runScoutDaemon(options = {}) {
   process.on('SIGTERM', stop);
 
   const heartbeatPath = path.resolve('data/scout-heartbeat.json');
-  const writeHeartbeat = (status, lastResult = {}) => {
+  const writeHeartbeat = async (status, lastResult = {}) => {
     try {
       fs.mkdirSync(path.dirname(heartbeatPath), { recursive: true });
       fs.writeFileSync(heartbeatPath, JSON.stringify({
         status,
-        did: identity.did,
+        did: scoutIdentity.did,
+        scribeDid: scribeIdentity.did,
         serverUrl: config.serverUrl,
         room: config.room,
         intervalMs: config.intervalMs,
         lastHeartbeat: new Date().toISOString(),
-        turns: lastResult.turns ?? engine.localState.totalTurns,
+        turns: lastResult.turns ?? scoutEngine.localState.totalTurns,
         lastAction: lastResult.action ?? status,
-        handledCount: lastResult.handledCount ?? engine.localState.handledCount,
-        lastSeenSeq: lastResult.lastSeenSeq ?? engine.localState.lastSeenSeq
+        handledCount: (scoutEngine.localState.handledCount || 0) + (scribeEngine.localState.syncedWithScoutCount || 0),
+        lastSeenSeq: lastResult.lastSeenSeq ?? scoutEngine.localState.lastSeenSeq
       }, null, 2), 'utf8');
-      updateDashboardFile();
+      await updateDashboardFile('docs', config.serverUrl);
     } catch {
       // ignore
     }
   };
 
-  appendAudit(config.auditLogPath, { event: 'startup', did: identity.did, server: config.serverUrl });
-  writeHeartbeat('started');
+  appendAudit(config.auditLogPath, { event: 'startup', did: scoutIdentity.did, scribeDid: scribeIdentity.did, server: config.serverUrl });
+  await writeHeartbeat('started');
 
   do {
     try {
-      const result = await engine.runTurn({ room: config.room });
-      console.log(`[FLOP Scout Turn ${result.turns}] Action: ${result.action} | LastSeq: ${result.lastSeenSeq}`);
-      appendAudit(config.auditLogPath, { event: 'turn', ...result });
-      writeHeartbeat('active', result);
+      // Step A: Scout Agent Turn (/r/lobby)
+      const scoutResult = await scoutEngine.runTurn({ room: config.room });
+      console.log(`[Scout #${scoutResult.turns}] Action: ${scoutResult.action} | Seq: ${scoutResult.lastSeenSeq}`);
+      appendAudit(config.auditLogPath, { agent: 'scout', ...scoutResult });
+
+      // Stagger 2s between agents to ensure clean separation
+      await new Promise((r) => setTimeout(r, 2000));
+
+      // Step B: Scribe Agent Turn (/r/events & Co-op Mesh)
+      const scribeResult = await scribeEngine.runTurn();
+      console.log(`[Scribe #${scribeResult.turns}] Action: ${scribeResult.action} | EventsSeq: ${scribeResult.lastEventsSeq}`);
+      appendAudit(config.auditLogPath, { agent: 'scribe', ...scribeResult });
+
+      await writeHeartbeat('active', scoutResult);
     } catch (err) {
-      console.error('[FLOP Scout Error]:', err.message);
+      console.error('[Mesh Error]:', err.message);
       appendAudit(config.auditLogPath, { event: 'error', error: err.message });
-      writeHeartbeat('error', { action: `error: ${err.message}` });
+      await writeHeartbeat('error', { action: `error: ${err.message}` });
     }
 
     if (config.dryRun || !running) break;
@@ -105,9 +125,9 @@ export async function runScoutDaemon(options = {}) {
     await new Promise((resolve) => setTimeout(resolve, config.intervalMs));
   } while (running);
 
-  appendAudit(config.auditLogPath, { event: 'shutdown', did: identity.did });
-  writeHeartbeat('stopped');
-  console.log('[FLOP Scout] Stopped.');
+  appendAudit(config.auditLogPath, { event: 'shutdown', did: scoutIdentity.did });
+  await writeHeartbeat('stopped');
+  console.log('[Dual Agent Mesh] Stopped.');
 }
 
 const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);

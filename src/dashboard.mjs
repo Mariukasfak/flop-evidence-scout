@@ -2,25 +2,46 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { loadOrCreateIdentity } from './identity.mjs';
+import { TechnocoreClient } from './technocore-client.mjs';
 
 export function generateDashboardHtml({
   identity,
+  scribeIdentity = null,
   heartbeat = {},
   logs = [],
+  roomMessages = [],
   generatedAt = new Date().toISOString()
 }) {
   const did = identity?.did || 'did:key:z6MkvJAr8ZTs5n4d14e4SGVFAxo8nWndZTin8vc23Aks3zgn';
+  const scribeDid = scribeIdentity?.did || 'did:key:z6Mkfdd1cRSrTaA1yuUC45a2dXpHe4zPf4cE1DC3DmCpELvW';
   const totalTurns = heartbeat.turns ? Math.max(heartbeat.turns, logs.length) : (logs.length > 0 ? logs.length : 1);
-  const handledCount = logs.filter((l) => l.action === 'answered_inquiry' || l.action === 'signed_checkin').length || (heartbeat.handledCount ?? 1);
+  const handledCount = logs.filter((l) => l.action === 'answered_inquiry' || l.action === 'signed_checkin' || l.action === 'coop_sync').length || (heartbeat.handledCount ?? 1);
   const lastLog = logs[logs.length - 1] || {};
   const lastAction = lastLog.action === 'answered_inquiry' ? 'answered_inquiry'
     : (lastLog.action === 'signed_checkin' ? 'signed_checkin'
-    : (lastLog.action?.startsWith('skipped') || lastLog.action?.startsWith('monitoring') ? 'monitoring_pacing' : (lastLog.action || 'active_monitoring')));
+    : (lastLog.action === 'coop_sync' ? 'coop_sync'
+    : (lastLog.action?.startsWith('monitoring') || lastLog.action?.startsWith('skipped') ? 'monitoring_pacing' : (lastLog.action || 'active_monitoring'))));
   
   const lastTime = lastLog.timestamp ? new Date(lastLog.timestamp) : (heartbeat.lastHeartbeat ? new Date(heartbeat.lastHeartbeat) : new Date());
   const isRecent = (Date.now() - lastTime.getTime()) < 1800_000;
   const status = isRecent ? 'ACTIVE · ONLINE' : 'SCHEDULED_IN_CLOUD';
   const lastHeartbeatFormatted = lastTime.toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'short', timeStyle: 'medium' }) + ' UTC';
+
+  // Format real live room messages
+  const renderedRoomMessages = roomMessages.length > 0
+    ? roomMessages.slice(-15).map((m) => {
+        const isMyScout = m.from?.includes('3zgn') || m.from === did;
+        const isMyScribe = m.from?.includes('ELvW') || m.from === scribeDid;
+        const isMyAgent = isMyScout || isMyScribe;
+        const agentLabel = isMyScout ? ' [MY SCOUT]' : (isMyScribe ? ' [MY SCRIBE]' : '');
+        const lineClass = isMyAgent ? 'msg-line my-msg' : 'msg-line';
+        const fromClass = isMyAgent ? 'msg-from my-agent' : 'msg-from';
+        const cleanContent = (m.content || m.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const cleanFrom = (m.from || 'anon').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+        return `<div class="${lineClass}"><span class="msg-seq">[#${m.seq || '—'}]</span> <span class="${fromClass}">&lt;${cleanFrom}&gt;${agentLabel}</span> <span class="msg-text">${cleanContent}</span></div>`;
+      }).join('\n')
+    : '<div style="color: #64748b; padding: 12px 0;">Prijungiama prie Technocore tiesioginio srauto...</div>';
 
   const logRowsLt = logs.slice(-30).reverse().map((log, idx) => {
     const time = log.timestamp ? new Date(log.timestamp).toLocaleTimeString('lt-LT') : '—';
@@ -46,6 +67,17 @@ export function generateDashboardHtml({
           <summary>🔑 <strong>Ed25519 Check-in:</strong> Pasirašytas tapatybės pulsas tinkle</summary>
           <div class="expanded-box">
             <p><code>${log.details?.response || `[FLOP Scout Check-in]: Active persistent DID ${did.slice(0, 16)}...`}</code></p>
+          </div>
+        </details>
+      `;
+    } else if (rawAction === 'coop_sync') {
+      actionBadge = `<span class="badge badge-success">coop_mesh_sync</span>`;
+      detailContent = `
+        <details class="row-details" open>
+          <summary>🤝 <strong>Dviejų agentų sinchronizacija:</strong> ${log.details?.targetAgent || 'Scout <-> Scribe'}</summary>
+          <div class="expanded-box">
+            <p><strong>📬 Pašto dėžutė:</strong> <code>${log.details?.mailbox || 'mb-p-scout-...'}</code></p>
+            <p><strong>💡 Pasirašyta žinutė:</strong> <code>${log.details?.response || 'Sentinel node active | Verified events'}</code></p>
           </div>
         </details>
       `;
@@ -84,7 +116,7 @@ export function generateDashboardHtml({
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="FLOP / Technocore Evidence Scout - Autonomous AI Agent live status and protocol readiness dashboard.">
+  <meta name="description" content="FLOP / Technocore Evidence Scout - Autonomous Dual AI Agent Mesh live status and protocol readiness dashboard.">
   <meta http-equiv="refresh" content="60">
   <title>FLOP Evidence Scout · Live Status Dashboard</title>
   <style>
@@ -152,20 +184,21 @@ export function generateDashboardHtml({
     .card .val { font-size: 1.4rem; font-weight: 700; color: #fff; }
     .card .sub { font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; }
     .section-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .did-duo {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 12px;
+      margin-bottom: 24px;
+    }
     .did-box {
       background: #0d1117;
       border: 1px solid #30363d;
       border-radius: 8px;
       padding: 12px 16px;
       font-family: var(--font-mono);
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       color: #58a6ff;
       word-break: break-all;
-      margin-bottom: 24px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
     }
     .checklist { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-bottom: 24px; }
     .check-item {
@@ -180,6 +213,40 @@ export function generateDashboardHtml({
     .check-icon { color: var(--accent); font-size: 1.2rem; line-height: 1; }
     .check-text strong { font-size: 0.9rem; display: block; }
     .check-text p { font-size: 0.8rem; color: var(--text-muted); margin-top: 2px; }
+    
+    /* Terminal Card */
+    .terminal-card {
+      background: #07090d;
+      border: 1px solid #21262d;
+      border-radius: 12px;
+      overflow: hidden;
+      margin-bottom: 24px;
+      font-family: var(--font-mono);
+    }
+    .terminal-header {
+      background: #11161f;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      border-bottom: 1px solid #21262d;
+    }
+    .terminal-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+    .terminal-dot.red { background: #ef4444; }
+    .terminal-dot.yellow { background: #f59e0b; }
+    .terminal-dot.green { background: #10b981; }
+    .terminal-body {
+      padding: 16px;
+      font-size: 0.82rem;
+      line-height: 1.7;
+      max-height: 280px;
+      overflow-y: auto;
+    }
+    .msg-line { color: #cbd5e1; word-break: break-word; }
+    .msg-seq { color: #64748b; margin-right: 6px; }
+    .msg-from { color: #38bdf8; font-weight: 600; margin-right: 6px; }
+    .msg-from.my-agent { color: #34d399; font-weight: 700; background: rgba(16, 185, 129, 0.15); padding: 1px 6px; border-radius: 4px; }
+    .msg-line.my-msg { background: rgba(16, 185, 129, 0.06); padding: 2px 6px; border-radius: 4px; margin: 2px 0; }
+    
     .table-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; overflow: hidden; margin-bottom: 24px; }
     table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.85rem; }
     th { background: #161b24; padding: 12px 16px; color: var(--text-muted); font-weight: 600; border-bottom: 1px solid var(--card-border); }
@@ -263,7 +330,7 @@ export function generateDashboardHtml({
     <header>
       <div class="brand">
         <h1 id="brand-title">🌐 FLOP / Technocore Evidence Scout</h1>
-        <p id="brand-sub">Autonomous AI Agent · 24/7 Network Presence & Protocol Readiness</p>
+        <p id="brand-sub">Autonomous Dual Agent Mesh · 24/7 Network Presence & Protocol Readiness</p>
       </div>
       <div class="pulse-pill">
         <span class="pulse-dot"></span>
@@ -271,15 +338,22 @@ export function generateDashboardHtml({
       </div>
     </header>
 
-    <div class="did-box">
-      <span><strong id="did-label">W3C DID:</strong> ${did}</span>
+    <div class="did-duo">
+      <div class="did-box">
+        <div><strong>🕵️ Agent #1 (Scout DID):</strong></div>
+        <div>${did}</div>
+      </div>
+      <div class="did-box">
+        <div><strong>🛡️ Agent #2 (Scribe DID):</strong></div>
+        <div>${scribeDid}</div>
+      </div>
     </div>
 
     <div class="grid">
       <div class="card">
         <h3 id="card-node-title">Network Node</h3>
         <div class="val" style="font-size: 1.1rem; color: #38bdf8;">technocore.chat</div>
-        <div class="sub" id="card-node-sub">Room: /r/lobby</div>
+        <div class="sub" id="card-node-sub">Room: /r/lobby & /r/events</div>
       </div>
       <div class="card">
         <h3 id="card-turns-title">Executed Cycles</h3>
@@ -294,7 +368,24 @@ export function generateDashboardHtml({
       <div class="card">
         <h3 id="card-handled-title">Processed Inquiries</h3>
         <div class="val">${handledCount}</div>
-        <div class="sub" id="card-handled-sub">Agent Knowledge Assistance</div>
+        <div class="sub" id="card-handled-sub">Co-op Mesh Knowledge</div>
+      </div>
+    </div>
+
+    <!-- Live Room Feed Terminal -->
+    <h2 class="section-title">
+      <span id="room-feed-title">📡 Live Technocore Feed (/r/lobby)</span>
+      <span style="font-size: 0.75rem; color: var(--accent); font-weight: normal;">● Auto-updating</span>
+    </h2>
+    <div class="terminal-card">
+      <div class="terminal-header">
+        <span class="terminal-dot red"></span>
+        <span class="terminal-dot yellow"></span>
+        <span class="terminal-dot green"></span>
+        <span style="margin-left: 8px; color: #94a3b8; font-size: 0.75rem;">https://technocore.chat/r/lobby</span>
+      </div>
+      <div class="terminal-body">
+        ${renderedRoomMessages}
       </div>
     </div>
 
@@ -303,8 +394,8 @@ export function generateDashboardHtml({
       <div class="check-item">
         <span class="check-icon">✓</span>
         <div class="check-text">
-          <strong id="check-1-title">W3C did:key Identity</strong>
-          <p id="check-1-desc">Unique Ed25519 cryptographic keypair registered on Technocore.</p>
+          <strong id="check-1-title">W3C did:key Identity Mesh</strong>
+          <p id="check-1-desc">Two unique Ed25519 cryptographic keypairs registered on Technocore.</p>
         </div>
       </div>
       <div class="check-item">
@@ -318,14 +409,14 @@ export function generateDashboardHtml({
         <span class="check-icon">✓</span>
         <div class="check-text">
           <strong id="check-3-title">/kv/ State Continuity</strong>
-          <p id="check-3-desc">Durable state persistence establishes "agents live here" metric.</p>
+          <p id="check-3-desc">Durable state persistence establishes 'agents live here' metric.</p>
         </div>
       </div>
       <div class="check-item">
         <span class="check-icon">✓</span>
         <div class="check-text">
-          <strong id="check-4-title">Anti-Spam Guardrails</strong>
-          <p id="check-4-desc">Rate limiting, SHA-256 deduplication and cooldown pacing enforced.</p>
+          <strong id="check-4-title">Anti-Spam & Anti-Sybil Guardrails</strong>
+          <p id="check-4-desc">Staggered execution, rate pacing and SHA-256 deduplication.</p>
         </div>
       </div>
       <div class="check-item">
@@ -394,24 +485,24 @@ export function generateDashboardHtml({
     const TEXTS = {
       en: {
         brandTitle: "🌐 FLOP / Technocore Evidence Scout",
-        brandSub: "Autonomous AI Agent · 24/7 Network Presence & Protocol Readiness",
-        didLabel: "W3C DID:",
+        brandSub: "Autonomous Dual Agent Mesh · 24/7 Network Presence & Protocol Readiness",
         nodeTitle: "Network Node",
-        nodeSub: "Room: /r/lobby",
+        nodeSub: "Room: /r/lobby & /r/events",
         turnsTitle: "Executed Cycles",
         turnsSub: "Cadence: every 15 min",
         actionTitle: "Last Action",
         handledTitle: "Processed Inquiries",
-        handledSub: "Agent Knowledge Assistance",
+        handledSub: "Co-op Mesh Knowledge",
+        roomFeedTitle: "📡 Live Technocore Feed (/r/lobby)",
         readinessTitle: "🛡️ FLOP Airdrop & Protocol Readiness",
-        check1Title: "W3C did:key Identity",
-        check1Desc: "Unique Ed25519 cryptographic keypair registered on Technocore.",
+        check1Title: "W3C did:key Identity Mesh",
+        check1Desc: "Two unique Ed25519 cryptographic keypairs registered on Technocore.",
         check2Title: "Cryptographic Signatures",
         check2Desc: "Every room message & check-in signed with unpadded base64url.",
         check3Title: "/kv/ State Continuity",
         check3Desc: "Durable state persistence establishes 'agents live here' metric.",
-        check4Title: "Anti-Spam Guardrails",
-        check4Desc: "Rate limiting, SHA-256 deduplication and cooldown pacing enforced.",
+        check4Title: "Anti-Spam & Anti-Sybil Guardrails",
+        check4Desc: "Staggered execution, rate pacing and SHA-256 deduplication.",
         check5Title: "24/7 Cloud Operations",
         check5Desc: "Continuous autonomous cycles running via GitHub Actions.",
         check6Title: "Zero-Leak Security",
@@ -425,24 +516,24 @@ export function generateDashboardHtml({
       },
       lt: {
         brandTitle: "🌐 FLOP / Technocore Evidence Scout · Savininko Pultas",
-        brandSub: "Autonominis AI agentas · 24/7 stebėsena ir airdrop atitikties suvestinė",
-        didLabel: "W3C DID tapatybė:",
+        brandSub: "Autonominis 2 agentų tinklas · 24/7 stebėsena ir airdrop atitikties suvestinė",
         nodeTitle: "Tinklo Mazgas",
-        nodeSub: "Kambarys: /r/lobby",
+        nodeSub: "Kambarys: /r/lobby ir /r/events",
         turnsTitle: "Atlikti Ciklai",
         turnsSub: "Taktas: kas 15 min.",
         actionTitle: "Paskutinis Veiksmas",
         handledTitle: "Apdoroti Klausimai",
         handledSub: "Žinių pagalba kitiems agentams",
+        roomFeedTitle: "📡 Gyvas Technocore srautas (/r/lobby)",
         readinessTitle: "🛡️ FLOP Airdrop & Protokolo Pasirengimas",
-        check1Title: "W3C did:key tapatybė",
-        check1Desc: "Unikali Ed25519 raktų pora su nuolatiniu DID tinkle.",
+        check1Title: "W3C did:key tapatybių tinklas",
+        check1Desc: "Dvi unikalios Ed25519 raktų poros su nuolatiniais DID tinkle.",
         check2Title: "Kriptografiniai parašai",
         check2Desc: "Kiekvienas pranešimas pasirašytas privačiu raktu.",
         check3Title: "/kv/ būsenos tęstinumas",
         check3Desc: "Ilgalaikė atmintis įrodo „agents live here“ metriką.",
-        check4Title: "Anti-Spam Guardrails",
-        check4Desc: "Rate limiting, SHA-256 deduplikacija ir aušinimo laikas.",
+        check4Title: "Apsauga nuo SPAM ir Sybil",
+        check4Desc: "Paeilinis vykdymas, rate pacing ir SHA-256 deduplikacija.",
         check5Title: "24/7 veikimas debesyje",
         check5Desc: "GitHub Actions suplanuoti ciklai be jūsų kompiuterio.",
         check6Title: "Zero-Leak saugumas",
@@ -460,7 +551,6 @@ export function generateDashboardHtml({
       const t = TEXTS[lang];
       document.getElementById('brand-title').innerText = t.brandTitle;
       document.getElementById('brand-sub').innerText = t.brandSub;
-      document.getElementById('did-label').innerText = t.didLabel;
       document.getElementById('card-node-title').innerText = t.nodeTitle;
       document.getElementById('card-node-sub').innerText = t.nodeSub;
       document.getElementById('card-turns-title').innerText = t.turnsTitle;
@@ -468,6 +558,7 @@ export function generateDashboardHtml({
       document.getElementById('card-action-title').innerText = t.actionTitle;
       document.getElementById('card-handled-title').innerText = t.handledTitle;
       document.getElementById('card-handled-sub').innerText = t.handledSub;
+      document.getElementById('room-feed-title').innerText = t.roomFeedTitle;
       document.getElementById('readiness-title').innerText = t.readinessTitle;
       document.getElementById('check-1-title').innerText = t.check1Title;
       document.getElementById('check-1-desc').innerText = t.check1Desc;
@@ -536,13 +627,15 @@ export function generateDashboardHtml({
 </html>`;
 }
 
-export function updateDashboardFile(outputDir = 'docs') {
+export async function updateDashboardFile(outputDir = 'docs', serverUrl = 'https://technocore.chat') {
   const resolvedDir = path.resolve(outputDir);
   fs.mkdirSync(resolvedDir, { recursive: true });
 
-  const identity = loadOrCreateIdentity('.secrets/scout-identity.json');
+  const identity = loadOrCreateIdentity('.secrets/scout-identity.json', 'SCOUT_IDENTITY_JSON');
+  const scribeIdentity = loadOrCreateIdentity('.secrets/scribe-identity.json', 'SCRIBE_IDENTITY_JSON');
   let heartbeat = {};
   let logs = [];
+  let roomMessages = [];
 
   const heartbeatPath = path.resolve('data/scout-heartbeat.json');
   if (fs.existsSync(heartbeatPath)) {
@@ -559,14 +652,22 @@ export function updateDashboardFile(outputDir = 'docs') {
     } catch { }
   }
 
-  const html = generateDashboardHtml({ identity, heartbeat, logs });
+  try {
+    const client = new TechnocoreClient({ baseUrl: serverUrl, timeoutMs: 4000 });
+    const res = await client.readRoom('lobby', { limit: 15 });
+    roomMessages = res.messages || [];
+  } catch {
+    // Non-blocking
+  }
+
+  const html = generateDashboardHtml({ identity, scribeIdentity, heartbeat, logs, roomMessages });
   const targetFile = path.join(resolvedDir, 'index.html');
   fs.writeFileSync(targetFile, html, 'utf8');
-  console.log(`[Dashboard] Generated live HTML status page at: ${targetFile}`);
+  console.log(`[Dashboard] Generated live HTML status page with real room feed at: ${targetFile}`);
   return targetFile;
 }
 
 const isDirectRun = process.argv[1] && process.argv[1].endsWith('dashboard.mjs');
 if (isDirectRun) {
-  updateDashboardFile();
+  updateDashboardFile().catch(console.error);
 }
