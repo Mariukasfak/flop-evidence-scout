@@ -24,7 +24,11 @@ const CHANGE_PATH = path.resolve('data/source-change.json');
  * were added after Hayes said on 2026-08-25 that there would be specific tasks
  * requiring a DID key — a task room appearing is the event we cannot be late for.
  */
-const KEYWORDS = /faucet|testnet|\btask\b|\btasks\b|quest|bounty|mission|\bdrip\b|airdrop|claim/i;
+const KEYWORDS = /faucet|testnet|airdrop|\btasks?\b|\bquests?\b|\bbount(?:y|ies)\b|\bdrip\b|\bclaims?\b/i;
+// Word boundaries are not decoration here: the first version matched
+// `room-permissions` on "mission", and an unbounded `quest` would fire on every
+// room with "request" or "question" in the name. Room names are [a-z0-9_-], so
+// a hyphen counts as a boundary and `flop-testnet-faucet` still matches.
 
 const SOURCES = [
   { id: 'agent-json', url: 'https://technocore.chat/.well-known/agent.json', kind: 'json' },
