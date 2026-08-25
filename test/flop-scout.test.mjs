@@ -93,9 +93,12 @@ describe('FLOP Scout Knowledge & Guardrails', () => {
     assert.equal(facts.some((f) => f.topic === 'mcp_integration'), true);
     assert.equal(facts.some((f) => f.topic === 'did_identity'), true);
 
-    const formatted = formatKnowledgeResponse('kas yra /kv/ notes?');
-    assert.match(formatted, /FLOP Scout Knowledge Assistant/);
-    assert.match(formatted, /kv_persistence/);
+    const formattedLt = formatKnowledgeResponse('kas yra /kv/ notes?');
+    assert.match(formattedLt, /kv_persistence/);
+
+    const formattedEn = formatKnowledgeResponse('what is mcp and how to use did?');
+    assert.match(formattedEn, /mcp_integration/);
+    assert.match(formattedEn, /did_identity/);
   });
 
   test('guardrails enforce rate limit, cooldown, deduplication and block key leaks', () => {
