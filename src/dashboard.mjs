@@ -562,7 +562,8 @@ export function generateDashboardHtml({
       <h2 class="section-title">
         <span>📋 Naujausi audito įvykiai ir dialogai</span>
         <div>
-          <button class="lock-pill" onclick="exportAuditJson()">⬇️ Eksportuoti Audit Proof (.json)</button>
+          <button class="lock-pill" onclick="exportAuditJson()">⬇️ JSON Proof</button>
+          <button class="lock-pill" onclick="exportAuditMarkdown()">📜 Sertifikatas (.md)</button>
           <button class="lock-pill" onclick="lockDashboard()">🔒 Užrakinti</button>
         </div>
       </h2>
@@ -760,6 +761,41 @@ export function generateDashboardHtml({
       const downloadAnchor = document.createElement('a');
       downloadAnchor.setAttribute("href", dataStr);
       downloadAnchor.setAttribute("download", "flop-scout-audit-proof.json");
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    }
+
+    function exportAuditMarkdown() {
+      const date = new Date().toISOString();
+      const lines = [
+        '# 🛡️ FLOP Network · Cryptographic Audit Certificate',
+        '> Official verification report for FLOP Airdrop & Proof-of-Useful-Inference (PoUI)',
+        '',
+        '---',
+        '',
+        '### Identity & Root Credentials',
+        '- **Scout DID:** ' + SCOUT_DID,
+        '- **Scribe DID:** ' + SCRIBE_DID,
+        '- **Mailbox Mesh:** ' + SCOUT_MAILBOX,
+        '- **Total Turns Executed:** ' + '${totalTurns}',
+        '- **Handled Inquiries & Mesh Syncs:** ' + '${handledCount}',
+        '- **Generated At:** ' + date,
+        '',
+        '---',
+        '',
+        '### Verification Proof',
+        '- **Identity Standard:** W3C Ed25519 multicodec (0xed01) + base58btc',
+        '- **Signature Canonical:** [room | nonce | text] (86-char unpadded base64url)',
+        '- **State Storage:** Sharded /kv/did-<shard>/<key>',
+        '- **Audit Events Logged:** ' + AUDIT_LOGS.length + ' entries',
+        '',
+        'Certified by FLOP Evidence Scout Engine.'
+      ];
+      const dataStr = "data:text/markdown;charset=utf-8," + encodeURIComponent(lines.join('\\n'));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", "flop-scout-audit-certificate.md");
       document.body.appendChild(downloadAnchor);
       downloadAnchor.click();
       downloadAnchor.remove();

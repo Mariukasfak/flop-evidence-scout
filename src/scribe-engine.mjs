@@ -1,5 +1,6 @@
 import { getDidShardedPath, singleLineSweep } from './identity.mjs';
 import { Guardrails } from './guardrails.mjs';
+import { formatKnowledgeResponse, findRelevantKnowledge } from './knowledge.mjs';
 
 export class ScribeEngine {
   constructor({
@@ -28,6 +29,7 @@ export class ScribeEngine {
       lastMailboxSeq: 0,
       lastCheckin: null,
       syncedWithScoutCount: 0,
+      faucetDiscovered: false,
       profilePublished: false
     };
   }
@@ -49,7 +51,7 @@ export class ScribeEngine {
       this.localState.lastActive = new Date().toISOString();
       await this.client.setKv('scribe', this.stateKey, this.localState);
     } catch (err) {
-      console.warn('Failed to persist state to Technocore /kv/:', err.message);
+      console.warn('Failed to persist scribe state to /kv/:', err.message);
     }
   }
 
@@ -57,11 +59,13 @@ export class ScribeEngine {
     await this.loadRemoteState();
     this.localState.totalTurns += 1;
 
+    const { shard, key } = getDidShardedPath(this.identity.did);
+    const myMailbox = `mb-p-scribe-${key}`;
+
     // 1. Ensure DID profile is registered
     if (!this.localState.profilePublished) {
       try {
-        const { shard, key } = getDidShardedPath(this.identity.did);
-        const profileText = `did: ${this.identity.did} | pubkey: ${this.identity.rawPublicKeyHex || ''} | mailbox: mb-p-scribe-${key} | type: sentinel_scribe | agent: FLOP Sentinel Scribe`;
+        const profileText = `did: ${this.identity.did} | pubkey: ${this.identity.rawPublicKeyHex || ''} | mailbox: ${myMailbox} | type: sentinel_scribe | agent: FLOP Sentinel Scribe`;
         await this.client.setKv(shard, key, profileText);
         this.localState.profilePublished = true;
       } catch {
@@ -74,14 +78,27 @@ export class ScribeEngine {
     let outgoingMessage = null;
     let targetRoom = lobbyRoom;
 
-    // 2. Discover new rooms from /r/events
+    // 2. Read Scribe's own private mailbox for Scout ACKs & tasks
+    try {
+      const mbData = await this.client.readRoom(myMailbox, { limit: 5 });
+      const mbMsgs = Array.isArray(mbData?.messages) ? mbData.messages : [];
+      const newMb = mbMsgs.filter(m => Number(m.seq || 0) > (this.localState.lastMailboxSeq || 0));
+      if (newMb.length > 0) {
+        this.localState.lastMailboxSeq = Math.max(...newMb.map(m => Number(m.seq || 0)));
+        this.localState.syncedWithScoutCount += newMb.length;
+      }
+    } catch {
+      // Non-blocking mailbox check
+    }
+
+    // 3. Discover new rooms & radar for Testnet Faucet in /r/events
     let eventsData = null;
     try {
       eventsData = await this.client.readRoom(eventsRoom, {
         since: this.localState.lastEventsSeq > 0 ? this.localState.lastEventsSeq : null,
         limit: 20
       });
-    } catch (err) {
+    } catch {
       // Non-blocking events read
     }
 
@@ -95,11 +112,16 @@ export class ScribeEngine {
       for (const ev of eventMessages) {
         const text = ev.content || ev.text || '';
         const match = text.match(/\/r\/([a-z0-9_-]+)/i);
-        if (match && match[1]) discoveredRooms.push(match[1]);
+        if (match && match[1]) {
+          discoveredRooms.push(match[1]);
+          if (/faucet|drip|testnet/i.test(match[1])) {
+            this.localState.faucetDiscovered = true;
+          }
+        }
       }
     }
 
-    // 3. Check for co-op peer sync with Scout Agent
+    // 4. Check for co-op peer sync with Scout Agent
     const scoutKey = this.scoutIdentity?.did ? getDidShardedPath(this.scoutIdentity.did).key : null;
     const scoutMailbox = scoutKey ? `mb-p-scout-${scoutKey}` : null;
 
@@ -146,11 +168,12 @@ export class ScribeEngine {
     if (!outgoingMessage) {
       detailPayload = {
         reason: `Stebimas /r/${eventsRoom} ir tinklo tapatybių registras (įvykių seka: #${this.localState.lastEventsSeq})`,
-        discoveredEvents: eventMessages.length
+        discoveredEvents: eventMessages.length,
+        discoveredRoomsCount: discoveredRooms.length
       };
     }
 
-    // 4. Record presence convention
+    // 5. Record presence convention
     try {
       await this.client.recordPresence('events', this.identity.did.slice(-8), this.localState.lastEventsSeq);
     } catch {
@@ -163,6 +186,7 @@ export class ScribeEngine {
       agent: 'scribe',
       action: actionTaken,
       did: this.identity.did,
+      room: targetRoom,
       turns: this.localState.totalTurns,
       lastEventsSeq: this.localState.lastEventsSeq,
       syncedWithScoutCount: this.localState.syncedWithScoutCount,
