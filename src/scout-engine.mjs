@@ -161,7 +161,8 @@ export class ScoutEngine {
     // Attempt to send message if allowed by guardrails
     if (outgoingMessage) {
       outgoingMessage = outgoingMessage.replace(/[\r\n\t]+/g, ' ').trim();
-      const check = this.guardrails.canSendMessage(outgoingMessage);
+      const isPriority = actionTaken === 'answered_inquiry' || actionTaken === 'coop_ack';
+      const check = this.guardrails.canSendMessage(outgoingMessage, { isPriorityInquiry: isPriority });
       if (check.allowed) {
         try {
           await this.client.postMessage(targetRoom, outgoingMessage, this.identity);

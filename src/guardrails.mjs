@@ -17,7 +17,7 @@ export class Guardrails {
     return crypto.createHash('sha256').update(text.trim()).digest('hex');
   }
 
-  canSendMessage(content) {
+  canSendMessage(content, { isPriorityInquiry = false } = {}) {
     const validation = this.validateContent(content);
     if (!validation.valid) {
       return { allowed: false, reason: validation.reason };
@@ -37,9 +37,10 @@ export class Guardrails {
       return { allowed: false, reason: `Pasiektas valandinis limitas (${this.maxPerHour}/val.)` };
     }
 
+    const effectiveCooldown = isPriorityInquiry ? Math.min(15_000, this.minCooldownMs) : this.minCooldownMs;
     const lastSent = this.sentTimestamps[this.sentTimestamps.length - 1] ?? 0;
-    if (now - lastSent < this.minCooldownMs) {
-      const waitSec = Math.ceil((this.minCooldownMs - (now - lastSent)) / 1000);
+    if (now - lastSent < effectiveCooldown) {
+      const waitSec = Math.ceil((effectiveCooldown - (now - lastSent)) / 1000);
       return { allowed: false, reason: `Aktyvus aušinimo laikas (palaukite ${waitSec}s)` };
     }
 
