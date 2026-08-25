@@ -59,11 +59,26 @@ async function estimateDidPopulation(shards = ['00', '3f', '85', 'c1', 'e0']) {
     counts.push(body.split('\n').filter((l) => l.startsWith(`/kv/did-${shard}/`)).length);
   }
   const mean = counts.reduce((a, b) => a + b, 0) / counts.length;
+  const shardedEstimate = Math.round(mean * 256);
+
+  // The legacy flat namespace is a real, separate population and the first
+  // version of this instrument missed it entirely — which understated the total
+  // by more than half. It is also enumerable exactly, no sampling needed.
+  const legacyBody = await get('/kv/did');
+  const legacyCount = legacyBody.split('\n').filter((l) => l.startsWith('/kv/did/')).length;
+
   return {
     shardsSampled: shards,
     countsPerShard: counts,
-    estimatedTotal: Math.round(mean * 256),
-    note: 'Scaled from a uniform 1/256 sharding of SHA-256(did:key). Spread across shards is the error bar.'
+    shardedEstimate,
+    legacyCount,
+    legacyAtCap: legacyCount >= 40960,
+    estimatedTotal: shardedEstimate + legacyCount,
+    note: 'Sharded figure is scaled from a uniform 1/256 sharding of SHA-256(did:key); '
+      + 'spread across shards is the error bar. Legacy /kv/did is counted exactly. '
+      + 'The total is an upper bound: an agent that wrote both paths is counted twice. '
+      + 'Legacy at 40960 means it is at notes_per_namespace and can accept no new agents, '
+      + 'so growth now shows up only in the sharded figure.'
   };
 }
 

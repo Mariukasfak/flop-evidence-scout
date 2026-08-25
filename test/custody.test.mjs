@@ -173,3 +173,59 @@ describe('Testnet operation policy', () => {
     assert.equal(second.summary().totalEver, 2);
   });
 });
+
+describe('technocore-contribution-v1 proofs', () => {
+  test('canonical payload matches the reference implementation byte for byte', async () => {
+    const { contributionPayload } = await import('../src/contribution.mjs');
+    // json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",",":"))
+    assert.equal(
+      contributionPayload('https://example.com/a', 'A'.repeat(40)),
+      '{"artifact_url":"https://example.com/a","commit":"' + 'a'.repeat(40) + '","schema":"technocore-contribution-v1"}'
+    );
+  });
+
+  test('signs and verifies a proof, and rejects a tampered one', async () => {
+    const { createContributionProof, verifyContributionProof } = await import('../src/contribution.mjs');
+    const identity = generateIdentity();
+    const url = 'https://github.com/Mariukasfak/flop-evidence-scout';
+    const commit = 'b'.repeat(40);
+
+    const proof = createContributionProof(identity, url, commit);
+    assert.equal(verifyContributionProof(proof), true);
+    assert.equal(proof.did, identity.did);
+
+    // Swapping the URL after signing must not still verify — that is the whole
+    // point of binding the DID to an exact revision.
+    assert.throws(
+      () => verifyContributionProof({ ...proof, artifact_url: 'https://evil.example/x' }),
+      /does not verify/
+    );
+    assert.throws(() => verifyContributionProof({ ...proof, commit: 'c'.repeat(40) }), /does not verify/);
+  });
+
+  test('refuses URLs and commits that cannot be pinned down', async () => {
+    const { createContributionProof } = await import('../src/contribution.mjs');
+    const identity = generateIdentity();
+    const good = 'b'.repeat(40);
+
+    assert.throws(() => createContributionProof(identity, 'http://example.com/a', good), /must be https/);
+    assert.throws(() => createContributionProof(identity, 'https://example.com/a#x', good), /fragment/);
+    assert.throws(() => createContributionProof(identity, 'https://u:p@example.com/a', good), /credentials/);
+    assert.throws(() => createContributionProof(identity, ' https://example.com/a', good), /whitespace/);
+    assert.throws(() => createContributionProof(identity, 'https://example.com/a', 'main'), /hexadecimal revision/);
+  });
+
+  test('an announcement must carry a real summary, not a fixed sentence', async () => {
+    const { createContributionProof, contributionAnnouncement } = await import('../src/contribution.mjs');
+    const proof = createContributionProof(generateIdentity(), 'https://example.com/a', 'd'.repeat(40));
+
+    assert.throws(() => contributionAnnouncement(proof, { summary: 'contribution' }), /real one-line summary/);
+
+    const line = contributionAnnouncement(proof, {
+      summary: 'Measured Technocore throughput and DID population with a reproducible instrument'
+    });
+    assert.match(line, /technocore-contribution-v1/);
+    assert.match(line, /https:\/\/example\.com\/a/);
+    assert.equal(line.includes('\n'), false, 'must survive the single-line sweep unchanged');
+  });
+});
