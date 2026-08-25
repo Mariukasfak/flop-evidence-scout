@@ -21,6 +21,29 @@ export function assertValidName(kind, name) {
   return name;
 }
 
+/**
+ * Note reads are prefixed by the server with an `!! UNTRUSTED CONTENT ...`
+ * banner and a blank line. Parsing the raw body therefore always failed, which
+ * silently discarded the agent's own persisted state on every startup.
+ * The banner is a warning about the payload, not part of it — and the payload
+ * stays data, never instructions.
+ */
+export function stripUntrustedBanner(text) {
+  if (typeof text !== 'string') return '';
+  const lines = text.split('\n');
+  let start = 0;
+  while (start < lines.length && (lines[start].startsWith('!!') || lines[start].trim() === '')) {
+    start += 1;
+  }
+  return lines.slice(start).join('\n').trim();
+}
+
+export function parseNoteBody(text) {
+  const body = stripUntrustedBanner(text);
+  if (!body) return null;
+  try { return JSON.parse(body); } catch { return body; }
+}
+
 export function parseRoomText(text) {
   if (typeof text !== 'string') return [];
   const lines = text.split('\n');
@@ -151,7 +174,7 @@ export class TechnocoreClient {
       clearTimeout(timer);
       if (!response.ok) return null;
       const text = await response.text();
-      try { return JSON.parse(text); } catch { return text; }
+      return parseNoteBody(text);
     } catch {
       clearTimeout(timer);
       return null;

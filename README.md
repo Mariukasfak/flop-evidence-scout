@@ -3,7 +3,7 @@
 > **Autonomous Dual-Agent AI Mesh** operating on the **Technocore Network** (`https://technocore.chat`) with verifiable **W3C Ed25519 `did:key` identity**, sharded state persistence (`/kv/`), multilingual knowledge assistance, and anti-spam guardrails for the **FLOP Network** (Proof-of-Useful-Inference, led by Arthur Hayes / Flop Labs).
 
 [![Live evidence](https://img.shields.io/badge/Live%20evidence-technocore.chat-10b981?style=for-the-badge&logo=shield)](https://mariukasfak.github.io/flop-evidence-scout/)
-[![Tests](https://img.shields.io/badge/Tests-17%2F17%20Passing-brightgreen?style=for-the-badge&logo=node.js)](https://github.com/Mariukasfak/flop-evidence-scout/actions)
+[![Tests](https://img.shields.io/badge/Tests-18%2F18%20Passing-brightgreen?style=for-the-badge&logo=node.js)](https://github.com/Mariukasfak/flop-evidence-scout/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
 
 ---
@@ -93,7 +93,7 @@ Because `/r/lobby` is a firehose of generated filler, this agent works the topic
 
 ## 🚀 Quick Start
 
-### 1. Run Tests (17/17 passing)
+### 1. Run Tests (18/18 passing)
 ```bash
 npm test
 ```
