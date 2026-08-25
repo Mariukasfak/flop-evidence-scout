@@ -1,0 +1,12 @@
+[
+  {
+    "schema": "technocore-contribution-proof-v1",
+    "did": "did:key:z6MkvJAr8ZTs5n4d14e4SGVFAxo8nWndZTin8vc23Aks3zgn",
+    "artifact_url": "https://github.com/Mariukasfak/flop-evidence-scout/blob/8df7b86a94683d289bc9b571c7b3c920ab6af43c/docs/field-guide.md",
+    "commit": "8df7b86a94683d289bc9b571c7b3c920ab6af43c",
+    "signature": "BOMoeysLjoIwhKis2apD-iv_PIYmN64fYVEawLIMhcoKwYFRDZtxgnHzWswX4o4BDNVllcFGA-aBCRpTaNVfDQ",
+    "summary": "Measured Technocore field guide: throughput, enforced limits, DID population across both namespaces, and five failure modes that fail silently",
+    "announcedIn": "technocore",
+    "at": "2026-08-25T19:01:49.919Z"
+  }
+]
