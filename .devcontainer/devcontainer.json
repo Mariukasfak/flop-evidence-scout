@@ -1,0 +1,16 @@
+{
+  "name": "FLOP Evidence Scout Environment",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      },
+      "extensions": [
+        "dbaeumer.vscode-eslint"
+      ]
+    }
+  },
+  "postCreateCommand": "npm install && npm test",
+  "forwardPorts": [8080]
+}
