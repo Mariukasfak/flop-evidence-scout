@@ -22,7 +22,7 @@ export function generateDashboardHtml({
   const status = isRecent ? 'ACTIVE · ONLINE' : 'SCHEDULED_IN_CLOUD';
   const lastHeartbeatFormatted = lastTime.toLocaleString('lt-LT');
 
-  const logRows = logs.slice(-25).reverse().map((log, idx) => {
+  const logRows = logs.slice(-30).reverse().map((log, idx) => {
     const time = log.timestamp ? new Date(log.timestamp).toLocaleTimeString('lt-LT') : '—';
     const rawAction = log.action || log.event || 'turn';
     let actionBadge;
@@ -151,7 +151,7 @@ export function generateDashboardHtml({
     .card h3 { font-size: 0.8rem; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.05em; margin-bottom: 8px; }
     .card .val { font-size: 1.4rem; font-weight: 700; color: #fff; }
     .card .sub { font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; }
-    .section-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+    .section-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .did-box {
       background: #0d1117;
       border: 1px solid #30363d;
@@ -187,6 +187,7 @@ export function generateDashboardHtml({
     tr:last-child td { border-bottom: none; }
     .col-num { font-family: var(--font-mono); color: var(--text-muted); width: 60px; }
     .col-time { font-family: var(--font-mono); width: 100px; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; }
     .badge-success { background: rgba(16, 185, 129, 0.15); color: #34d399; }
     .badge-warn { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
     .badge-info { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
@@ -205,6 +206,53 @@ export function generateDashboardHtml({
     .expanded-box p:last-child { margin-bottom: 0; }
     .expanded-box code { font-family: var(--font-mono); color: #7ee787; font-size: 0.78rem; word-break: break-all; }
     .error-box { color: #f87171; font-size: 0.82rem; }
+    
+    /* Lock Box Styling */
+    .lock-box {
+      background: #111827;
+      border: 1px dashed #374151;
+      border-radius: 12px;
+      padding: 32px 20px;
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    .lock-icon { font-size: 2.2rem; margin-bottom: 12px; }
+    .lock-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 6px; }
+    .lock-desc { color: var(--text-muted); font-size: 0.85rem; max-width: 480px; margin: 0 auto 18px; }
+    .lock-form { display: flex; justify-content: center; gap: 8px; max-width: 360px; margin: 0 auto; }
+    .lock-input {
+      background: #090b0e;
+      border: 1px solid #4b5563;
+      color: #fff;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      flex: 1;
+      outline: none;
+    }
+    .lock-input:focus { border-color: var(--accent); }
+    .lock-btn {
+      background: var(--accent);
+      color: #000;
+      border: none;
+      font-weight: 700;
+      padding: 8px 18px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      transition: opacity 0.2s;
+    }
+    .lock-btn:hover { opacity: 0.9; }
+    .lock-err { color: #f87171; font-size: 0.8rem; margin-top: 10px; display: none; }
+    .lock-pill {
+      font-size: 0.75rem;
+      padding: 4px 10px;
+      border-radius: 6px;
+      background: rgba(16, 185, 129, 0.1);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      cursor: pointer;
+    }
     footer { text-align: center; color: var(--text-muted); font-size: 0.8rem; padding-top: 16px; border-top: 1px solid var(--card-border); }
     footer a { color: #58a6ff; text-decoration: none; }
     footer a:hover { text-decoration: underline; }
@@ -296,32 +344,92 @@ export function generateDashboardHtml({
       </div>
     </div>
 
-    <h2 class="section-title">📋 Naujausi audito įvykiai ir atsakymai</h2>
-    <div class="table-card">
-      <table>
-        <thead>
-          <tr>
-            <th>Ciklas</th>
-            <th>Laikas</th>
-            <th>Veiksmas</th>
-            <th>Išsami informacija</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${logRows || '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">Laukiama naujų įvykių...</td></tr>'}
-        </tbody>
-      </table>
+    <!-- Password Protected Private Section -->
+    <div id="locked-panel" class="lock-box">
+      <div class="lock-icon">🔒</div>
+      <div class="lock-title">Savininko audito žurnalas ir dialogų inspektorius</div>
+      <p class="lock-desc">Airdrop atitikties suvestinė yra vieša. Išsamūs agentų dialogai, klausimai ir techniniai žurnalai apsaugoti slaptažodžiu.</p>
+      <div class="lock-form">
+        <input type="password" id="scout-pass" class="lock-input" placeholder="Įveskite slaptažodį...">
+        <button id="unlock-btn" class="lock-btn" onclick="attemptUnlock()">Atrakinti</button>
+      </div>
+      <div id="lock-err" class="lock-err">Neteisingas slaptažodis. Bandykite dar kartą.</div>
     </div>
 
-    <h2 class="section-title">📡 Kaip veikia saugaus tempo (Rate Pacing) taisyklė</h2>
-    <div class="card" style="margin-bottom: 24px; font-size: 0.85rem; color: var(--text-muted); line-height: 1.6;">
-      <p>💡 <strong>Kodėl rodoma <code>rate_pacing</code>?</strong> „Technocore“ tinkle veikia griežta apsauga nuo SPAM ir Sybil atakų. Mūsų agento apsaugos filtras riboja siunčiamus pasirašytus pranešimus iki saugaus tempo (1–4 pranešimai per valandą). Tarp šių taktų agentas toliau skaito kambarį, seka naujausias žinutes ir saugo resursus.</p>
+    <div id="unlocked-panel" style="display: none;">
+      <h2 class="section-title">
+        <span>📋 Naujausi audito įvykiai ir dialogai</span>
+        <button class="lock-pill" onclick="lockDashboard()">🔒 Užrakinti</button>
+      </h2>
+      <div class="table-card">
+        <table>
+          <thead>
+            <tr>
+              <th>Ciklas</th>
+              <th>Laikas</th>
+              <th>Veiksmas</th>
+              <th>Išsami informacija</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${logRows || '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">Laukiama naujų įvykių...</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="section-title">📡 Kaip veikia saugaus tempo (Rate Pacing) taisyklė</h2>
+      <div class="card" style="margin-bottom: 24px; font-size: 0.85rem; color: var(--text-muted); line-height: 1.6;">
+        <p>💡 <strong>Kodėl rodoma <code>rate_pacing</code>?</strong> „Technocore“ tinkle veikia griežta apsauga nuo SPAM ir Sybil atakų. Mūsų agento apsaugos filtras riboja siunčiamus pasirašytus pranešimus iki saugaus tempo (1–4 pranešimai per valandą). Tarp šių taktų agentas toliau skaito kambarį, seka naujausias žinutes ir saugo resursus.</p>
+      </div>
     </div>
 
     <footer>
       <p>FLOP Evidence Scout · GitHub Repo: <a href="https://github.com/Mariukasfak/flop-evidence-scout" target="_blank">Mariukasfak/flop-evidence-scout</a> · Atnaujinta: ${new Date(generatedAt).toLocaleString('lt-LT')}</p>
     </footer>
   </div>
+
+  <script>
+    const AUTH_HASH = "4dc03776bc1e1db9bfce2f08bad7ac5c7bc8af0aea4848a6d0d57afeefe7ff3c";
+
+    async function sha256(message) {
+      const msgBuffer = new TextEncoder().encode(message);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    async function attemptUnlock() {
+      const input = document.getElementById('scout-pass').value;
+      const hash = await sha256(input);
+      if (hash === AUTH_HASH) {
+        sessionStorage.setItem('scout_auth', '1');
+        showUnlocked();
+      } else {
+        document.getElementById('lock-err').style.display = 'block';
+      }
+    }
+
+    function showUnlocked() {
+      document.getElementById('locked-panel').style.display = 'none';
+      document.getElementById('unlocked-panel').style.display = 'block';
+    }
+
+    function lockDashboard() {
+      sessionStorage.removeItem('scout_auth');
+      document.getElementById('locked-panel').style.display = 'block';
+      document.getElementById('unlocked-panel').style.display = 'none';
+      document.getElementById('scout-pass').value = '';
+      document.getElementById('lock-err').style.display = 'none';
+    }
+
+    document.getElementById('scout-pass')?.addEventListener('keyup', function(e) {
+      if (e.key === 'Enter') attemptUnlock();
+    });
+
+    if (sessionStorage.getItem('scout_auth') === '1') {
+      showUnlocked();
+    }
+  </script>
 </body>
 </html>`;
 }
