@@ -6,6 +6,10 @@ output/
 *.log
 __pycache__/
 *.pyc
-/.codex/gemini-worker/
-!/.codex/gemini-handoff.md
 .secrets/
+.codex/
+docs/
+tools/
+web/
+scripts/
+*.bat

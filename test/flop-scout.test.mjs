@@ -14,17 +14,17 @@ import {
   signMessage,
   verifyMessage,
   loadOrCreateIdentity
-} from '../src/agents/flop-scout/identity.mjs';
+} from '../src/identity.mjs';
 
 import {
   findRelevantKnowledge,
   formatKnowledgeResponse,
   VERIFIED_FACTS
-} from '../src/agents/flop-scout/knowledge.mjs';
+} from '../src/knowledge.mjs';
 
-import { Guardrails } from '../src/agents/flop-scout/guardrails.mjs';
-import { TechnocoreClient } from '../src/agents/flop-scout/technocore-client.mjs';
-import { ScoutEngine } from '../src/agents/flop-scout/scout-engine.mjs';
+import { Guardrails } from '../src/guardrails.mjs';
+import { TechnocoreClient } from '../src/technocore-client.mjs';
+import { ScoutEngine } from '../src/scout-engine.mjs';
 
 describe('FLOP Scout Identity & Cryptography', () => {
   test('base58 encode and decode roundtrips accurately', () => {
@@ -253,7 +253,7 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
     const identityPath = path.join(tmpDir, 'identity.json');
     const auditLogPath = path.join(tmpDir, 'audit.jsonl');
 
-    const { runScoutDaemon } = await import('../src/agents/flop-scout/daemon.mjs');
+    const { runScoutDaemon } = await import('../src/daemon.mjs');
 
     await runScoutDaemon({
       dryRun: true,

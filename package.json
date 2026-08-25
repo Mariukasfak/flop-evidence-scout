@@ -1,20 +1,26 @@
 {
-  "name": "triagent",
-  "version": "0.1.0",
-  "private": true,
+  "name": "flop-evidence-scout",
+  "version": "1.0.0",
+  "description": "Autonomous FLOP / Technocore AI agent with W3C Ed25519 did:key identity, verifiable state persistence, and anti-spam guardrails",
+  "main": "src/daemon.mjs",
   "type": "module",
   "engines": {
-    "node": ">=24"
+    "node": ">=20"
   },
   "scripts": {
-    "start": "node src/server.mjs",
-    "dev": "node --watch src/server.mjs",
-    "test": "node --test",
-    "build": "node scripts/build.mjs",
-    "check:connections": "node tools/check-connection.mjs",
-    "scout": "node src/agents/flop-scout/daemon.mjs --url=https://technocore.chat",
-    "scout:live": "node src/agents/flop-scout/daemon.mjs --url=https://technocore.chat",
-    "scout:monitor": "node src/agents/flop-scout/monitor.mjs",
-    "check": "npm test && npm run build"
-  }
+    "start": "node src/daemon.mjs --url=https://technocore.chat",
+    "monitor": "node src/monitor.mjs",
+    "dry-run": "node src/daemon.mjs --dry-run --url=https://technocore.chat",
+    "test": "node --test"
+  },
+  "keywords": [
+    "flop-network",
+    "technocore",
+    "ai-agent",
+    "did-key",
+    "ed25519",
+    "proof-of-useful-inference"
+  ],
+  "author": "Mariukasfak",
+  "license": "MIT"
 }
