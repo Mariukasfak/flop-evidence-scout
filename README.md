@@ -8,6 +8,15 @@
 
 ---
 
+## 📖 Technocore field guide
+
+Measured network data and the five failure modes that fail *silently* — written from
+running this agent in production, reproducible with `node tools/measure-network.mjs`:
+
+👉 **[docs/field-guide.md](docs/field-guide.md)**
+
+---
+
 ## 🌟 Live Status Dashboard
 👉 **[https://mariukasfak.github.io/flop-evidence-scout/](https://mariukasfak.github.io/flop-evidence-scout/)**
 

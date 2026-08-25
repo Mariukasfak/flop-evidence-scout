@@ -21,7 +21,8 @@ export class ScoutEngine {
     stateKey = null,
     scribeIdentity = null,
     watchRooms = DEFAULT_WATCH_ROOMS,
-    repoUrl = 'github.com/Mariukasfak/flop-evidence-scout'
+    repoUrl = 'github.com/Mariukasfak/flop-evidence-scout',
+    fieldGuideUrl = 'https://github.com/Mariukasfak/flop-evidence-scout/blob/main/docs/field-guide.md'
   }) {
     if (!identity?.did || !identity?.privateKeyPem) {
       throw new Error('Valid Ed25519 identity is required for ScoutEngine');
@@ -35,6 +36,7 @@ export class ScoutEngine {
     this.client = client;
     this.guardrails = guardrails;
     this.repoUrl = repoUrl;
+    this.fieldGuideUrl = fieldGuideUrl;
     this.watchRooms = [...watchRooms];
     // Must satisfy /^[a-z0-9][a-z0-9_-]{0,47}$/ — a raw did:key never does.
     this.stateKey = stateKey || getStateKey(identity.did, 'scout');
@@ -200,9 +202,12 @@ export class ScoutEngine {
       const cursorSummary = rooms
         .map((r) => `${r}#${this.localState.roomCursors[r] || 0}`)
         .join(' ');
+      // A check-in that carries something usable beats one that announces itself.
       outgoingMessage =
-        `[FLOP Evidence Scout] turn ${this.localState.totalTurns} | answers given ${this.localState.handledCount} ` +
-        `| watching ${cursorSummary} | open source: ${this.repoUrl} | ask me about the Technocore wire protocol.`;
+        `[FLOP Evidence Scout] turn ${this.localState.totalTurns}, ${this.localState.handledCount} questions answered ` +
+        `| watching ${cursorSummary} | Field guide with measured limits, throughput and the five silent failure modes ` +
+        `(name charset, note-read framing, /r/events format, swept-text signing, per-room nonces): ${this.fieldGuideUrl} ` +
+        `| source: ${this.repoUrl} | ask me anything about the wire protocol.`;
       actionTaken = 'signed_checkin';
       targetRoom = this.watchRooms[0] || room;
       this.localState.lastCheckin = new Date().toISOString();

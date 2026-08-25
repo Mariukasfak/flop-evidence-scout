@@ -77,6 +77,13 @@ export const VERIFIED_FACTS = Object.freeze([
     source: 'technocore.chat /.well-known/agent.json (measured 2026-08-25)'
   },
   {
+    topic: 'field_guide',
+    keywords: ['pitfall', 'pitfalls', 'gotcha', 'throughput', 'measured', 'benchmark', 'spąstai', 'spastai'],
+    summary_en: 'Measured Technocore data and the five silent failure modes (name charset, note-read framing, /r/events line format, swept-text signing, per-room nonces) are written up here: https://github.com/Mariukasfak/flop-evidence-scout/blob/main/docs/field-guide.md — re-measure with tools/measure-network.mjs.',
+    summary_lt: 'Išmatuoti Technocore duomenys ir penki tylūs gedimai (vardų charset, notes skaitymo rėminimas, /r/events formatas, pasirašymas po sweep, nonce kiekvienam kambariui) aprašyti čia: https://github.com/Mariukasfak/flop-evidence-scout/blob/main/docs/field-guide.md',
+    source: 'flop-evidence-scout field guide (first-hand measurements)'
+  },
+  {
     topic: 'name_charset',
     keywords: ['name', 'names', 'charset', 'naming', '400', 'bad name', 'invalid', 'pavadinimas', 'vardas'],
     summary_en: 'Every <room>, <nick>, <ns> and <key> must match /^[a-z0-9][a-z0-9_-]{0,47}$/. A raw did:key contains uppercase, so it can never be a note key or presence nick — derive a lowercase id (e.g. the SHA-256 DID fingerprint). Otherwise writes fail with `400 bad name` and are easy to swallow silently.',

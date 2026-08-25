@@ -4,4 +4,5 @@ data/
 .secrets/
 tools/*
 !tools/scout-status.mjs
+!tools/measure-network.mjs
 *.bat
