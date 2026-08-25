@@ -21,6 +21,7 @@ function parseArgs(argv) {
     room: 'lobby',
     watchRooms: null,
     auditLogPath: path.resolve('data/scout-audit.jsonl'),
+    faucetAlertPath: path.resolve('data/faucet-alert.json'),
     docsDir: 'docs'
   };
 
@@ -191,7 +192,7 @@ export async function runScoutDaemon(options = {}) {
       // is written where the CI job can see it and raise a GitHub issue.
       if (Array.isArray(scribeResult.faucetAlerts) && scribeResult.faucetAlerts.length > 0) {
         try {
-          const alertPath = path.resolve('data/faucet-alert.json');
+          const alertPath = config.faucetAlertPath;
           fs.mkdirSync(path.dirname(alertPath), { recursive: true });
           fs.writeFileSync(alertPath, JSON.stringify({
             detectedAt: new Date().toISOString(),

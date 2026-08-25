@@ -315,6 +315,7 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
       dryRun: true,
       identityPath,
       auditLogPath,
+      faucetAlertPath: path.join(tmpDir, 'faucet-alert.json'),
       serverUrl,
       room: 'lobby',
       docsDir: tmpDir
@@ -410,9 +411,12 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
     assert.equal(html.includes('GET /r/&lt;room&gt;?since=&lt;seq&gt;&amp;wait=10'), true);
   });
 
-  test('a scheduled tick logs cycle_complete, not shutdown', async () => {
+  test('a scheduled tick logs cycle_complete, and never touches the real faucet alert', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-cycle-'));
     const auditLogPath = path.join(tmpDir, 'audit.jsonl');
+    const faucetAlertPath = path.join(tmpDir, 'faucet-alert.json');
+    const realAlertPath = path.resolve('data/faucet-alert.json');
+    const realAlertExisted = fs.existsSync(realAlertPath);
     const { runScoutDaemon } = await import('../src/daemon.mjs');
 
     await runScoutDaemon({
@@ -420,11 +424,21 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
       identityPath: path.join(tmpDir, 'identity.json'),
       scribeIdentityPath: path.join(tmpDir, 'scribe.json'),
       auditLogPath,
+      faucetAlertPath,
       serverUrl,
       room: 'noise',
       watchRooms: [],
       docsDir: tmpDir
     });
+
+    // Regression: the alert path used to be hardcoded, so the mock /r/events
+    // fixture ("created flop-testnet-faucet") wrote a real alert file, and CI
+    // filed a real GitHub issue about a faucet that does not exist.
+    assert.equal(
+      fs.existsSync(realAlertPath), realAlertExisted,
+      'a test run must never create or modify the real faucet alert file'
+    );
+    assert.equal(fs.existsSync(faucetAlertPath), true, 'the alert belongs in the temp dir');
 
     const events = fs.readFileSync(auditLogPath, 'utf8').split('\n').filter(Boolean)
       .map((l) => JSON.parse(l).event).filter(Boolean);
