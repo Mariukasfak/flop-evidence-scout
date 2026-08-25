@@ -272,7 +272,8 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
       identityPath,
       auditLogPath,
       serverUrl,
-      room: 'lobby'
+      room: 'lobby',
+      docsDir: tmpDir
     });
 
     assert.equal(fs.existsSync(identityPath), true);

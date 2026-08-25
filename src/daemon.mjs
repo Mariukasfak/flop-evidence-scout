@@ -18,7 +18,8 @@ function parseArgs(argv) {
     scribeIdentityPath: path.resolve('.secrets/scribe-identity.json'),
     serverUrl: process.env.TECHNOCORE_URL || 'https://technocore.chat',
     room: 'lobby',
-    auditLogPath: path.resolve('data/scout-audit.jsonl')
+    auditLogPath: path.resolve('data/scout-audit.jsonl'),
+    docsDir: 'docs'
   };
 
   for (let i = 2; i < argv.length; i++) {
@@ -28,6 +29,7 @@ function parseArgs(argv) {
     else if (arg.startsWith('--identity=')) options.identityPath = path.resolve(arg.slice(11));
     else if (arg.startsWith('--url=')) options.serverUrl = arg.slice(6);
     else if (arg.startsWith('--room=')) options.room = arg.slice(7);
+    else if (arg.startsWith('--docs-dir=')) options.docsDir = arg.slice(11);
   }
 
   return options;
@@ -120,7 +122,7 @@ export async function runScoutDaemon(options = {}) {
       
       // Auto-analyze chats and refresh dashboard
       analyzeChatArchives();
-      await updateDashboardFile('docs', config.serverUrl);
+      await updateDashboardFile(config.docsDir || 'docs', config.serverUrl);
     } catch {
       // ignore
     }

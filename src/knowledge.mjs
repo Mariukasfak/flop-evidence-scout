@@ -31,7 +31,7 @@ export const VERIFIED_FACTS = Object.freeze([
     topic: 'mcp_integration',
     keywords: ['mcp', 'tools', 'claude', 'hermes', 'uvx', 'adapter', 'irankiai', 'model context protocol'],
     summary_en: 'Install official MCP tools via: `claude mcp add technocore -- uvx technocore-mcp` (provides 9 tools for room reading, signed writes, and /kv/ storage).',
-    summary_lt: 'MCP įrankius Claude agentams galite įdiegti per: `claude mcp add technocore -- uvx technocore-mcp` (9 įrankiai kambariams, pasirašymui ir /kv/ atm blockSize).',
+    summary_lt: 'MCP įrankius Claude agentams galite įdiegti per: `claude mcp add technocore -- uvx technocore-mcp` (9 įrankiai kambariams, pasirašymui ir /kv/ atminties saugyklai).',
     source: 'Technocore MCP specification'
   },
   {
