@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" role="img" aria-label="Published DID profiles, sharded namespace">
+  <title>Published DID profiles, sharded namespace</title>
+  <desc>The legacy flat namespace is separately full at 40,960 and cannot take new agents.</desc>
+  <style>
+    .grid      { stroke: var(--chart-grid, #d8dce4); stroke-width: 1; }
+    .cap       { stroke: var(--chart-cap, #9a2b22); stroke-width: 1.5; stroke-dasharray: 5 4; }
+    .cap-label { fill: var(--chart-cap, #9a2b22); font: 600 11px Archivo, system-ui, sans-serif; letter-spacing: .04em; }
+    .tick      { fill: var(--chart-muted, #737c8c); font: 500 11px "IBM Plex Mono", ui-monospace, monospace; }
+    .tick-y    { text-anchor: end; }
+    .tick-x    { text-anchor: middle; }
+    .series    { fill: none; stroke: var(--chart-line, #a25c00); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+    .fill      { fill: var(--chart-fill, rgba(162,92,0,.10)); stroke: none; }
+    .dot       { fill: var(--chart-line, #a25c00); }
+    .dot-last  { stroke: var(--chart-bg, #fff); stroke-width: 2.5; }
+    .end-label { fill: var(--chart-line, #a25c00); font: 700 13px Archivo, system-ui, sans-serif; }
+    .axis      { stroke: var(--chart-axis, #b9bfca); stroke-width: 1; }
+  </style>
+  
+    <line x1="68" y1="256.0" x2="696" y2="256.0" class="grid"/>
+    <text x="58" y="260.0" class="tick tick-y">0</text>
+    <line x1="68" y1="198.0" x2="696" y2="198.0" class="grid"/>
+    <text x="58" y="202.0" class="tick tick-y">15k</text>
+    <line x1="68" y1="140.0" x2="696" y2="140.0" class="grid"/>
+    <text x="58" y="144.0" class="tick tick-y">30k</text>
+    <line x1="68" y1="82.0" x2="696" y2="82.0" class="grid"/>
+    <text x="58" y="86.0" class="tick tick-y">45k</text>
+    <line x1="68" y1="24.0" x2="696" y2="24.0" class="grid"/>
+    <text x="58" y="28.0" class="tick tick-y">60k</text>
+  <path d="M68.0,202.6 L317.2,141.2 L435.6,103.7 L686.0,26.0 L696.0,25.8 L696.0,256.0 L68.0,256.0 Z" class="fill"/>
+  
+  <path d="M68.0,202.6 L317.2,141.2 L435.6,103.7 L686.0,26.0 L696.0,25.8" class="series"/>
+  <circle cx="68.0" cy="202.6" r="3.5" class="dot"><title>14:00 — 13,800</title></circle><circle cx="317.2" cy="141.2" r="3.5" class="dot"><title>17:20 — 29,700</title></circle><circle cx="435.6" cy="103.7" r="3.5" class="dot"><title>18:55 — 39,400</title></circle><circle cx="686.0" cy="26.0" r="3.5" class="dot"><title>22:16 — 59,494</title></circle><circle cx="696.0" cy="25.8" r="5" class="dot dot-last"><title>22:24 — 59,546</title></circle>
+  <text x="696.0" y="11.8" class="end-label" text-anchor="end">59,546</text>
+  <line x1="68" y1="256" x2="696" y2="256" class="axis"/>
+  
+    <text x="68.0" y="278" class="tick tick-x">14:00</text>
+    <text x="317.2" y="278" class="tick tick-x">17:20</text>
+    <text x="435.6" y="278" class="tick tick-x">18:55</text>
+    <text x="686.0" y="278" class="tick tick-x">22:16</text>
+    <text x="696.0" y="278" class="tick tick-x">22:24</text>
+</svg>

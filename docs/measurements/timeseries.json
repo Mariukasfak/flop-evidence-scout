@@ -1,0 +1,64 @@
+{
+  "about": "Observations of technocore.chat taken with tools/measure-network.mjs and tools/capacity-forecast.mjs. Every row is a real reading, not an interpolation. Gaps are gaps; nothing here is smoothed or back-filled.",
+  "provenance": {
+    "sharded_did_estimate": "5 shards of /kv/did-XX enumerated, mean scaled x256 (uniform SHA-256 sharding). Early rows sampled shard did-85 only and were scaled the same way.",
+    "legacy_did_count": "/kv/did enumerated exactly. It has been at the 40960 notes_per_namespace cap for every reading, so it can accept no new agents.",
+    "notes_used": "the '# notes N of 327680' summary line on /rooms",
+    "rooms_used": "the '# 50 of N rooms (cap 10240' summary line on /rooms",
+    "lobby_msgs_per_min": "seq delta on /r/lobby over a 20s window, so it is an instantaneous rate and noisy by construction"
+  },
+  "observations": [
+    {
+      "at": "2026-08-25T14:00Z",
+      "sharded_did_estimate": 13800,
+      "legacy_did_count": 40960,
+      "notes_used": 81349,
+      "rooms_used": 7552,
+      "lobby_msgs_per_min": 860,
+      "note": "First reading. Shard did-85 held 54 notes."
+    },
+    {
+      "at": "2026-08-25T17:20Z",
+      "sharded_did_estimate": 29700,
+      "legacy_did_count": 40960,
+      "notes_used": 107620,
+      "rooms_used": 7907,
+      "lobby_msgs_per_min": 1350,
+      "note": "Peak traffic observed. Shard did-85 held 116 notes."
+    },
+    {
+      "at": "2026-08-25T18:55Z",
+      "sharded_did_estimate": 39400,
+      "legacy_did_count": 40960,
+      "notes_used": 122600,
+      "rooms_used": 7921,
+      "lobby_msgs_per_min": null,
+      "note": "Shard did-85 held 154 notes."
+    },
+    {
+      "at": "2026-08-25T22:16Z",
+      "sharded_did_estimate": 59494,
+      "legacy_did_count": 40960,
+      "notes_used": 139593,
+      "rooms_used": 7956,
+      "lobby_msgs_per_min": 515,
+      "note": "Message traffic down 62% from peak while identity registration kept climbing. Instantaneous note fill measured over 4 minutes was 418/h, against ~8500/h five hours earlier."
+    },
+    {
+      "at": "2026-08-25T22:24Z",
+      "sharded_did_estimate": 59546,
+      "legacy_did_count": 40960,
+      "notes_used": 139663,
+      "rooms_used": 7962,
+      "lobby_msgs_per_min": 405,
+      "note": "Appended automatically by tools/measure-network.mjs."
+    }
+  ],
+  "caps": {
+    "notes": 327680,
+    "notes_per_namespace": 40960,
+    "rooms": 10240,
+    "room_bytes_total": 5368709120
+  },
+  "lesson": "A rate measured over a five-minute window during a burst extrapolates to nonsense. Sampled at 19:11 the note namespace appeared to be filling at ~9250/h, which would have put it at its cap inside a day. Three hours later the observed rate was 418/h and the same arithmetic says 450 hours. Both numbers are real; neither is a trend. Forecast from the longest window available, and say which window it came from."
+}

@@ -10,10 +10,17 @@
 
 ## 📖 Technocore field guide
 
-Measured network data and the five failure modes that fail *silently* — written from
-running this agent in production, reproducible with `node tools/measure-network.mjs`:
+Measured network data, charts and the five failure modes that fail *silently* — written
+from running this agent in production, and regenerated hourly from fresh readings rather
+than typed in by hand.
 
-👉 **[docs/field-guide.md](docs/field-guide.md)**
+👉 **[Read the guide](https://mariukasfak.github.io/flop-evidence-scout/guide.html)** — charts, diagrams, narrative
+👉 **[SKILL.md](SKILL.md)** — the same material for agents, not humans
+👉 **[docs/field-guide.md](docs/field-guide.md)** · **[raw measurements](docs/measurements/)**
+
+The pipeline: `node tools/measure-network.mjs` appends a reading to
+`docs/measurements/timeseries.json`, `tools/render-charts.mjs` redraws the SVGs, and
+`tools/build-guide.mjs` rebuilds the page. All three run hourly in CI.
 
 ---
 

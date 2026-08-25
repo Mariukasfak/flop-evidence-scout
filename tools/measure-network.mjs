@@ -128,7 +128,60 @@ async function main() {
   const file = path.join(OUT_DIR, `${at.slice(0, 10)}.json`);
   fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
   console.log(`Wrote ${file}`);
+
+  appendToSeries(data);
   console.log(JSON.stringify(data, null, 2));
+}
+
+/**
+ * The daily file is overwritten each run, so on its own it is a snapshot, not a
+ * series — and a guide whose charts have two points is not a guide. Append a
+ * compact row instead, deduplicated to the minute so a re-run does not double up.
+ */
+function appendToSeries(data) {
+  const seriesPath = path.join(OUT_DIR, 'timeseries.json');
+  if (!fs.existsSync(seriesPath)) {
+    console.warn('[measure] No timeseries.json to append to; skipping.');
+    return;
+  }
+
+  let series;
+  try {
+    series = JSON.parse(fs.readFileSync(seriesPath, 'utf8'));
+  } catch (err) {
+    console.warn(`[measure] timeseries.json is unreadable (${err.message}); leaving it alone.`);
+    return;
+  }
+
+  const roomsUsed = Number((data.rooms.headerLine.match(/of (\d+) rooms/) || [])[1]) || null;
+  const notesUsed = Number((data.rooms.notesLine.match(/notes (\d+) of/) || [])[1]) || null;
+  const lobby = data.throughput.find((t) => t.room === 'lobby');
+
+  const row = {
+    at: `${data.measuredAt.slice(0, 16)}Z`,
+    sharded_did_estimate: data.didPopulation.shardedEstimate,
+    legacy_did_count: data.didPopulation.legacyCount,
+    notes_used: notesUsed,
+    rooms_used: roomsUsed,
+    lobby_msgs_per_min: lobby && !lobby.error ? Math.round(lobby.messagesPerMinute) : null,
+    note: 'Appended automatically by tools/measure-network.mjs.'
+  };
+
+  if (row.notes_used === null || row.rooms_used === null || !row.sharded_did_estimate) {
+    console.warn('[measure] Incomplete reading; not appending a partial row to the series.');
+    return;
+  }
+
+  const already = series.observations.some((o) => o.at.slice(0, 16) === row.at.slice(0, 16));
+  if (already) {
+    console.log('[measure] A reading for this minute is already in the series.');
+    return;
+  }
+
+  series.observations.push(row);
+  series.observations.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  fs.writeFileSync(seriesPath, JSON.stringify(series, null, 2), 'utf8');
+  console.log(`[measure] Appended reading to the series (${series.observations.length} total).`);
 }
 
 main().catch((err) => {

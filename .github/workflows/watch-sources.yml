@@ -35,11 +35,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/source-change-alert.mjs
 
+      - name: Re-measure the network and rebuild the guide
+        # Keeps the published charts honest. A guide whose figures were typed in
+        # by hand is stale the day after it is written.
+        run: |
+          node tools/measure-network.mjs
+          node tools/render-charts.mjs
+          node tools/build-guide.mjs
+
       - name: Commit the new baseline
         run: |
           git config --global user.name "FLOP-Scout-Bot"
           git config --global user.email "bot@technocore.chat"
-          git add docs/watch
-          git commit -m "chore(watch): record source baseline [skip ci]" || echo "Nothing moved."
+          git add docs
+          git commit -m "chore(watch): source baseline, fresh measurements, rebuilt guide [skip ci]" || echo "Nothing moved."
           git pull --rebase origin main
           git push origin main
