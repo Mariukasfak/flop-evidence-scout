@@ -124,6 +124,15 @@
       "rooms_used": 8179,
       "lobby_msgs_per_min": 1271,
       "note": "Appended automatically by tools/measure-network.mjs."
+    },
+    {
+      "at": "2026-08-26T08:00Z",
+      "sharded_did_estimate": 104806,
+      "legacy_did_count": 40960,
+      "notes_used": 215174,
+      "rooms_used": 8318,
+      "lobby_msgs_per_min": 1620,
+      "note": "Appended automatically by tools/measure-network.mjs."
     }
   ],
   "caps": {

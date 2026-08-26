@@ -142,7 +142,7 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
     either a number measured with a tool in this repository or a bug hit in production.
     <strong>Nothing here is official, and nothing here is airdrop advice.</strong>
   </p>
-  <p class="stamp">Last reading 2026-08-26T07:09Z · generated from <code>docs/measurements/timeseries.json</code></p>
+  <p class="stamp">Last reading 2026-08-26T08:00Z · generated from <code>docs/measurements/timeseries.json</code></p>
 </header>
 
 <section>
@@ -150,23 +150,23 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
   <div class="metrics">
     <div class="metric hot">
       <span class="metric-label">DID profiles</span>
-      <span class="metric-value">≈139k</span>
-      <span class="metric-foot">40,960 legacy + ≈98,406 sharded</span>
+      <span class="metric-value">≈146k</span>
+      <span class="metric-foot">40,960 legacy + ≈104,806 sharded</span>
     </div>
     <div class="metric">
       <span class="metric-label">Lobby traffic</span>
-      <span class="metric-value">1,271<span style="font-size:14px;color:var(--ink-faint)">/min</span></span>
-      <span class="metric-foot">range 405–1,350 across the window</span>
+      <span class="metric-value">1,620<span style="font-size:14px;color:var(--ink-faint)">/min</span></span>
+      <span class="metric-foot">range 405–1,620 across the window</span>
     </div>
     <div class="metric">
       <span class="metric-label">Rooms used</span>
-      <span class="metric-value">79.9%</span>
-      <span class="metric-foot">8,179 of 10,240 — tightest cap</span>
+      <span class="metric-value">81.2%</span>
+      <span class="metric-foot">8,318 of 10,240 — tightest cap</span>
     </div>
     <div class="metric">
       <span class="metric-label">Notes used</span>
-      <span class="metric-value">61.9%</span>
-      <span class="metric-foot">202,822 of 327,680</span>
+      <span class="metric-value">65.7%</span>
+      <span class="metric-foot">215,174 of 327,680</span>
     </div>
   </div>
   <p class="stamp">Re-measure any of it: <code>node tools/measure-network.mjs</code></p>
@@ -175,17 +175,17 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
 <section class="prose">
   <h2>The shape of it</h2>
   <p>
-    Over 17 hours of continuous measurement the sharded identity namespace went from
+    Over 18 hours of continuous measurement the sharded identity namespace went from
     about 13,800 published agent profiles to about
-    98,406 — 7.1× — on top of a legacy namespace that has been
+    104,806 — 7.6× — on top of a legacy namespace that has been
     full at its 40,960 cap for every single reading. Call it
-    139 thousand identities, minus however many agents wrote both
+    146 thousand identities, minus however many agents wrote both
     paths and got counted twice.
   </p>
   <p>
     That curve has not turned down once. Message traffic, meanwhile, has ranged between
-    405 and 1,350 messages a minute and is back near its high
-    (1,271/min at the last reading).
+    405 and 1,620 messages a minute and is back near its high
+    (1,620/min at the last reading).
   </p>
 
 
@@ -211,27 +211,28 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
     <line x1="68" y1="256.0" x2="696" y2="256.0" class="grid"/>
     <text x="58" y="260.0" class="tick tick-y">0</text>
     <line x1="68" y1="198.0" x2="696" y2="198.0" class="grid"/>
-    <text x="58" y="202.0" class="tick tick-y">25k</text>
+    <text x="58" y="202.0" class="tick tick-y">50k</text>
     <line x1="68" y1="140.0" x2="696" y2="140.0" class="grid"/>
-    <text x="58" y="144.0" class="tick tick-y">50k</text>
+    <text x="58" y="144.0" class="tick tick-y">100k</text>
     <line x1="68" y1="82.0" x2="696" y2="82.0" class="grid"/>
-    <text x="58" y="86.0" class="tick tick-y">75k</text>
+    <text x="58" y="86.0" class="tick tick-y">150k</text>
     <line x1="68" y1="24.0" x2="696" y2="24.0" class="grid"/>
-    <text x="58" y="28.0" class="tick tick-y">100k</text>
-  <path d="M68.0,224.0 L190.1,187.1 L248.0,164.6 L370.7,118.0 L375.6,117.9 L377.4,117.4 L388.4,117.1 L420.8,114.1 L506.8,82.2 L555.0,80.2 L614.8,57.4 L647.8,44.4 L696.0,27.7 L696.0,256.0 L68.0,256.0 Z" class="fill"/>
+    <text x="58" y="28.0" class="tick tick-y">200k</text>
+  <path d="M68.0,240.0 L184.3,221.5 L239.5,210.3 L356.4,187.0 L361.1,186.9 L362.8,186.7 L373.3,186.6 L404.1,185.0 L486.1,169.1 L532.0,168.1 L589.0,156.7 L620.4,150.2 L666.3,141.8 L696.0,134.4 L696.0,256.0 L68.0,256.0 Z" class="fill"/>
   
-  <path d="M68.0,224.0 L190.1,187.1 L248.0,164.6 L370.7,118.0 L375.6,117.9 L377.4,117.4 L388.4,117.1 L420.8,114.1 L506.8,82.2 L555.0,80.2 L614.8,57.4 L647.8,44.4 L696.0,27.7" class="series"/>
-  <circle cx="68.0" cy="224.0" r="3.5" class="dot"><title>14:00 — 13,800</title></circle><circle cx="190.1" cy="187.1" r="3.5" class="dot"><title>17:20 — 29,700</title></circle><circle cx="248.0" cy="164.6" r="3.5" class="dot"><title>18:55 — 39,400</title></circle><circle cx="370.7" cy="118.0" r="3.5" class="dot"><title>22:16 — 59,494</title></circle><circle cx="375.6" cy="117.9" r="3.5" class="dot"><title>22:24 — 59,546</title></circle><circle cx="377.4" cy="117.4" r="3.5" class="dot"><title>22:27 — 59,750</title></circle><circle cx="388.4" cy="117.1" r="3.5" class="dot"><title>22:45 — 59,853</title></circle><circle cx="420.8" cy="114.1" r="3.5" class="dot"><title>23:38 — 61,184</title></circle><circle cx="506.8" cy="82.2" r="3.5" class="dot"><title>01:59 — 74,906</title></circle><circle cx="555.0" cy="80.2" r="3.5" class="dot"><title>03:18 — 75,776</title></circle><circle cx="614.8" cy="57.4" r="3.5" class="dot"><title>04:56 — 85,606</title></circle><circle cx="647.8" cy="44.4" r="3.5" class="dot"><title>05:50 — 91,187</title></circle><circle cx="696.0" cy="27.7" r="5" class="dot dot-last"><title>07:09 — 98,406</title></circle>
-  <text x="696.0" y="13.7" class="end-label" text-anchor="end">98,406</text>
+  <path d="M68.0,240.0 L184.3,221.5 L239.5,210.3 L356.4,187.0 L361.1,186.9 L362.8,186.7 L373.3,186.6 L404.1,185.0 L486.1,169.1 L532.0,168.1 L589.0,156.7 L620.4,150.2 L666.3,141.8 L696.0,134.4" class="series"/>
+  <circle cx="68.0" cy="240.0" r="3.5" class="dot"><title>14:00 — 13,800</title></circle><circle cx="184.3" cy="221.5" r="3.5" class="dot"><title>17:20 — 29,700</title></circle><circle cx="239.5" cy="210.3" r="3.5" class="dot"><title>18:55 — 39,400</title></circle><circle cx="356.4" cy="187.0" r="3.5" class="dot"><title>22:16 — 59,494</title></circle><circle cx="361.1" cy="186.9" r="3.5" class="dot"><title>22:24 — 59,546</title></circle><circle cx="362.8" cy="186.7" r="3.5" class="dot"><title>22:27 — 59,750</title></circle><circle cx="373.3" cy="186.6" r="3.5" class="dot"><title>22:45 — 59,853</title></circle><circle cx="404.1" cy="185.0" r="3.5" class="dot"><title>23:38 — 61,184</title></circle><circle cx="486.1" cy="169.1" r="3.5" class="dot"><title>01:59 — 74,906</title></circle><circle cx="532.0" cy="168.1" r="3.5" class="dot"><title>03:18 — 75,776</title></circle><circle cx="589.0" cy="156.7" r="3.5" class="dot"><title>04:56 — 85,606</title></circle><circle cx="620.4" cy="150.2" r="3.5" class="dot"><title>05:50 — 91,187</title></circle><circle cx="666.3" cy="141.8" r="3.5" class="dot"><title>07:09 — 98,406</title></circle><circle cx="696.0" cy="134.4" r="5" class="dot dot-last"><title>08:00 — 104,806</title></circle>
+  <text x="696.0" y="120.4" class="end-label" text-anchor="end">104,806</text>
   <line x1="68" y1="256" x2="696" y2="256" class="axis"/>
   
     <text x="68.0" y="278" class="tick" text-anchor="start">14:00</text>
-    <text x="370.7" y="278" class="tick" text-anchor="middle">22:16</text>
-    <text x="388.4" y="278" class="tick" text-anchor="middle">22:45</text>
-    <text x="555.0" y="278" class="tick" text-anchor="middle">03:18</text>
-    <text x="696.0" y="278" class="tick" text-anchor="end">07:09</text>
+    <text x="356.4" y="278" class="tick" text-anchor="middle">22:16</text>
+    <text x="373.3" y="278" class="tick" text-anchor="middle">22:45</text>
+    <text x="532.0" y="278" class="tick" text-anchor="middle">03:18</text>
+    <text x="666.3" y="278" class="tick" text-anchor="middle">07:09</text>
+    <text x="696.0" y="278" class="tick" text-anchor="end">08:00</text>
 </svg></div>
-  <figcaption>Identity registration, 13,800 to 98,406 over 17 hours. Each point is a real reading; the gaps between them are gaps, not smoothing.</figcaption>
+  <figcaption>Identity registration, 13,800 to 104,806 over 18 hours. Each point is a real reading; the gaps between them are gaps, not smoothing.</figcaption>
 </figure>
 
 
@@ -264,22 +265,20 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
     <text x="58" y="86.0" class="tick tick-y">1.5k</text>
     <line x1="68" y1="24.0" x2="696" y2="24.0" class="grid"/>
     <text x="58" y="28.0" class="tick tick-y">2.0k</text>
-  <path d="M68.0,156.2 L190.1,99.4 L370.7,196.3 L375.6,209.0 L377.4,195.0 L388.4,197.4 L420.8,190.8 L506.8,130.6 L555.0,115.6 L614.8,108.7 L647.8,123.2 L696.0,108.6 L696.0,256.0 L68.0,256.0 Z" class="fill"/>
+  <path d="M68.0,156.2 L184.3,99.4 L356.4,196.3 L361.1,209.0 L362.8,195.0 L373.3,197.4 L404.1,190.8 L486.1,130.6 L532.0,115.6 L589.0,108.7 L620.4,123.2 L666.3,108.6 L696.0,68.1 L696.0,256.0 L68.0,256.0 Z" class="fill"/>
   
-  <path d="M68.0,156.2 L190.1,99.4 L370.7,196.3 L375.6,209.0 L377.4,195.0 L388.4,197.4 L420.8,190.8 L506.8,130.6 L555.0,115.6 L614.8,108.7 L647.8,123.2 L696.0,108.6" class="series"/>
-  <circle cx="68.0" cy="156.2" r="3.5" class="dot"><title>14:00 — 860/min</title></circle><circle cx="190.1" cy="99.4" r="3.5" class="dot"><title>17:20 — 1,350/min</title></circle><circle cx="370.7" cy="196.3" r="3.5" class="dot"><title>22:16 — 515/min</title></circle><circle cx="375.6" cy="209.0" r="3.5" class="dot"><title>22:24 — 405/min</title></circle><circle cx="377.4" cy="195.0" r="3.5" class="dot"><title>22:27 — 526/min</title></circle><circle cx="388.4" cy="197.4" r="3.5" class="dot"><title>22:45 — 505/min</title></circle><circle cx="420.8" cy="190.8" r="3.5" class="dot"><title>23:38 — 562/min</title></circle><circle cx="506.8" cy="130.6" r="3.5" class="dot"><title>01:59 — 1,081/min</title></circle><circle cx="555.0" cy="115.6" r="3.5" class="dot"><title>03:18 — 1,210/min</title></circle><circle cx="614.8" cy="108.7" r="3.5" class="dot"><title>04:56 — 1,270/min</title></circle><circle cx="647.8" cy="123.2" r="3.5" class="dot"><title>05:50 — 1,145/min</title></circle><circle cx="696.0" cy="108.6" r="5" class="dot dot-last"><title>07:09 — 1,271/min</title></circle>
-  <text x="696.0" y="94.6" class="end-label" text-anchor="end">1,271/min</text>
+  <path d="M68.0,156.2 L184.3,99.4 L356.4,196.3 L361.1,209.0 L362.8,195.0 L373.3,197.4 L404.1,190.8 L486.1,130.6 L532.0,115.6 L589.0,108.7 L620.4,123.2 L666.3,108.6 L696.0,68.1" class="series"/>
+  <circle cx="68.0" cy="156.2" r="3.5" class="dot"><title>14:00 — 860/min</title></circle><circle cx="184.3" cy="99.4" r="3.5" class="dot"><title>17:20 — 1,350/min</title></circle><circle cx="356.4" cy="196.3" r="3.5" class="dot"><title>22:16 — 515/min</title></circle><circle cx="361.1" cy="209.0" r="3.5" class="dot"><title>22:24 — 405/min</title></circle><circle cx="362.8" cy="195.0" r="3.5" class="dot"><title>22:27 — 526/min</title></circle><circle cx="373.3" cy="197.4" r="3.5" class="dot"><title>22:45 — 505/min</title></circle><circle cx="404.1" cy="190.8" r="3.5" class="dot"><title>23:38 — 562/min</title></circle><circle cx="486.1" cy="130.6" r="3.5" class="dot"><title>01:59 — 1,081/min</title></circle><circle cx="532.0" cy="115.6" r="3.5" class="dot"><title>03:18 — 1,210/min</title></circle><circle cx="589.0" cy="108.7" r="3.5" class="dot"><title>04:56 — 1,270/min</title></circle><circle cx="620.4" cy="123.2" r="3.5" class="dot"><title>05:50 — 1,145/min</title></circle><circle cx="666.3" cy="108.6" r="3.5" class="dot"><title>07:09 — 1,271/min</title></circle><circle cx="696.0" cy="68.1" r="5" class="dot dot-last"><title>08:00 — 1,620/min</title></circle>
+  <text x="696.0" y="54.1" class="end-label" text-anchor="end">1,620/min</text>
   <line x1="68" y1="256" x2="696" y2="256" class="axis"/>
   
     <text x="68.0" y="278" class="tick" text-anchor="start">14:00</text>
-    <text x="370.7" y="278" class="tick" text-anchor="middle">22:16</text>
-    <text x="377.4" y="278" class="tick" text-anchor="middle">22:27</text>
-    <text x="420.8" y="278" class="tick" text-anchor="middle">23:38</text>
-    <text x="555.0" y="278" class="tick" text-anchor="middle">03:18</text>
-    <text x="647.8" y="278" class="tick" text-anchor="middle">05:50</text>
-    <text x="696.0" y="278" class="tick" text-anchor="end">07:09</text>
+    <text x="361.1" y="278" class="tick" text-anchor="middle">22:24</text>
+    <text x="404.1" y="278" class="tick" text-anchor="middle">23:38</text>
+    <text x="589.0" y="278" class="tick" text-anchor="middle">04:56</text>
+    <text x="696.0" y="278" class="tick" text-anchor="end">08:00</text>
 </svg></div>
-  <figcaption>Traffic in /r/lobby between 405 and 1,350 messages a minute across the window. Read the shape, not any single point.</figcaption>
+  <figcaption>Traffic in /r/lobby between 405 and 1,620 messages a minute across the window. Read the shape, not any single point.</figcaption>
 </figure>
 
 <section class="prose">
@@ -295,8 +294,8 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
     <p>
       An earlier version of it read <em>"a hundred thousand agents arrived, and then most of them
       stopped talking"</em>. That was written from four readings, at a moment when traffic had
-      fallen from 1,350 to 405 a minute. It was a real observation and a wrong
-      conclusion: eleven readings later the same measurement is back at 1,271. It was a
+      fallen from 1,620 to 405 a minute. It was a real observation and a wrong
+      conclusion: eleven readings later the same measurement is back at 1,620. It was a
       dip, not a decay.
     </p>
     <p>
@@ -341,22 +340,23 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
     <text x="58" y="86.0" class="tick tick-y">15k</text>
     <line x1="68" y1="24.0" x2="696" y2="24.0" class="grid"/>
     <text x="58" y="28.0" class="tick tick-y">20k</text>
-  <path d="M68.0,168.4 L190.1,164.3 L248.0,164.1 L370.7,163.7 L375.6,163.6 L377.4,163.6 L388.4,163.6 L420.8,163.4 L506.8,163.3 L555.0,163.0 L614.8,162.1 L647.8,161.7 L696.0,161.1 L696.0,256.0 L68.0,256.0 Z" class="fill"/>
+  <path d="M68.0,168.4 L184.3,164.3 L239.5,164.1 L356.4,163.7 L361.1,163.6 L362.8,163.6 L373.3,163.6 L404.1,163.4 L486.1,163.3 L532.0,163.0 L589.0,162.1 L620.4,161.7 L666.3,161.1 L696.0,159.5 L696.0,256.0 L68.0,256.0 Z" class="fill"/>
   
     <line x1="68" y1="137.2" x2="696" y2="137.2" class="cap"/>
     <text x="696" y="130.2" class="cap-label" text-anchor="end">cap 10k</text>
-  <path d="M68.0,168.4 L190.1,164.3 L248.0,164.1 L370.7,163.7 L375.6,163.6 L377.4,163.6 L388.4,163.6 L420.8,163.4 L506.8,163.3 L555.0,163.0 L614.8,162.1 L647.8,161.7 L696.0,161.1" class="series"/>
-  <circle cx="68.0" cy="168.4" r="3.5" class="dot"><title>14:00 — 7,552</title></circle><circle cx="190.1" cy="164.3" r="3.5" class="dot"><title>17:20 — 7,907</title></circle><circle cx="248.0" cy="164.1" r="3.5" class="dot"><title>18:55 — 7,921</title></circle><circle cx="370.7" cy="163.7" r="3.5" class="dot"><title>22:16 — 7,956</title></circle><circle cx="375.6" cy="163.6" r="3.5" class="dot"><title>22:24 — 7,962</title></circle><circle cx="377.4" cy="163.6" r="3.5" class="dot"><title>22:27 — 7,963</title></circle><circle cx="388.4" cy="163.6" r="3.5" class="dot"><title>22:45 — 7,969</title></circle><circle cx="420.8" cy="163.4" r="3.5" class="dot"><title>23:38 — 7,983</title></circle><circle cx="506.8" cy="163.3" r="3.5" class="dot"><title>01:59 — 7,988</title></circle><circle cx="555.0" cy="163.0" r="3.5" class="dot"><title>03:18 — 8,016</title></circle><circle cx="614.8" cy="162.1" r="3.5" class="dot"><title>04:56 — 8,093</title></circle><circle cx="647.8" cy="161.7" r="3.5" class="dot"><title>05:50 — 8,130</title></circle><circle cx="696.0" cy="161.1" r="5" class="dot dot-last"><title>07:09 — 8,179</title></circle>
-  <text x="696.0" y="147.1" class="end-label" text-anchor="end">8,179</text>
+  <path d="M68.0,168.4 L184.3,164.3 L239.5,164.1 L356.4,163.7 L361.1,163.6 L362.8,163.6 L373.3,163.6 L404.1,163.4 L486.1,163.3 L532.0,163.0 L589.0,162.1 L620.4,161.7 L666.3,161.1 L696.0,159.5" class="series"/>
+  <circle cx="68.0" cy="168.4" r="3.5" class="dot"><title>14:00 — 7,552</title></circle><circle cx="184.3" cy="164.3" r="3.5" class="dot"><title>17:20 — 7,907</title></circle><circle cx="239.5" cy="164.1" r="3.5" class="dot"><title>18:55 — 7,921</title></circle><circle cx="356.4" cy="163.7" r="3.5" class="dot"><title>22:16 — 7,956</title></circle><circle cx="361.1" cy="163.6" r="3.5" class="dot"><title>22:24 — 7,962</title></circle><circle cx="362.8" cy="163.6" r="3.5" class="dot"><title>22:27 — 7,963</title></circle><circle cx="373.3" cy="163.6" r="3.5" class="dot"><title>22:45 — 7,969</title></circle><circle cx="404.1" cy="163.4" r="3.5" class="dot"><title>23:38 — 7,983</title></circle><circle cx="486.1" cy="163.3" r="3.5" class="dot"><title>01:59 — 7,988</title></circle><circle cx="532.0" cy="163.0" r="3.5" class="dot"><title>03:18 — 8,016</title></circle><circle cx="589.0" cy="162.1" r="3.5" class="dot"><title>04:56 — 8,093</title></circle><circle cx="620.4" cy="161.7" r="3.5" class="dot"><title>05:50 — 8,130</title></circle><circle cx="666.3" cy="161.1" r="3.5" class="dot"><title>07:09 — 8,179</title></circle><circle cx="696.0" cy="159.5" r="5" class="dot dot-last"><title>08:00 — 8,318</title></circle>
+  <text x="696.0" y="145.5" class="end-label" text-anchor="end">8,318</text>
   <line x1="68" y1="256" x2="696" y2="256" class="axis"/>
   
     <text x="68.0" y="278" class="tick" text-anchor="start">14:00</text>
-    <text x="370.7" y="278" class="tick" text-anchor="middle">22:16</text>
-    <text x="388.4" y="278" class="tick" text-anchor="middle">22:45</text>
-    <text x="555.0" y="278" class="tick" text-anchor="middle">03:18</text>
-    <text x="696.0" y="278" class="tick" text-anchor="end">07:09</text>
+    <text x="356.4" y="278" class="tick" text-anchor="middle">22:16</text>
+    <text x="373.3" y="278" class="tick" text-anchor="middle">22:45</text>
+    <text x="532.0" y="278" class="tick" text-anchor="middle">03:18</text>
+    <text x="666.3" y="278" class="tick" text-anchor="middle">07:09</text>
+    <text x="696.0" y="278" class="tick" text-anchor="end">08:00</text>
 </svg></div>
-  <figcaption>Rooms are the tightest constraint on the service: 79.9% of the 10,240 cap.</figcaption>
+  <figcaption>Rooms are the tightest constraint on the service: 81.2% of the 10,240 cap.</figcaption>
 </figure>
 
   
@@ -389,20 +389,21 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
     <text x="58" y="86.0" class="tick tick-y">300k</text>
     <line x1="68" y1="24.0" x2="696" y2="24.0" class="grid"/>
     <text x="58" y="28.0" class="tick tick-y">400k</text>
-  <path d="M68.0,208.8 L190.1,193.6 L248.0,184.9 L370.7,175.0 L375.6,175.0 L377.4,174.8 L388.4,174.7 L420.8,173.5 L506.8,163.8 L555.0,161.2 L614.8,153.6 L647.8,147.1 L696.0,138.4 L696.0,256.0 L68.0,256.0 Z" class="fill"/>
+  <path d="M68.0,208.8 L184.3,193.6 L239.5,184.9 L356.4,175.0 L361.1,175.0 L362.8,174.8 L373.3,174.7 L404.1,173.5 L486.1,163.8 L532.0,161.2 L589.0,153.6 L620.4,147.1 L666.3,138.4 L696.0,131.2 L696.0,256.0 L68.0,256.0 Z" class="fill"/>
   
     <line x1="68" y1="65.9" x2="696" y2="65.9" class="cap"/>
     <text x="696" y="58.9" class="cap-label" text-anchor="end">cap 328k</text>
-  <path d="M68.0,208.8 L190.1,193.6 L248.0,184.9 L370.7,175.0 L375.6,175.0 L377.4,174.8 L388.4,174.7 L420.8,173.5 L506.8,163.8 L555.0,161.2 L614.8,153.6 L647.8,147.1 L696.0,138.4" class="series"/>
-  <circle cx="68.0" cy="208.8" r="3.5" class="dot"><title>14:00 — 81,349</title></circle><circle cx="190.1" cy="193.6" r="3.5" class="dot"><title>17:20 — 107,620</title></circle><circle cx="248.0" cy="184.9" r="3.5" class="dot"><title>18:55 — 122,600</title></circle><circle cx="370.7" cy="175.0" r="3.5" class="dot"><title>22:16 — 139,593</title></circle><circle cx="375.6" cy="175.0" r="3.5" class="dot"><title>22:24 — 139,663</title></circle><circle cx="377.4" cy="174.8" r="3.5" class="dot"><title>22:27 — 140,052</title></circle><circle cx="388.4" cy="174.7" r="3.5" class="dot"><title>22:45 — 140,219</title></circle><circle cx="420.8" cy="173.5" r="3.5" class="dot"><title>23:38 — 142,190</title></circle><circle cx="506.8" cy="163.8" r="3.5" class="dot"><title>01:59 — 158,997</title></circle><circle cx="555.0" cy="161.2" r="3.5" class="dot"><title>03:18 — 163,455</title></circle><circle cx="614.8" cy="153.6" r="3.5" class="dot"><title>04:56 — 176,497</title></circle><circle cx="647.8" cy="147.1" r="3.5" class="dot"><title>05:50 — 187,704</title></circle><circle cx="696.0" cy="138.4" r="5" class="dot dot-last"><title>07:09 — 202,822</title></circle>
-  <text x="696.0" y="124.4" class="end-label" text-anchor="end">202,822</text>
+  <path d="M68.0,208.8 L184.3,193.6 L239.5,184.9 L356.4,175.0 L361.1,175.0 L362.8,174.8 L373.3,174.7 L404.1,173.5 L486.1,163.8 L532.0,161.2 L589.0,153.6 L620.4,147.1 L666.3,138.4 L696.0,131.2" class="series"/>
+  <circle cx="68.0" cy="208.8" r="3.5" class="dot"><title>14:00 — 81,349</title></circle><circle cx="184.3" cy="193.6" r="3.5" class="dot"><title>17:20 — 107,620</title></circle><circle cx="239.5" cy="184.9" r="3.5" class="dot"><title>18:55 — 122,600</title></circle><circle cx="356.4" cy="175.0" r="3.5" class="dot"><title>22:16 — 139,593</title></circle><circle cx="361.1" cy="175.0" r="3.5" class="dot"><title>22:24 — 139,663</title></circle><circle cx="362.8" cy="174.8" r="3.5" class="dot"><title>22:27 — 140,052</title></circle><circle cx="373.3" cy="174.7" r="3.5" class="dot"><title>22:45 — 140,219</title></circle><circle cx="404.1" cy="173.5" r="3.5" class="dot"><title>23:38 — 142,190</title></circle><circle cx="486.1" cy="163.8" r="3.5" class="dot"><title>01:59 — 158,997</title></circle><circle cx="532.0" cy="161.2" r="3.5" class="dot"><title>03:18 — 163,455</title></circle><circle cx="589.0" cy="153.6" r="3.5" class="dot"><title>04:56 — 176,497</title></circle><circle cx="620.4" cy="147.1" r="3.5" class="dot"><title>05:50 — 187,704</title></circle><circle cx="666.3" cy="138.4" r="3.5" class="dot"><title>07:09 — 202,822</title></circle><circle cx="696.0" cy="131.2" r="5" class="dot dot-last"><title>08:00 — 215,174</title></circle>
+  <text x="696.0" y="117.2" class="end-label" text-anchor="end">215,174</text>
   <line x1="68" y1="256" x2="696" y2="256" class="axis"/>
   
     <text x="68.0" y="278" class="tick" text-anchor="start">14:00</text>
-    <text x="370.7" y="278" class="tick" text-anchor="middle">22:16</text>
-    <text x="388.4" y="278" class="tick" text-anchor="middle">22:45</text>
-    <text x="555.0" y="278" class="tick" text-anchor="middle">03:18</text>
-    <text x="696.0" y="278" class="tick" text-anchor="end">07:09</text>
+    <text x="356.4" y="278" class="tick" text-anchor="middle">22:16</text>
+    <text x="373.3" y="278" class="tick" text-anchor="middle">22:45</text>
+    <text x="532.0" y="278" class="tick" text-anchor="middle">03:18</text>
+    <text x="666.3" y="278" class="tick" text-anchor="middle">07:09</text>
+    <text x="696.0" y="278" class="tick" text-anchor="end">08:00</text>
 </svg></div>
   <figcaption>Notes filled quickly during the burst and then nearly stopped. The dashed line is the 327,680 cap.</figcaption>
 </figure>
