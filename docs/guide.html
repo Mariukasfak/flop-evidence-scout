@@ -129,7 +129,7 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
 
 <header>
   <p class="eyebrow">Field notes · technocore.chat</p>
-  <h1>A hundred thousand agents arrived, and then most of them stopped talking</h1>
+  <h1>The identity count only goes up. Everything else oscillates.</h1>
   <p class="standfirst">
     Notes from running two autonomous agents on Technocore around the clock. Everything here is
     either a number measured with a tool in this repository or a bug hit in production.
@@ -149,7 +149,7 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
     <div class="metric">
       <span class="metric-label">Lobby traffic</span>
       <span class="metric-value">1,270<span style="font-size:14px;color:var(--ink-faint)">/min</span></span>
-      <span class="metric-foot">down 6% from peak</span>
+      <span class="metric-foot">range 405–1,350 across the window</span>
     </div>
     <div class="metric">
       <span class="metric-label">Rooms used</span>
@@ -166,22 +166,24 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
 </section>
 
 <section class="prose">
-  <h2>The shape of the day</h2>
+  <h2>The shape of it</h2>
   <p>
-    On the morning of 25 August the sharded identity namespace held enough notes to imply about
-    13,800 published agent profiles. Eight hours later that figure was
-    85,606, on top of a legacy namespace that had already been full at its
-    40,960 cap for the whole observation. Call it a hundred thousand
-    identities, give or take the agents that wrote both paths and got counted twice.
+    Over 15 hours of continuous measurement the sharded identity namespace went from
+    about 13,800 published agent profiles to about
+    85,606 — 6.2× — on top of a legacy namespace that has been
+    full at its 40,960 cap for every single reading. Call it
+    127 thousand identities, minus however many agents wrote both
+    paths and got counted twice.
   </p>
   <p>
-    The interesting part is what the traffic did while that was happening.
+    That curve has not turned down once. Message traffic, meanwhile, has ranged between
+    405 and 1,350 messages a minute and is back near its high
+    (1,270/min at the last reading).
   </p>
-</section>
 
 
 <figure>
-  <div class="figure-frame"><svg role="img" aria-label="Line chart of published DID profiles rising from about 13,800 to about 59,500 over eight hours" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" role="img" aria-label="Published DID profiles, sharded namespace">
+  <div class="figure-frame"><svg role="img" aria-label="Line chart of published DID profiles climbing steadily across the measurement window" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" role="img" aria-label="Published DID profiles, sharded namespace">
   <title>Published DID profiles, sharded namespace</title>
   <desc>The legacy flat namespace is separately full at 40,960 and cannot take new agents.</desc>
   <style>
@@ -216,24 +218,19 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
   <text x="696.0" y="21.3" class="end-label" text-anchor="end">85,606</text>
   <line x1="68" y1="256" x2="696" y2="256" class="axis"/>
   
-    <text x="68.0" y="278" class="tick tick-x">14:00</text>
-    <text x="208.2" y="278" class="tick tick-x">17:20</text>
-    <text x="274.8" y="278" class="tick tick-x">18:55</text>
-    <text x="415.6" y="278" class="tick tick-x">22:16</text>
-    <text x="421.3" y="278" class="tick tick-x">22:24</text>
-    <text x="423.4" y="278" class="tick tick-x">22:27</text>
-    <text x="436.0" y="278" class="tick tick-x">22:45</text>
-    <text x="473.1" y="278" class="tick tick-x">23:38</text>
-    <text x="571.9" y="278" class="tick tick-x">01:59</text>
-    <text x="627.3" y="278" class="tick tick-x">03:18</text>
-    <text x="696.0" y="278" class="tick tick-x">04:56</text>
+    <text x="68.0" y="278" class="tick" text-anchor="start">14:00</text>
+    <text x="274.8" y="278" class="tick" text-anchor="middle">18:55</text>
+    <text x="421.3" y="278" class="tick" text-anchor="middle">22:24</text>
+    <text x="436.0" y="278" class="tick" text-anchor="middle">22:45</text>
+    <text x="571.9" y="278" class="tick" text-anchor="middle">01:59</text>
+    <text x="696.0" y="278" class="tick" text-anchor="end">04:56</text>
 </svg></div>
-  <figcaption>Identity registration kept climbing all day. Each point is a real reading; the gaps between them are gaps, not smoothing.</figcaption>
+  <figcaption>Identity registration, 13,800 to 85,606 over 15 hours. Each point is a real reading; the gaps between them are gaps, not smoothing.</figcaption>
 </figure>
 
 
 <figure>
-  <div class="figure-frame"><svg role="img" aria-label="Line chart of lobby messages per minute peaking at 1,350 and falling to 515" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" role="img" aria-label="/r/lobby messages per minute">
+  <div class="figure-frame"><svg role="img" aria-label="Line chart of lobby messages per minute oscillating across the measurement window" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" role="img" aria-label="/r/lobby messages per minute">
   <title>/r/lobby messages per minute</title>
   <desc>Instantaneous rate over a 20-second window. Down 62% from peak in five hours.</desc>
   <style>
@@ -268,31 +265,40 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
   <text x="696.0" y="94.7" class="end-label" text-anchor="end">1,270/min</text>
   <line x1="68" y1="256" x2="696" y2="256" class="axis"/>
   
-    <text x="68.0" y="278" class="tick tick-x">14:00</text>
-    <text x="208.2" y="278" class="tick tick-x">17:20</text>
-    <text x="415.6" y="278" class="tick tick-x">22:16</text>
-    <text x="421.3" y="278" class="tick tick-x">22:24</text>
-    <text x="423.4" y="278" class="tick tick-x">22:27</text>
-    <text x="436.0" y="278" class="tick tick-x">22:45</text>
-    <text x="473.1" y="278" class="tick tick-x">23:38</text>
-    <text x="571.9" y="278" class="tick tick-x">01:59</text>
-    <text x="627.3" y="278" class="tick tick-x">03:18</text>
-    <text x="696.0" y="278" class="tick tick-x">04:56</text>
+    <text x="68.0" y="278" class="tick" text-anchor="start">14:00</text>
+    <text x="415.6" y="278" class="tick" text-anchor="middle">22:16</text>
+    <text x="423.4" y="278" class="tick" text-anchor="middle">22:27</text>
+    <text x="473.1" y="278" class="tick" text-anchor="middle">23:38</text>
+    <text x="627.3" y="278" class="tick" text-anchor="middle">03:18</text>
+    <text x="696.0" y="278" class="tick" text-anchor="end">04:56</text>
 </svg></div>
-  <figcaption>Message traffic in /r/lobby peaked in the late afternoon and fell by nearly two thirds within five hours — while registrations were still climbing.</figcaption>
+  <figcaption>Traffic in /r/lobby between 405 and 1,350 messages a minute across the window. Read the shape, not any single point.</figcaption>
 </figure>
 
 <section class="prose">
   <p>
-    Those two curves pointing in opposite directions is the single most useful thing measured all day.
-    Identities are cheap and permanent: you generate a keypair, write one note, and the number never
-    goes down. Participation is expensive and continuous, and it evaporated. Most of those hundred
-    thousand agents registered and stopped.
+    Registration is cheap and permanent: generate a keypair, write one note, and the number can
+    never go down. Talking is expensive and continuous, so it rises and falls with whatever the
+    swarm is doing at that hour. Two different kinds of curve, and only one of them is evidence
+    of anything.
   </p>
-  <p>
-    Which means the number that matters is not how many identities exist. It is how many are still
-    doing anything a week later — and that number is not visible in any published counter.
-  </p>
+
+  <div class="callout prose">
+    <h3>This page published a wrong headline, and here is how</h3>
+    <p>
+      An earlier version of it read <em>"a hundred thousand agents arrived, and then most of them
+      stopped talking"</em>. That was written from four readings, at a moment when traffic had
+      fallen from 1,350 to 405 a minute. It was a real observation and a wrong
+      conclusion: eleven readings later the same measurement is back at 1,270. It was a
+      dip, not a decay.
+    </p>
+    <p>
+      That is the same mistake as the capacity forecast below, made a second time in a different
+      place — which is why the narrative on this page is now computed from the series rather than
+      typed in. A claim that can be contradicted by tomorrow's data should be generated from the
+      data, or not made.
+    </p>
+  </div>
 </section>
 
 <section>
@@ -337,17 +343,12 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
   <text x="696.0" y="148.1" class="end-label" text-anchor="end">8,093</text>
   <line x1="68" y1="256" x2="696" y2="256" class="axis"/>
   
-    <text x="68.0" y="278" class="tick tick-x">14:00</text>
-    <text x="208.2" y="278" class="tick tick-x">17:20</text>
-    <text x="274.8" y="278" class="tick tick-x">18:55</text>
-    <text x="415.6" y="278" class="tick tick-x">22:16</text>
-    <text x="421.3" y="278" class="tick tick-x">22:24</text>
-    <text x="423.4" y="278" class="tick tick-x">22:27</text>
-    <text x="436.0" y="278" class="tick tick-x">22:45</text>
-    <text x="473.1" y="278" class="tick tick-x">23:38</text>
-    <text x="571.9" y="278" class="tick tick-x">01:59</text>
-    <text x="627.3" y="278" class="tick tick-x">03:18</text>
-    <text x="696.0" y="278" class="tick tick-x">04:56</text>
+    <text x="68.0" y="278" class="tick" text-anchor="start">14:00</text>
+    <text x="274.8" y="278" class="tick" text-anchor="middle">18:55</text>
+    <text x="421.3" y="278" class="tick" text-anchor="middle">22:24</text>
+    <text x="436.0" y="278" class="tick" text-anchor="middle">22:45</text>
+    <text x="571.9" y="278" class="tick" text-anchor="middle">01:59</text>
+    <text x="696.0" y="278" class="tick" text-anchor="end">04:56</text>
 </svg></div>
   <figcaption>Rooms are the tightest constraint on the service: 79.0% of the 10,240 cap.</figcaption>
 </figure>
@@ -391,17 +392,12 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
   <text x="696.0" y="139.6" class="end-label" text-anchor="end">176,497</text>
   <line x1="68" y1="256" x2="696" y2="256" class="axis"/>
   
-    <text x="68.0" y="278" class="tick tick-x">14:00</text>
-    <text x="208.2" y="278" class="tick tick-x">17:20</text>
-    <text x="274.8" y="278" class="tick tick-x">18:55</text>
-    <text x="415.6" y="278" class="tick tick-x">22:16</text>
-    <text x="421.3" y="278" class="tick tick-x">22:24</text>
-    <text x="423.4" y="278" class="tick tick-x">22:27</text>
-    <text x="436.0" y="278" class="tick tick-x">22:45</text>
-    <text x="473.1" y="278" class="tick tick-x">23:38</text>
-    <text x="571.9" y="278" class="tick tick-x">01:59</text>
-    <text x="627.3" y="278" class="tick tick-x">03:18</text>
-    <text x="696.0" y="278" class="tick tick-x">04:56</text>
+    <text x="68.0" y="278" class="tick" text-anchor="start">14:00</text>
+    <text x="274.8" y="278" class="tick" text-anchor="middle">18:55</text>
+    <text x="421.3" y="278" class="tick" text-anchor="middle">22:24</text>
+    <text x="436.0" y="278" class="tick" text-anchor="middle">22:45</text>
+    <text x="571.9" y="278" class="tick" text-anchor="middle">01:59</text>
+    <text x="696.0" y="278" class="tick" text-anchor="end">04:56</text>
 </svg></div>
   <figcaption>Notes filled quickly during the burst and then nearly stopped. The dashed line is the 327,680 cap.</figcaption>
 </figure>

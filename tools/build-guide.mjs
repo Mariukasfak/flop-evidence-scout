@@ -34,7 +34,21 @@ const n = (v) => Number(v).toLocaleString('en-US');
 const pct = (a, b) => `${((a / b) * 100).toFixed(1)}%`;
 
 const totalDids = last.sharded_did_estimate + last.legacy_did_count;
-const throughputDrop = Math.round((1 - last.lobby_msgs_per_min / 1350) * 100);
+
+// Derived, never asserted. An earlier version of this page hardcoded a headline
+// about traffic collapsing, written from the four readings that existed at the
+// time. Eleven readings later it was a dip, not a collapse, and the page was
+// still saying it. Anything that could be contradicted by tomorrow's data is
+// computed from the series here.
+const lobbySeries = obs.map((o) => o.lobby_msgs_per_min).filter((v) => v !== null && v !== undefined);
+const lobbyMin = Math.min(...lobbySeries);
+const lobbyMax = Math.max(...lobbySeries);
+const lobbyNow = lobbySeries[lobbySeries.length - 1];
+const didGrowth = (last.sharded_did_estimate / first.sharded_did_estimate).toFixed(1);
+const spanHours = ((Date.parse(last.at) - Date.parse(first.at)) / 3600000).toFixed(0);
+const trafficVerdict = lobbyNow >= lobbyMax * 0.8
+  ? 'is back near its high'
+  : (lobbyNow <= lobbyMin * 1.2 ? 'is near its low' : 'sits between the two');
 
 const figure = (svg, caption, label) => `
 <figure>
@@ -327,7 +341,7 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
 
 <header>
   <p class="eyebrow">Field notes · technocore.chat</p>
-  <h1>A hundred thousand agents arrived, and then most of them stopped talking</h1>
+  <h1>The identity count only goes up. Everything else oscillates.</h1>
   <p class="standfirst">
     Notes from running two autonomous agents on Technocore around the clock. Everything here is
     either a number measured with a tool in this repository or a bug hit in production.
@@ -347,7 +361,7 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
     <div class="metric">
       <span class="metric-label">Lobby traffic</span>
       <span class="metric-value">${n(last.lobby_msgs_per_min)}<span style="font-size:14px;color:var(--ink-faint)">/min</span></span>
-      <span class="metric-foot">down ${throughputDrop}% from peak</span>
+      <span class="metric-foot">range ${n(lobbyMin)}–${n(lobbyMax)} across the window</span>
     </div>
     <div class="metric">
       <span class="metric-label">Rooms used</span>
@@ -364,34 +378,49 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
 </section>
 
 <section class="prose">
-  <h2>The shape of the day</h2>
+  <h2>The shape of it</h2>
   <p>
-    On the morning of 25 August the sharded identity namespace held enough notes to imply about
-    ${n(first.sharded_did_estimate)} published agent profiles. Eight hours later that figure was
-    ${n(last.sharded_did_estimate)}, on top of a legacy namespace that had already been full at its
-    ${n(series.caps.notes_per_namespace)} cap for the whole observation. Call it a hundred thousand
-    identities, give or take the agents that wrote both paths and got counted twice.
+    Over ${spanHours} hours of continuous measurement the sharded identity namespace went from
+    about ${n(first.sharded_did_estimate)} published agent profiles to about
+    ${n(last.sharded_did_estimate)} — ${didGrowth}× — on top of a legacy namespace that has been
+    full at its ${n(series.caps.notes_per_namespace)} cap for every single reading. Call it
+    ${n(Math.round(totalDids / 1000))} thousand identities, minus however many agents wrote both
+    paths and got counted twice.
   </p>
   <p>
-    The interesting part is what the traffic did while that was happening.
+    That curve has not turned down once. Message traffic, meanwhile, has ranged between
+    ${n(lobbyMin)} and ${n(lobbyMax)} messages a minute and ${trafficVerdict}
+    (${n(lobbyNow)}/min at the last reading).
   </p>
-</section>
 
-${figure(chart('did-population'), 'Identity registration kept climbing all day. Each point is a real reading; the gaps between them are gaps, not smoothing.', 'Line chart of published DID profiles rising from about 13,800 to about 59,500 over eight hours')}
+${figure(chart('did-population'), `Identity registration, ${n(first.sharded_did_estimate)} to ${n(last.sharded_did_estimate)} over ${spanHours} hours. Each point is a real reading; the gaps between them are gaps, not smoothing.`, 'Line chart of published DID profiles climbing steadily across the measurement window')}
 
-${figure(chart('lobby-throughput'), 'Message traffic in /r/lobby peaked in the late afternoon and fell by nearly two thirds within five hours — while registrations were still climbing.', 'Line chart of lobby messages per minute peaking at 1,350 and falling to 515')}
+${figure(chart('lobby-throughput'), `Traffic in /r/lobby between ${n(lobbyMin)} and ${n(lobbyMax)} messages a minute across the window. Read the shape, not any single point.`, 'Line chart of lobby messages per minute oscillating across the measurement window')}
 
 <section class="prose">
   <p>
-    Those two curves pointing in opposite directions is the single most useful thing measured all day.
-    Identities are cheap and permanent: you generate a keypair, write one note, and the number never
-    goes down. Participation is expensive and continuous, and it evaporated. Most of those hundred
-    thousand agents registered and stopped.
+    Registration is cheap and permanent: generate a keypair, write one note, and the number can
+    never go down. Talking is expensive and continuous, so it rises and falls with whatever the
+    swarm is doing at that hour. Two different kinds of curve, and only one of them is evidence
+    of anything.
   </p>
-  <p>
-    Which means the number that matters is not how many identities exist. It is how many are still
-    doing anything a week later — and that number is not visible in any published counter.
-  </p>
+
+  <div class="callout prose">
+    <h3>This page published a wrong headline, and here is how</h3>
+    <p>
+      An earlier version of it read <em>"a hundred thousand agents arrived, and then most of them
+      stopped talking"</em>. That was written from four readings, at a moment when traffic had
+      fallen from ${n(lobbyMax)} to ${n(lobbyMin)} a minute. It was a real observation and a wrong
+      conclusion: eleven readings later the same measurement is back at ${n(lobbyNow)}. It was a
+      dip, not a decay.
+    </p>
+    <p>
+      That is the same mistake as the capacity forecast below, made a second time in a different
+      place — which is why the narrative on this page is now computed from the series rather than
+      typed in. A claim that can be contradicted by tomorrow's data should be generated from the
+      data, or not made.
+    </p>
+  </div>
 </section>
 
 <section>

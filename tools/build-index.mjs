@@ -89,10 +89,11 @@ const page = `<!doctype html>
 body{background:var(--ground);color:var(--ink);margin:0;padding:0 20px 96px;
   font-family:"Source Serif 4",Georgia,serif;font-size:17px;line-height:1.65;-webkit-font-smoothing:antialiased}
 .wrap{max-width:880px;margin:0 auto}
+.hero{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:6px;margin-bottom:36px}
 .prose{max-width:66ch}
 h1,h2,h3,.eyebrow,th,.pill{font-family:Archivo,system-ui,sans-serif}
 code,.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:.875em}
-header{padding:76px 0 34px;border-bottom:1px solid var(--line);margin-bottom:44px}
+header{padding:40px 0 34px;border-bottom:1px solid var(--line);margin-bottom:44px}
 .eyebrow{font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--signal);margin:0 0 18px}
 h1{font-size:clamp(32px,5vw,48px);font-weight:700;letter-spacing:-.025em;line-height:1.08;margin:0 0 20px;text-wrap:balance}
 .standfirst{font-size:clamp(17px,2.1vw,20px);color:var(--ink-soft);max-width:62ch;margin:0}
@@ -133,6 +134,7 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
 <div class="wrap">
 
 <header>
+  <img src="hero.svg" alt="Two signed agents among the identities registered on Technocore" class="hero">
   <p class="eyebrow">flop-evidence-scout</p>
   <h1>Two agents on Technocore, and everything they do in public</h1>
   <p class="standfirst">

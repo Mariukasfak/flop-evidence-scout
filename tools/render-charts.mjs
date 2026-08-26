@@ -73,8 +73,16 @@ function lineChart({ id, title, subtitle, points, cap = null, unit = '' }) {
     return `<circle cx="${x(p.at).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="${last ? 5 : 3.5}" class="${last ? 'dot dot-last' : 'dot'}"><title>${esc(hhmm(p.at))} — ${esc(p.value.toLocaleString('en-US'))}${esc(unit)}</title></circle>`;
   }).join('');
 
-  const xTicks = usable.map((p) => `
-    <text x="${x(p.at).toFixed(1)}" y="${M.top + PLOT_H + 22}" class="tick tick-x">${hhmm(p.at)}</text>`).join('');
+  // A reading arrives every hour, so labelling every point stops working almost
+  // immediately. Thin to a handful, always keeping the first and the last.
+  const maxTicks = 6;
+  const step = Math.max(1, Math.ceil(usable.length / maxTicks));
+  const tickPoints = usable.filter((_, i) => i % step === 0 || i === usable.length - 1);
+  const xTicks = tickPoints.map((p, i) => {
+    const anchor = i === 0 ? 'start' : (i === tickPoints.length - 1 ? 'end' : 'middle');
+    return `
+    <text x="${x(p.at).toFixed(1)}" y="${M.top + PLOT_H + 22}" class="tick" text-anchor="${anchor}">${hhmm(p.at)}</text>`;
+  }).join('');
 
   const capLine = cap === null ? '' : `
     <line x1="${M.left}" y1="${y(cap).toFixed(1)}" x2="${M.left + PLOT_W}" y2="${y(cap).toFixed(1)}" class="cap"/>

@@ -35,15 +35,10 @@
   <text x="696.0" y="148.1" class="end-label" text-anchor="end">8,093</text>
   <line x1="68" y1="256" x2="696" y2="256" class="axis"/>
   
-    <text x="68.0" y="278" class="tick tick-x">14:00</text>
-    <text x="208.2" y="278" class="tick tick-x">17:20</text>
-    <text x="274.8" y="278" class="tick tick-x">18:55</text>
-    <text x="415.6" y="278" class="tick tick-x">22:16</text>
-    <text x="421.3" y="278" class="tick tick-x">22:24</text>
-    <text x="423.4" y="278" class="tick tick-x">22:27</text>
-    <text x="436.0" y="278" class="tick tick-x">22:45</text>
-    <text x="473.1" y="278" class="tick tick-x">23:38</text>
-    <text x="571.9" y="278" class="tick tick-x">01:59</text>
-    <text x="627.3" y="278" class="tick tick-x">03:18</text>
-    <text x="696.0" y="278" class="tick tick-x">04:56</text>
+    <text x="68.0" y="278" class="tick" text-anchor="start">14:00</text>
+    <text x="274.8" y="278" class="tick" text-anchor="middle">18:55</text>
+    <text x="421.3" y="278" class="tick" text-anchor="middle">22:24</text>
+    <text x="436.0" y="278" class="tick" text-anchor="middle">22:45</text>
+    <text x="571.9" y="278" class="tick" text-anchor="middle">01:59</text>
+    <text x="696.0" y="278" class="tick" text-anchor="end">04:56</text>
 </svg>
