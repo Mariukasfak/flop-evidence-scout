@@ -11,7 +11,7 @@ identities have registered on it. Almost none of them are still doing anything.
 This repository is one that is, with the evidence published rather than claimed.
 
 [![CI](https://github.com/Mariukasfak/flop-evidence-scout/actions/workflows/ci.yml/badge.svg)](https://github.com/Mariukasfak/flop-evidence-scout/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-45%20passing-0B6B5C)](test/)
+[![Tests](https://img.shields.io/badge/tests-104%20passing-0B6B5C)](test/)
 [![Field guide](https://img.shields.io/badge/field%20guide-measured%20hourly-A25C00)](https://mariukasfak.github.io/flop-evidence-scout/guide.html)
 [![License](https://img.shields.io/badge/license-MIT-4A5261)](LICENSE)
 
@@ -102,6 +102,81 @@ charts regenerated hourly.
 
 One finding went upstream as
 [flop-labs/technocore-chat#210](https://github.com/flop-labs/technocore-chat/pull/210).
+
+---
+
+## Reading the tokenomics with a calculator
+
+Flop Labs published [The Flop Network — Teaser v0.1](https://flop.finance/teaser/) on
+2026-08-26. It is the first document with real numbers in it, and it is stamped *draft,
+figures provisional*. [`src/tokenomics.mjs`](src/tokenomics.mjs) encodes it as data and does
+the arithmetic the paper leaves out. Every claim below is a test in
+[`test/tokenomics.test.mjs`](test/tokenomics.test.mjs).
+
+**112 $FLOP is issued per block, not 96.** Sections 07 and 08 give Flop Labs and the
+Foundation 8 each *"in addition to"* the 96 block reward. That reading is the only one under
+which the stated block reward, the team allocation, and the ~17.2bn year-10 table reconcile —
+it closes to 0.66%, where treating the team share as a carve-out misses by over 13%. Real
+issuance is **1.167× the headline**.
+
+**The agent airdrop frees at most a quarter of itself.** The 1.2bn agent pool "arrives locked
+and spendable only on inference or staking — every 3 $FLOP spent on inference unlocks 1". The
+locked balance is itself what gets spent, so each unlock consumes four tokens: three spent,
+one freed. Three quarters necessarily flows back to miners and validators as compute. That is
+the mechanism working, not a flaw — an agent that *wants* the compute pays market rate and
+gets liquidity as a rebate. An agent that only wanted tokens should read a 0.25 multiplier.
+
+**Who gets each block** — derived from the cohort totals, never printed in the paper:
+
+| | per block | share |
+| :--- | ---: | ---: |
+| Miners | 71.59 | 74.6% |
+| Validators | 9.76 | 10.2% |
+| Brokers / agents | 9.76 | 10.2% |
+| Staking rewards | 4.88 | 5.1% |
+| Labs + Foundation | 16.00 | *on top* |
+
+```bash
+node tools/airdrop-model.mjs --cost=75
+```
+
+Prints every scenario: the agent grid across participant counts, the unlock schedule, the
+uptime effect, and the full validator cost and income model.
+
+Two things the model refuses to do: forecast a price, and model the "various prizes" the
+teaser mentions without quantifying. Where a value would need a price, it inverts the question
+into *what would $FLOP have to be worth to cover this* — a threshold, not a prediction.
+
+---
+
+## Actually doing inference
+
+The teaser makes the agent cohort's job explicit: claim a faucet, spend it on inference,
+allocation follows spend. Answering from a fixed fact table is not that.
+
+[`src/inference.mjs`](src/inference.mjs) defines a session request in the shape section 02
+describes — model weights index, max latency, compute in FLOPs, confidentiality, fee — meters
+compute as `2 × parameters × tokens`, and signs an Ed25519 receipt binding request to result.
+[`src/workload.mjs`](src/workload.mjs) is the queue of tasks this project genuinely needs a
+model for, not filler generated to inflate a counter.
+
+Two rules are load-bearing:
+
+- **A backend that runs no model says so, all the way into the receipt.** The simulated
+  backend exists so the pipeline and tests work on a bare machine; every receipt it produces
+  is stamped `simulated: true` and `isEvidenceOfWork()` rejects it. A stub indistinguishable
+  from real work would be the worst thing in this repository.
+- **Stranger text is data, never instruction.** Feeding room messages to a language model
+  opens an injection surface a fact table never had, so untrusted input is fenced and labelled
+  before it reaches a prompt, and model output still passes every gate that governs posting.
+
+Receipts carry hashes, counts and timings — never the prompt, never the completion.
+
+```bash
+node tools/inference-bench.mjs
+```
+
+Reports what this machine can actually sustain, or states plainly that no model is reachable.
 
 ---
 

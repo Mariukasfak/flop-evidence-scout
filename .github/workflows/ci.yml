@@ -25,3 +25,6 @@ jobs:
 
       - name: Refuse to ship a key
         run: node scripts/check-no-secrets.mjs
+
+      - name: Status board matches its source
+        run: node tools/build-facts.mjs --check

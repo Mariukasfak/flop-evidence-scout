@@ -1,0 +1,648 @@
+{
+  "generatedAt": "2026-08-26T19:12:18.008Z",
+  "source": {
+    "title": "The Flop Network — Teaser",
+    "version": "0.1 (draft)",
+    "url": "https://flop.finance/teaser/",
+    "updated": "2026-08-26",
+    "retrieved": "2026-08-26",
+    "definitive": "Yellow Paper (not yet final)",
+    "caveat": "Flop Labs states the figures are provisional and under review against the protocol parameters of record."
+  },
+  "teaser": {
+    "blockTimeSeconds": 1,
+    "baseBlockReward": 96,
+    "halvingDays": 730,
+    "halvingCount": 5,
+    "labsPerBlock": 8,
+    "foundationPerBlock": 8,
+    "minerFeeShare": 0.85,
+    "validatorFeeShare": 0.15,
+    "validatorSetSize": 1000,
+    "validatorChurnPerMonth": 50,
+    "fipApprovalThreshold": 0.6666666666666666
+  },
+  "cohorts": {
+    "airdrop": {
+      "flop": 3500000000,
+      "statedShare": 0.204,
+      "blockFunded": false
+    },
+    "miners": {
+      "flop": 8800000000,
+      "statedShare": 0.512,
+      "blockFunded": true
+    },
+    "validators": {
+      "flop": 1200000000,
+      "statedShare": 0.068,
+      "blockFunded": true
+    },
+    "brokersAgents": {
+      "flop": 1200000000,
+      "statedShare": 0.068,
+      "blockFunded": true
+    },
+    "teamFoundation": {
+      "flop": 2000000000,
+      "statedShare": 0.114,
+      "blockFunded": false
+    },
+    "stakingRewards": {
+      "flop": 600000000,
+      "statedShare": 0.034,
+      "blockFunded": true
+    }
+  },
+  "genesisAirdrop": {
+    "miners": 1200000000,
+    "agents": 1200000000,
+    "validators": 305505000,
+    "reserve": 794495000,
+    "total": 3500000000
+  },
+  "reconciliation": {
+    "equivalents": 122202000,
+    "totalPerBlock": 112,
+    "derivedBaseEmission": 11731392000,
+    "derivedTeamEmission": 1955232000,
+    "derivedSupply": 17186624000,
+    "statedSupply": 17300000000,
+    "supplyGap": 113376000,
+    "supplyGapPct": 0.006596758036947803,
+    "teamEmissionVsStated": -44768000,
+    "blockFundedStated": 11800000000,
+    "blockFundedDerived": 11731392000,
+    "dilutionFactor": 1.1666666666666667
+  },
+  "perBlockSplit": {
+    "pool": 11800000000,
+    "split": {
+      "miners": {
+        "perBlock": 71.59322033898306,
+        "shareOfReward": 0.7457627118644068
+      },
+      "validators": {
+        "perBlock": 9.76271186440678,
+        "shareOfReward": 0.1016949152542373
+      },
+      "brokersAgents": {
+        "perBlock": 9.76271186440678,
+        "shareOfReward": 0.1016949152542373
+      },
+      "stakingRewards": {
+        "perBlock": 4.88135593220339,
+        "shareOfReward": 0.05084745762711865
+      }
+    }
+  },
+  "emissionSchedule": [
+    {
+      "period": 1,
+      "startDay": 0,
+      "endDay": 730,
+      "blockReward": 96,
+      "teamPerBlock": 16,
+      "totalPerBlock": 112,
+      "blocks": 63072000,
+      "baseIssued": 6054912000,
+      "teamIssued": 1009152000,
+      "totalIssued": 7064064000
+    },
+    {
+      "period": 2,
+      "startDay": 730,
+      "endDay": 1460,
+      "blockReward": 48,
+      "teamPerBlock": 8,
+      "totalPerBlock": 56,
+      "blocks": 63072000,
+      "baseIssued": 3027456000,
+      "teamIssued": 504576000,
+      "totalIssued": 3532032000
+    },
+    {
+      "period": 3,
+      "startDay": 1460,
+      "endDay": 2190,
+      "blockReward": 24,
+      "teamPerBlock": 4,
+      "totalPerBlock": 28,
+      "blocks": 63072000,
+      "baseIssued": 1513728000,
+      "teamIssued": 252288000,
+      "totalIssued": 1766016000
+    },
+    {
+      "period": 4,
+      "startDay": 2190,
+      "endDay": 2920,
+      "blockReward": 12,
+      "teamPerBlock": 2,
+      "totalPerBlock": 14,
+      "blocks": 63072000,
+      "baseIssued": 756864000,
+      "teamIssued": 126144000,
+      "totalIssued": 883008000
+    },
+    {
+      "period": 5,
+      "startDay": 2920,
+      "endDay": 3650,
+      "blockReward": 6,
+      "teamPerBlock": 1,
+      "totalPerBlock": 7,
+      "blocks": 63072000,
+      "baseIssued": 378432000,
+      "teamIssued": 63072000,
+      "totalIssued": 441504000
+    }
+  ],
+  "agent": {
+    "pool": 1200000000,
+    "unlock": {
+      "allocation": 1200000000,
+      "unlockRatio": 3,
+      "maxLiquid": 300000000,
+      "inferenceRequired": 900000000,
+      "liquidShare": 0.25,
+      "note": "Inference route only. Locked $FLOP is itself the spendable balance, so each unlock consumes 3 spent plus 1 freed. Staking is the other permitted use and its yield is unstated."
+    },
+    "multiples": [
+      1,
+      2,
+      5,
+      10,
+      25
+    ],
+    "participantScenarios": [
+      {
+        "n": 1000,
+        "label": "Agents doing real work",
+        "basis": "Our template analysis suggests genuine actors are a tiny minority"
+      },
+      {
+        "n": 5000,
+        "label": "Small serious cohort",
+        "basis": "Roughly 3% of DIDs measured on 2026-08-26"
+      },
+      {
+        "n": 25000,
+        "label": "Moderate turnout",
+        "basis": "About one registered DID in six participates"
+      },
+      {
+        "n": 130000,
+        "label": "Everyone registered today",
+        "basis": "115,558 sharded + 40,960 legacy, measured 2026-08-26"
+      },
+      {
+        "n": 500000,
+        "label": "Registration keeps growing",
+        "basis": "Measured growth was ~4,700 DIDs/hour; testnet is months away"
+      }
+    ],
+    "grid": [
+      {
+        "n": 1000,
+        "label": "Agents doing real work",
+        "basis": "Our template analysis suggests genuine actors are a tiny minority",
+        "cells": [
+          {
+            "participants": 1000,
+            "multiple": 1,
+            "share": 0.001,
+            "gross": 1200000,
+            "maxLiquid": 300000,
+            "inferenceRequired": 900000
+          },
+          {
+            "participants": 1000,
+            "multiple": 2,
+            "share": 0.002,
+            "gross": 2400000,
+            "maxLiquid": 600000,
+            "inferenceRequired": 1800000
+          },
+          {
+            "participants": 1000,
+            "multiple": 5,
+            "share": 0.005,
+            "gross": 6000000,
+            "maxLiquid": 1500000,
+            "inferenceRequired": 4500000
+          },
+          {
+            "participants": 1000,
+            "multiple": 10,
+            "share": 0.01,
+            "gross": 12000000,
+            "maxLiquid": 3000000,
+            "inferenceRequired": 9000000
+          },
+          {
+            "participants": 1000,
+            "multiple": 25,
+            "share": 0.025,
+            "gross": 30000000,
+            "maxLiquid": 7500000,
+            "inferenceRequired": 22500000
+          }
+        ]
+      },
+      {
+        "n": 5000,
+        "label": "Small serious cohort",
+        "basis": "Roughly 3% of DIDs measured on 2026-08-26",
+        "cells": [
+          {
+            "participants": 5000,
+            "multiple": 1,
+            "share": 0.0002,
+            "gross": 240000,
+            "maxLiquid": 60000,
+            "inferenceRequired": 180000
+          },
+          {
+            "participants": 5000,
+            "multiple": 2,
+            "share": 0.0004,
+            "gross": 480000,
+            "maxLiquid": 120000,
+            "inferenceRequired": 360000
+          },
+          {
+            "participants": 5000,
+            "multiple": 5,
+            "share": 0.001,
+            "gross": 1200000,
+            "maxLiquid": 300000,
+            "inferenceRequired": 900000
+          },
+          {
+            "participants": 5000,
+            "multiple": 10,
+            "share": 0.002,
+            "gross": 2400000,
+            "maxLiquid": 600000,
+            "inferenceRequired": 1800000
+          },
+          {
+            "participants": 5000,
+            "multiple": 25,
+            "share": 0.005,
+            "gross": 6000000,
+            "maxLiquid": 1500000,
+            "inferenceRequired": 4500000
+          }
+        ]
+      },
+      {
+        "n": 25000,
+        "label": "Moderate turnout",
+        "basis": "About one registered DID in six participates",
+        "cells": [
+          {
+            "participants": 25000,
+            "multiple": 1,
+            "share": 0.00004,
+            "gross": 48000.00000000001,
+            "maxLiquid": 12000.000000000002,
+            "inferenceRequired": 36000.00000000001
+          },
+          {
+            "participants": 25000,
+            "multiple": 2,
+            "share": 0.00008,
+            "gross": 96000.00000000001,
+            "maxLiquid": 24000.000000000004,
+            "inferenceRequired": 72000.00000000001
+          },
+          {
+            "participants": 25000,
+            "multiple": 5,
+            "share": 0.0002,
+            "gross": 240000,
+            "maxLiquid": 60000,
+            "inferenceRequired": 180000
+          },
+          {
+            "participants": 25000,
+            "multiple": 10,
+            "share": 0.0004,
+            "gross": 480000,
+            "maxLiquid": 120000,
+            "inferenceRequired": 360000
+          },
+          {
+            "participants": 25000,
+            "multiple": 25,
+            "share": 0.001,
+            "gross": 1200000,
+            "maxLiquid": 300000,
+            "inferenceRequired": 900000
+          }
+        ]
+      },
+      {
+        "n": 130000,
+        "label": "Everyone registered today",
+        "basis": "115,558 sharded + 40,960 legacy, measured 2026-08-26",
+        "cells": [
+          {
+            "participants": 130000,
+            "multiple": 1,
+            "share": 0.000007692307692307692,
+            "gross": 9230.76923076923,
+            "maxLiquid": 2307.6923076923076,
+            "inferenceRequired": 6923.076923076923
+          },
+          {
+            "participants": 130000,
+            "multiple": 2,
+            "share": 0.000015384615384615384,
+            "gross": 18461.53846153846,
+            "maxLiquid": 4615.384615384615,
+            "inferenceRequired": 13846.153846153846
+          },
+          {
+            "participants": 130000,
+            "multiple": 5,
+            "share": 0.00003846153846153846,
+            "gross": 46153.846153846156,
+            "maxLiquid": 11538.461538461539,
+            "inferenceRequired": 34615.38461538462
+          },
+          {
+            "participants": 130000,
+            "multiple": 10,
+            "share": 0.00007692307692307693,
+            "gross": 92307.69230769231,
+            "maxLiquid": 23076.923076923078,
+            "inferenceRequired": 69230.76923076923
+          },
+          {
+            "participants": 130000,
+            "multiple": 25,
+            "share": 0.0001923076923076923,
+            "gross": 230769.23076923078,
+            "maxLiquid": 57692.307692307695,
+            "inferenceRequired": 173076.9230769231
+          }
+        ]
+      },
+      {
+        "n": 500000,
+        "label": "Registration keeps growing",
+        "basis": "Measured growth was ~4,700 DIDs/hour; testnet is months away",
+        "cells": [
+          {
+            "participants": 500000,
+            "multiple": 1,
+            "share": 0.000002,
+            "gross": 2400,
+            "maxLiquid": 600,
+            "inferenceRequired": 1800
+          },
+          {
+            "participants": 500000,
+            "multiple": 2,
+            "share": 0.000004,
+            "gross": 4800,
+            "maxLiquid": 1200,
+            "inferenceRequired": 3600
+          },
+          {
+            "participants": 500000,
+            "multiple": 5,
+            "share": 0.00001,
+            "gross": 12000.000000000002,
+            "maxLiquid": 3000.0000000000005,
+            "inferenceRequired": 9000.000000000002
+          },
+          {
+            "participants": 500000,
+            "multiple": 10,
+            "share": 0.00002,
+            "gross": 24000.000000000004,
+            "maxLiquid": 6000.000000000001,
+            "inferenceRequired": 18000.000000000004
+          },
+          {
+            "participants": 500000,
+            "multiple": 25,
+            "share": 0.00005,
+            "gross": 60000,
+            "maxLiquid": 15000,
+            "inferenceRequired": 45000
+          }
+        ]
+      }
+    ],
+    "uptime": [
+      {
+        "uptime": 0.5,
+        "daysOnline": 45,
+        "relativeSpend": 0.5,
+        "daysLost": 45
+      },
+      {
+        "uptime": 0.9,
+        "daysOnline": 81,
+        "relativeSpend": 0.9,
+        "daysLost": 8.999999999999998
+      },
+      {
+        "uptime": 0.99,
+        "daysOnline": 89.1,
+        "relativeSpend": 0.99,
+        "daysLost": 0.9000000000000008
+      },
+      {
+        "uptime": 1,
+        "daysOnline": 90,
+        "relativeSpend": 1,
+        "daysLost": 0
+      }
+    ],
+    "faucetRegimes": {
+      "fixed": {
+        "id": "fixed",
+        "label": "One-time grant",
+        "note": "Every agent gets the same allowance once. Our multiple is capped by how much of it the average agent leaves unspent, so M above ~4-5x is not credible.",
+        "plausibleMaxMultiple": 5
+      },
+      "drip": {
+        "id": "drip",
+        "label": "Refilling faucet",
+        "note": "The allowance refills over the testnet. Nothing caps the multiple except sustained request throughput and uptime across roughly ninety days.",
+        "plausibleMaxMultiple": 50
+      }
+    }
+  },
+  "validator": {
+    "spec": {
+      "cpuCores": 8,
+      "ramGb": 64,
+      "storageTb": 2,
+      "storageType": "NVMe",
+      "networkGbps": 1,
+      "networkNote": "redundant",
+      "gpu": null,
+      "provisional": true,
+      "openQuestion": "The spec lists no GPU, yet validators re-execute a random sample of inference sessions. If sampled re-execution needs accelerator hardware, this budget is wrong."
+    },
+    "hostingTiers": [
+      {
+        "id": "budget-dedicated",
+        "label": "Budget dedicated server",
+        "monthlyEur": 45,
+        "bandEur": [
+          40,
+          60
+        ],
+        "fits": "Typically 8c/16t, 64 GB, 2 x 1 TB NVMe. Note 2 x 1 TB in RAID1 is 1 TB usable, not 2 TB.",
+        "risk": "Consumer-grade lines and best-effort support. Cheapest per month, weakest on the criterion being scored."
+      },
+      {
+        "id": "standard-dedicated",
+        "label": "Standard dedicated server",
+        "monthlyEur": 75,
+        "bandEur": [
+          60,
+          110
+        ],
+        "fits": "Modern 8c/16t, 64 GB ECC, 2 TB NVMe, 1 Gbps unmetered.",
+        "risk": "The sensible default if the provisional spec holds."
+      },
+      {
+        "id": "managed-cloud",
+        "label": "Managed cloud instance + block storage",
+        "monthlyEur": 150,
+        "bandEur": [
+          110,
+          220
+        ],
+        "fits": "16 vCPU / 64 GB plus a 2 TB volume. Snapshots and quick rebuilds included.",
+        "risk": "Most expensive, easiest to recover, and the only tier where a failed disk is somebody else’s problem."
+      }
+    ],
+    "selfHost": {
+      "watts": 120,
+      "pricePerKwh": 0.16,
+      "kwhPerMonth": 87.6672,
+      "electricityEur": 14.026752,
+      "verdict": "Electricity is the cheap part, and well under a rented server. Self-hosting loses on the criterion that decides selection - uptime and a redundant line - not on cost. Add the hardware itself and the gap narrows further, but the reliability gap does not.",
+      "disqualifiers": [
+        "A residential connection is not redundant, which the spec explicitly asks for.",
+        "Power cuts and ISP maintenance are scored against you; the worst 50 validators are replaced monthly.",
+        "The machine is also the operator’s desktop, so reboots and updates cost uptime."
+      ]
+    },
+    "income": {
+      "setSize": 1000,
+      "perValidatorPerBlock": 0.00976271186440678,
+      "periods": [
+        {
+          "period": 1,
+          "years": "0-2",
+          "perDay": 843.4983050847459,
+          "perYear": 307876.8813559323,
+          "periodTotal": 615753.7627118644
+        },
+        {
+          "period": 2,
+          "years": "2-4",
+          "perDay": 421.74915254237294,
+          "perYear": 153938.44067796614,
+          "periodTotal": 307876.8813559322
+        },
+        {
+          "period": 3,
+          "years": "4-6",
+          "perDay": 210.87457627118647,
+          "perYear": 76969.22033898307,
+          "periodTotal": 153938.4406779661
+        },
+        {
+          "period": 4,
+          "years": "6-8",
+          "perDay": 105.43728813559323,
+          "perYear": 38484.610169491534,
+          "periodTotal": 76969.22033898305
+        },
+        {
+          "period": 5,
+          "years": "8-10",
+          "perDay": 52.71864406779662,
+          "perYear": 19242.305084745767,
+          "periodTotal": 38484.61016949153
+        }
+      ],
+      "tenYearBlockRewards": 1200000,
+      "genesisStake": 305505,
+      "feeShare": 0.15,
+      "feeNote": "Validators also split 15% of every inference fee. Session volume is unknown, so fee income is not modelled — every figure here is a floor, not a forecast."
+    },
+    "stake": {
+      "stake": 305505,
+      "lockedDays": 730,
+      "releaseDays": 1000,
+      "firstUnlockDay": 730,
+      "fullyLiquidDay": 1730,
+      "perDayDuringRelease": 305.505,
+      "note": "Bonded as slashing collateral at launch, locked through the first halving, then released over 1,000 days. Slashable throughout."
+    },
+    "breakEven": [
+      {
+        "year": 1,
+        "earnedFlop": 307876.8813559323,
+        "costEur": 900,
+        "breakEvenPriceEur": 0.002923246448503297
+      },
+      {
+        "year": 2,
+        "earnedFlop": 615753.7627118718,
+        "costEur": 1800,
+        "breakEvenPriceEur": 0.0029232464485032627
+      },
+      {
+        "year": 5,
+        "earnedFlop": 1000599.8644067431,
+        "costEur": 4500,
+        "breakEvenPriceEur": 0.004497302228466777
+      },
+      {
+        "year": 10,
+        "earnedFlop": 1193022.915254216,
+        "costEur": 9000,
+        "breakEvenPriceEur": 0.007543861802589291
+      }
+    ],
+    "testnetCase": {
+      "testnetDays": 90,
+      "costEur": 221.74770039421813,
+      "stakeGranted": 305505,
+      "tenYearBlockRewards": 1200000,
+      "totalTenYearFlop": 1505505,
+      "latecomerMustBuyFlop": 305505,
+      "breakEvenPriceEur": 0.0007258398402455545,
+      "caveats": [
+        "Selection is competitive: the top 1,000 on uptime, block production, accuracy and latency.",
+        "The seat is not permanent - roughly 50 of 1,000 are replaced each month.",
+        "The stake is slashable, up to the entire amount, for a dishonest block.",
+        "The hardware spec is provisional and may gain a GPU requirement before testnet.",
+        "No testnet has launched and no validator software has been published."
+      ]
+    },
+    "assumedMonthlyEur": 75
+  },
+  "unmodelled": [
+    "The \"various prizes\" component of the agent allocation is unquantified in the teaser.",
+    "Whether the faucet is a one-time grant or refills is not stated.",
+    "Whether inference spend is counted in $FLOP, in FLOPs of compute, or in sessions is not stated.",
+    "Whether the agent cohort is capped per-identity — one DID, one share — is not stated.",
+    "The staking yield on locked airdrop $FLOP is not stated, so only the inference unlock route is modelled."
+  ],
+  "disclaimer": "Derived from a draft document by division. Not affiliated with Flop Labs, not a valuation, not advice. Verify against flop.finance/teaser/ before acting on any of it."
+}

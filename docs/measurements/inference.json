@@ -1,0 +1,61 @@
+{
+  "measuredAt": "2026-08-26T19:16:46.781Z",
+  "backend": "simulated",
+  "model": null,
+  "isRealInference": false,
+  "runsPerTask": 3,
+  "perTask": {
+    "classify-message": {
+      "runs": 3,
+      "succeeded": 3,
+      "validOutputs": 0,
+      "validShare": 0,
+      "meanLatencyMs": 0,
+      "minLatencyMs": 0,
+      "maxLatencyMs": 0
+    },
+    "summarise-source-change": {
+      "runs": 3,
+      "succeeded": 3,
+      "validOutputs": 3,
+      "validShare": 1,
+      "meanLatencyMs": 0,
+      "minLatencyMs": 0,
+      "maxLatencyMs": 0
+    },
+    "explain-measurement": {
+      "runs": 3,
+      "succeeded": 3,
+      "validOutputs": 3,
+      "validShare": 1,
+      "meanLatencyMs": 0,
+      "minLatencyMs": 0,
+      "maxLatencyMs": 0
+    },
+    "draft-answer": {
+      "runs": 3,
+      "succeeded": 3,
+      "validOutputs": 3,
+      "validShare": 1,
+      "meanLatencyMs": 0,
+      "minLatencyMs": 0,
+      "maxLatencyMs": 0
+    }
+  },
+  "totals": {
+    "receipts": 12,
+    "genuine": 0,
+    "simulated": 12,
+    "failed": 0,
+    "promptTokens": 0,
+    "completionTokens": 0,
+    "estimatedFlops": 0,
+    "feeFlop": 0,
+    "latencyMsTotal": 0,
+    "meanLatencyMs": null
+  },
+  "receiptsVerified": 12,
+  "receiptsCountingAsWork": 0,
+  "projection": null,
+  "caveat": "NOT A MEASUREMENT OF INFERENCE. No model was reachable; a deterministic stand-in ran instead."
+}

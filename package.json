@@ -15,7 +15,10 @@
     "learn": "node src/learning-engine.mjs",
     "clean-chats": "node src/learning-engine.mjs --clean",
     "prune-chats": "node src/learning-engine.mjs --prune",
-    "test": "node --test"
+    "test": "node --test",
+    "airdrop-model": "node tools/airdrop-model.mjs",
+    "inference-bench": "node tools/inference-bench.mjs",
+    "watch-sources": "node tools/watch-sources.mjs"
   },
   "keywords": [
     "flop-network",
@@ -23,7 +26,10 @@
     "ai-agent",
     "did-key",
     "ed25519",
-    "proof-of-useful-inference"
+    "proof-of-useful-inference",
+    "tokenomics",
+    "inference",
+    "validator"
   ],
   "author": "Mariukasfak",
   "license": "MIT"

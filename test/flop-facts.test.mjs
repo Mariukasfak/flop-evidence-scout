@@ -34,10 +34,20 @@ describe('FLOP status board', () => {
   test('what is unknown is published, not omitted', () => {
     const unknown = factsByStatus(STATUS.UNKNOWN);
     assert.equal(unknown.length >= 3, true, 'the unknowns are the point');
-    // The three that matter most for anyone deciding what to do.
+
+    // This used to assert that "chain" was among the unknowns. The Teaser
+    // answered it — FLOP runs on its own account-based PoUI chain — so that
+    // entry moved to CONFIRMED and the assertion started failing on a correct
+    // change. Pinning a topic word pins the state of someone else's roadmap.
+    //
+    // What should stay true regardless is the shape: the scoring formula is the
+    // one thing a reader most needs and the one thing still unpublished, and no
+    // UNKNOWN may be a bare shrug without a source explaining what was checked.
     const text = unknown.map((f) => f.claim).join(' ').toLowerCase();
-    assert.match(text, /chain/);
-    assert.match(text, /snapshot|scoring/);
+    assert.match(text, /snapshot|scoring|formula/);
+    for (const f of unknown) {
+      assert.ok(f.source.length > 20, `${f.id} must say what was checked, not just assert ignorance`);
+    }
   });
 
   test('a post fits the message cap and survives the single-line sweep', () => {

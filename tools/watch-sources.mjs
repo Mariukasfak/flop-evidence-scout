@@ -49,6 +49,12 @@ const SOURCES = [
   { id: 'patterns', url: 'https://technocore.chat/patterns.md', kind: 'text' },
   { id: 'skill', url: 'https://technocore.chat/skill.md', kind: 'text' },
   { id: 'flop-finance', url: 'https://flop.finance/', kind: 'html' },
+  // Added 2026-08-26, the day this watcher failed to notice the most important
+  // document Flop Labs has published. The Teaser appeared at /teaser/ — a path
+  // that did not exist when the source list was written — and the apex page only
+  // gained a link to it. Watching the apex was never going to be enough, so the
+  // teaser is watched directly AND link discovery below reports any new path.
+  { id: 'flop-teaser', url: 'https://flop.finance/teaser/', kind: 'html' },
   { id: 'upstream-commits', url: 'https://api.github.com/repos/flop-labs/technocore-chat/commits?per_page=5', kind: 'gh' },
   { id: 'upstream-releases', url: 'https://api.github.com/repos/flop-labs/technocore-chat/releases?per_page=1', kind: 'gh' }
 ];
@@ -67,7 +73,12 @@ const SIGNAL_WORDS = [
   // the whitepaper within weeks. Those are the documents that turn every UNKNOWN
   // on the status board into an answer, so their first appearance is the single
   // most valuable thing this watcher can catch.
-  'tokenomics', 'whitepaper', 'supply', 'halving', 'genesis', 'staking', 'governance'
+  'tokenomics', 'whitepaper', 'supply', 'halving', 'genesis', 'staking', 'governance',
+  // Added 2026-08-26 from the Teaser v0.1's own vocabulary. The Yellow Paper is
+  // the document that turns every provisional figure into a final one, so its
+  // first mention anywhere is the loudest signal this watcher can carry.
+  'yellow', 'slashing', 'slashed', 'validator', 'miner', 'emission', 'unlock',
+  'vesting', 'snapshot', 'toploc', 'attestation', 'mempool'
 ];
 
 function signalHits(body) {
@@ -127,6 +138,29 @@ function summarise(id, kind, body) {
   return `${normalise(kind, body).length} chars`;
 }
 
+/**
+ * Every first-party path flop.finance links to.
+ *
+ * The Teaser did not change a watched source — it *was* a new source, at a path
+ * that did not exist the day before. Digest-watching a fixed list can only ever
+ * catch edits to documents we already knew about, so this reports the appearance
+ * of a path instead, which is how a new document actually arrives.
+ */
+function discoverLinks(html, origin = 'https://flop.finance') {
+  const paths = new Set();
+  for (const m of html.matchAll(/href="([^"]+)"/gi)) {
+    let href = m[1];
+    if (href.startsWith(origin)) href = href.slice(origin.length) || '/';
+    if (!href.startsWith('/') || href.startsWith('//')) continue;
+    const path = href.split(/[?#]/)[0];
+    // Locale mirrors of the same page are not new documents.
+    if (/^\/(ar|de|es|fr|ja|ko|pt-BR|ru|tr|zh)\/?$/.test(path)) continue;
+    if (/\.(svg|png|jpg|jpeg|ico|css|js|woff2?|xml|txt)$/i.test(path)) continue;
+    paths.add(path);
+  }
+  return [...paths].sort();
+}
+
 async function checkRooms() {
   const body = await fetchText('https://technocore.chat/rooms');
   const names = body.split('\n')
@@ -140,8 +174,24 @@ async function main() {
   const now = new Date().toISOString();
 
   let previous = {};
+  let stateWasCorrupt = false;
   if (fs.existsSync(STATE_PATH)) {
-    try { previous = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8')); } catch { previous = {}; }
+    try {
+      previous = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
+    } catch (err) {
+      // This used to be `catch { previous = {}; }`, and that silence cost us the
+      // single most important document Flop Labs has published. A merge landed
+      // conflict markers in this file; the parse failed; the run reported
+      // "Baseline recorded ... no comparison on a first run" and exited 0. Every
+      // run after it did the same. The watcher looked healthy and was blind.
+      //
+      // An unreadable state file is not a first run. It is a fault, and it is
+      // reported as one — a missing file is the only honest first run.
+      stateWasCorrupt = true;
+      previous = {};
+      console.error(`[watch] STATE FILE UNREADABLE (${err.message}). Rebuilding the baseline.`);
+      console.error('[watch] No change can be detected on this run. This is a fault, not a first run.');
+    }
   }
   const prevSources = previous.sources || {};
   const prevRooms = previous.interestingRooms || [];
@@ -161,13 +211,22 @@ async function main() {
         ? Object.keys(JSON.parse(body).paths || {}).sort()
         : undefined;
 
-      sources[source.id] = { url: source.url, digest, summary, signals, paths, checkedAt: now };
+      const links = source.kind === 'html' ? discoverLinks(body) : undefined;
+
+      sources[source.id] = { url: source.url, digest, summary, signals, paths, links, checkedAt: now };
 
       const before = prevSources[source.id];
       if (before && before.digest !== digest) {
         const change = { id: source.id, url: source.url, was: before.summary, now: summary };
 
         // A route appearing is the event; the digest moving is just how we noticed.
+        // A path appearing on the apex is how the Teaser arrived. Report it the
+        // same way a new API route is reported, because it is the same event.
+        if (links && Array.isArray(before.links)) {
+          const addedLinks = links.filter((l) => !before.links.includes(l));
+          if (addedLinks.length) change.addedLinks = addedLinks;
+        }
+
         if (paths && Array.isArray(before.paths)) {
           const added = paths.filter((p) => !before.paths.includes(p));
           const removed = before.paths.filter((p) => !paths.includes(p));
@@ -231,6 +290,15 @@ async function main() {
     interestingRooms
   }, null, 2), 'utf8');
 
+  if (stateWasCorrupt) {
+    // Exit non-zero so the scheduled workflow goes red instead of green. The
+    // baseline above has already been rewritten, so the next run compares
+    // normally — but this run must not be mistaken for a quiet one.
+    console.error('[watch] Baseline rebuilt from a corrupt state file. Failing loudly by design.');
+    process.exitCode = 1;
+    return;
+  }
+
   const isFirstRun = Object.keys(prevSources).length === 0;
   if (isFirstRun) {
     console.log(`[watch] Baseline recorded for ${Object.keys(sources).length} sources. No comparison on a first run.`);
@@ -249,7 +317,8 @@ async function main() {
   console.log(`[watch] ${changes.length} source change(s), ${newRooms.length} new room(s), ${signalAlerts.length} signal-word alert(s).`);
   for (const c of changes) {
     console.log(`  ${c.id}: ${c.was}  ->  ${c.now}`);
-    if (c.addedPaths) console.log(`    NEW PATHS: ${c.addedPaths.join(', ')}`);
+    if (c.addedPaths) console.log(`    NEW ROUTES: ${c.addedPaths.join(', ')}`);
+    if (c.addedLinks) console.log(`    NEW PAGES: ${c.addedLinks.join(', ')}`);
   }
   for (const r of newRooms) console.log(`  new room: ${r}`);
   for (const a of signalAlerts) console.log(`  SIGNAL in ${a.id}: ${a.words.join(', ')}`);
