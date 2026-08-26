@@ -120,7 +120,14 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
   background:var(--signal);border:2px solid var(--ground)}
 .timeline time{display:block;font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--ink-faint);margin-bottom:3px}
 footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:var(--ink-faint);max-width:70ch}
-@media (max-width:620px){body{font-size:16px;padding:0 16px 64px}}
+@media (max-width:620px){
+  body{font-size:16px;padding:0 16px 64px}
+  /* Shrinking a 760-wide diagram to a 340px screen puts its labels at about
+     five effective pixels. The frame already scrolls, so give the figure a
+     floor and let it scroll at a readable size instead. */
+  .figure-frame svg{min-width:600px}
+  .figure-frame{padding:12px}
+}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
