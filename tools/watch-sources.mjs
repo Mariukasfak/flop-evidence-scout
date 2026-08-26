@@ -62,7 +62,12 @@ const SOURCES = [
  */
 const SIGNAL_WORDS = [
   'faucet', 'testnet', 'inference', 'wallet', 'balance', 'mint',
-  'credit', 'quota', 'settle', 'payment', 'ledger'
+  'credit', 'quota', 'settle', 'payment', 'ledger',
+  // Added 2026-08-26: Hayes said tokenomics materials are due within a week and
+  // the whitepaper within weeks. Those are the documents that turn every UNKNOWN
+  // on the status board into an answer, so their first appearance is the single
+  // most valuable thing this watcher can catch.
+  'tokenomics', 'whitepaper', 'supply', 'halving', 'genesis', 'staking', 'governance'
 ];
 
 function signalHits(body) {

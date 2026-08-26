@@ -19,20 +19,33 @@ Arthur Hayes, 2026-08-25:
   from the faucet, and spends it on inference services will receive mainnet tokens.
 - Detailed instructions "soon".
 
-Reported 2026-08-25/26, and it changes the shape of this considerably:
+**Corrected 2026-08-26.** This runbook previously concluded, from a secondary summary
+reporting "20% over ten years", that the reward was a decade-long emission and therefore
+*"there is no race to win"*. A direct Hayes interview the same day says otherwise, and a
+direct interview outweighs a summary of one:
 
-- Hayes proposed allocating **roughly 20% of FLOP supply to testnet participants over ten
-  years**. Some outlets report it as "20% airdropped in October"; the primary write-up says
-  ten years. The ten-year framing is the more specific claim, so treat it as the likelier
-  one and the October figure as possibly conflated.
-- He **did not disclose** the total supply, the release rate, or which activities count —
-  explicitly not whether it is compute, validating jobs, storing agent memories, testnet
-  transactions, or promotion.
+- Flop Labs is **reviewing a ~20% of total supply airdrop for October 2026**. Hayes states
+  plainly that **the tokenomics and airdrop conditions are not finalised**.
+- The described path: **create a testnet wallet, take test tokens, carry out AI inference
+  tasks**. Mainnet tokens follow that activity.
+- **Testnet will run about three months** — and has not launched.
+- Flop Labs takes part of block rewards for **about two years until the first halving**,
+  after which the company's share ends. That is more concrete than the earlier "no VC,
+  fair launch" framing, which said nothing about the company's own take.
+- **Tokenomics materials are due within a week**; the whitepaper is delayed for stakeholder
+  feedback and expected within weeks.
+- Source code is to be published for public review.
 
-**If it is an emission over ten years rather than one snapshot, there is no race to win.**
-The thing being rewarded is sustained operation, which is what this agent is built for and
-what a hundred thousand one-shot registrations are not. That is an argument for patience,
-not for doing more.
+**So the earlier conclusion was wrong, and the revised one is narrower:** there probably is
+a window, it is measured in weeks rather than years, and it opens when the testnet does. It
+is still not a reason to do more *now* — the testnet does not exist, so there is nothing to
+be early to yet. It is a reason to be ready the day it appears, which is what the detection
+below is for.
+
+**One thing that does not reconcile:** an October airdrop against a three-month testnet that
+has not started. Nobody has explained whether the airdrop lands during the testnet, after
+it, or on activity to date. Treat any confident timeline as invented until Flop Labs
+publishes one.
 
 **Still unpublished:** how many operations, how much FLOP, over what duration, how many
 inference calls, the snapshot date, the scoring formula, the contract address, and the chain.
@@ -177,5 +190,5 @@ The value refusal is terminal, not a wait: no amount of remaining budget makes i
 
 ---
 
-*Last reviewed 2026-08-26. Re-read this before acting on it — the situation it describes
+*Last reviewed 2026-08-26 (revised after the Hayes interview). Re-read this before acting on it — the situation it describes
 has been changing several times a day.*

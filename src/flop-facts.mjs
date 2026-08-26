@@ -66,8 +66,57 @@ export const FACTS = Object.freeze([
   {
     id: 'twenty-percent',
     status: STATUS.REPORTED,
-    claim: '~20% of supply proposed for testnet participants — over TEN YEARS, not one snapshot',
-    source: 'crypto.news 2026-08-25. Other outlets render it as "20% airdropped in October"; the ten-year figure is the more specific claim',
+    claim: 'A ~20% of total supply airdrop is UNDER REVIEW for October 2026 — Hayes states tokenomics and airdrop conditions are not finalised',
+    source: 'Hayes, direct interview, Bloomingbit 2026-08-26 ("reviewing a plan to airdrop about 20% ... in October"; "the tokenomics and the conditions for the airdrop have not been finalized")',
+    asOf: '2026-08-26'
+  },
+  {
+    id: 'ten-year-correction',
+    status: STATUS.REFUTED,
+    claim: 'That the 20% is an emission spread over ten years',
+    source: 'This board said so on 2026-08-26, weighting a crypto.news summary over a direct interview. The Bloomingbit interview of the same day has Hayes describing an October airdrop. Corrected rather than deleted',
+    asOf: '2026-08-26'
+  },
+  {
+    id: 'eligibility-loop',
+    status: STATUS.REPORTED,
+    claim: 'Eligibility: create a testnet wallet, take test tokens, and carry out AI inference tasks — mainnet tokens follow that activity',
+    source: 'Hayes, Bloomingbit interview 2026-08-26',
+    asOf: '2026-08-26'
+  },
+  {
+    id: 'testnet-duration',
+    status: STATUS.REPORTED,
+    claim: 'Testnet will run about three months, for security and reliability testing. It has not launched yet',
+    source: 'Hayes, Bloomingbit 2026-08-26; no testnet announced as of this date',
+    asOf: '2026-08-26'
+  },
+  {
+    id: 'company-block-rewards',
+    status: STATUS.REPORTED,
+    claim: 'Flop Labs takes part of block rewards for ~2 years after mainnet, until the first halving, then that share disappears',
+    source: 'Hayes, Bloomingbit 2026-08-26. More concrete than the earlier "no VC / fair launch" framing, which said nothing about the company’s own share',
+    asOf: '2026-08-26'
+  },
+  {
+    id: 'tokenomics-imminent',
+    status: STATUS.REPORTED,
+    claim: 'Tokenomics materials due within a week (supply, distribution, staking, governance); whitepaper delayed for stakeholder feedback, expected within weeks',
+    source: 'Hayes, 2026-08-26, via KuCoin and CryptoRank summaries of the same statements',
+    asOf: '2026-08-26'
+  },
+  {
+    id: 'source-public',
+    status: STATUS.REPORTED,
+    claim: 'Flop Network source code is to be published for public review',
+    source: 'Hayes, Bloomingbit 2026-08-26',
+    asOf: '2026-08-26'
+  },
+  {
+    id: 'date-tension',
+    status: STATUS.UNKNOWN,
+    claim: 'How an October airdrop fits a three-month testnet that has not started — the dates do not obviously reconcile',
+    source: 'Arithmetic on the two reported figures. Nobody has explained whether the airdrop lands during testnet, after it, or on activity to date',
     asOf: '2026-08-26'
   },
   {
