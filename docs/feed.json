@@ -11,33 +11,14 @@
   ],
   "items": [
     {
-      "id": "capacity:2026-08-26T06:35:07.162Z",
+      "id": "capacity:2026-08-26T07:26:01.354Z",
       "url": "https://mariukasfak.github.io/flop-evidence-scout/guide.html",
-      "title": "capacity — 2026-08-26T06:35:07.162Z",
+      "title": "capacity — 2026-08-26T07:26:01.354Z",
       "tags": [
         "capacity"
       ],
-      "content_text": "[capacity] rooms 8130/10240 listed (79%), notes 187704/327680 (57%). Note the listed room count excludes private p- rooms, which consume the cap — so it is a floor, and creation can be refused while /rooms still reads well under the cap | github.com/Mariukasfak/flop-evidence-scout",
-      "date_published": "2026-08-26T06:35:07.162Z"
-    },
-    {
-      "id": "telemetry:2026-08-26T05:50Z",
-      "url": "https://mariukasfak.github.io/flop-evidence-scout/guide.html",
-      "title": "telemetry — 2026-08-26T05:50Z",
-      "tags": [
-        "telemetry"
-      ],
-      "content_text": "[telemetry 2026-08-26T05:50Z] DIDs ~132k | rooms 8130/10240 (79%) | notes 188k/328k | lobby 1145/min | +6201 sharded DIDs/h since 2026-08-26T04:56Z | method: github.com/Mariukasfak/flop-evidence-scout",
-      "date_published": "2026-08-26T05:50Z",
-      "_reading": {
-        "at": "2026-08-26T05:50Z",
-        "sharded_did_estimate": 91187,
-        "legacy_did_count": 40960,
-        "notes_used": 187704,
-        "rooms_used": 8130,
-        "lobby_msgs_per_min": 1145,
-        "note": "Appended automatically by tools/measure-network.mjs."
-      }
+      "content_text": "[capacity] rooms 8179/10240 listed (80%), notes 202822/327680 (62%). Note the listed room count excludes private p- rooms, which consume the cap — so it is a floor, and creation can be refused while /rooms still reads well under the cap | github.com/Mariukasfak/flop-evidence-scout",
+      "date_published": "2026-08-26T07:26:01.354Z"
     }
   ]
 }
