@@ -301,3 +301,64 @@ describe('Generated pages', () => {
     }
   });
 });
+
+describe('Template detection', () => {
+  /**
+   * The signal score ranked /r/gpu-miners and /r/validators highest of any room —
+   * 0.500 and 0.475 — on the strength of generated oracle lines that were
+   * on-topic by every keyword test and matched no boilerplate phrase. A metric
+   * that ranks a feed above a conversation sends the agent where nobody talks.
+   */
+  test('a room generated from one template is recognised as such', async () => {
+    const { templateShare, messageSkeleton } = await import('../src/learning-engine.mjs');
+
+    const generated = Array.from({ length: 20 }, (_, i) =>
+      `FLOP fleet presence did:key:z6Mk${'abcdef'.repeat(8)}${i} | note /kv/did-${i}/${i}beef`);
+    assert.equal(templateShare(generated) >= 0.9, true, 'one template, twenty messages');
+
+    // The identifier must not perturb the signature, which is what defeated the
+    // substitution-based version: 87 messages produced 86 distinct skeletons.
+    assert.equal(messageSkeleton(generated[0]), messageSkeleton(generated[19]));
+  });
+
+  test('genuine variety is not mistaken for a template', async () => {
+    const { templateShare } = await import('../src/learning-engine.mjs');
+    const varied = [
+      'How do I publish a did:key profile note?',
+      'The nonce has to increase per room, not globally.',
+      'Anyone know why my compare-and-set keeps returning 409?',
+      'Long-polling with wait=10 cut my read budget by 95%.',
+      'Which rooms actually carry conversation rather than feeds?'
+    ];
+    assert.equal(templateShare(varied), 0);
+  });
+
+  test('the score is discounted by templating, not only by boilerplate', async () => {
+    const { analyzeChatArchives } = await import('../src/learning-engine.mjs');
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const pathMod = await import('node:path');
+
+    const dir = fs.mkdtempSync(pathMod.join(os.tmpdir(), 'learn-'));
+    const write = (room, texts) => fs.writeFileSync(
+      pathMod.join(dir, `${room}-archive.jsonl`),
+      texts.map((t, i) => JSON.stringify({ seq: i + 1, from: `did:key:z6MkW${i}`, content: t })).join('\n')
+    );
+
+    write('feed', Array.from({ length: 25 }, (_, i) => `Oracle Feed [ABC/USDT]: $${i}.00 verified by node cortex_${i}. did:key mcp technocore`));
+    write('talk', [
+      'How does the did:key signature payload work on Technocore?',
+      'Why does my /kv/ write return 400 bad name?',
+      'Does anyone long-poll with wait=10, or is polling cheaper?',
+      'What is the nonce rule for signed writes per room?',
+      'Where is the mcp tool list documented?'
+    ].concat(Array.from({ length: 20 }, (_, i) => `Genuine question number ${i} about did:key and /kv/ persistence on technocore?`)));
+
+    const report = analyzeChatArchives({ archiveDir: dir, outputDir: dir });
+    const feed = report.roomsBySignal.feed;
+    assert.equal(feed.templateShare >= 0.9, true, 'the feed room is templated');
+    assert.equal(feed.signalScore < 0.1, true, 'and its score is discounted accordingly');
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
