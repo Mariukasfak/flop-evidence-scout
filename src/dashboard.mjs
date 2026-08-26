@@ -614,25 +614,35 @@ export function generateDashboardHtml({
       </div>
     </div>
 
-    <!-- Password Protected Private Section -->
-    <div id="locked-panel" class="lock-box">
-      <div class="lock-icon">🔒</div>
-      <div class="lock-title" id="lock-title">Operator Audit Logs & Dialogue Inspector</div>
-      <p class="lock-desc" id="lock-desc">Public protocol readiness is verified above. Detailed agent dialogues, inquiries, and audit logs are restricted to the operator.</p>
-      <div class="lock-form">
-        <input type="password" id="scout-pass" class="lock-input" placeholder="Enter password to unlock...">
-        <button id="unlock-btn" class="lock-btn" onclick="attemptUnlock()">Unlock</button>
-      </div>
-      <div id="lock-err" class="lock-err">Invalid password. Please try again.</div>
+    <!--
+      There is no password gate here any more, and there never really was one.
+      Everything below was already present in this file: the "lock" only set
+      display:none, so view-source, devtools, or one line in the console showed
+      it all. A control that looks like protection but is not is worse than
+      none, because it invites putting something behind it.
+
+      Nothing here needs protecting. Every message the agents send is already
+      world-readable on technocore.chat, and the whole point of this project is
+      that it can be verified independently.
+    -->
+    <div class="lock-box">
+      <div class="lock-icon">🌐</div>
+      <div class="lock-title">Everything on this page is public</div>
+      <p class="lock-desc">
+        These agents work on a world-readable network. Every message below is already
+        visible to anyone at <code>technocore.chat</code>, so there is nothing here to gate —
+        and a page that pretends otherwise would only be lying to its own operator.
+        Private keys live in <code>.secrets/</code> and GitHub Secrets, are never rendered,
+        and CI fails the build if key material is ever committed.
+      </p>
     </div>
 
-    <div id="unlocked-panel" style="display: none;">
+    <div id="unlocked-panel">
       <h2 class="section-title">
         <span>📋 Naujausi audito įvykiai ir dialogai</span>
         <div>
           <button class="lock-pill" onclick="exportAuditJson()">⬇️ JSON Proof</button>
           <button class="lock-pill" onclick="exportAuditMarkdown()">📜 Sertifikatas (.md)</button>
-          <button class="lock-pill" onclick="lockDashboard()">🔒 Užrakinti</button>
         </div>
       </h2>
       <div class="table-card">
@@ -683,7 +693,6 @@ export function generateDashboardHtml({
   </div>
 
   <script>
-    const AUTH_HASH = "4dc03776bc1e1db9bfce2f08bad7ac5c7bc8af0aea4848a6d0d57afeefe7ff3c";
     const SCOUT_DID = "${did}";
     const SCRIBE_DID = "${scribeDid}";
     const SCOUT_MAILBOX = "${scoutMailbox}";
@@ -799,44 +808,13 @@ export function generateDashboardHtml({
       document.getElementById('check-6-desc').innerText = t.check6Desc;
       document.getElementById('lock-title').innerText = t.lockTitle;
       document.getElementById('lock-desc').innerText = t.lockDesc;
-      document.getElementById('scout-pass').placeholder = t.lockPlaceholder;
       document.getElementById('unlock-btn').innerText = t.lockBtn;
-      document.getElementById('lock-err').innerText = t.lockErr;
       document.getElementById('footer-text').innerHTML = t.footer;
     }
 
-    async function sha256(message) {
-      const msgBuffer = new TextEncoder().encode(message);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    }
 
-    async function attemptUnlock() {
-      const input = document.getElementById('scout-pass').value;
-      const hash = await sha256(input);
-      if (hash === AUTH_HASH) {
-        sessionStorage.setItem('scout_auth', '1');
-        showUnlocked();
-      } else {
-        document.getElementById('lock-err').style.display = 'block';
-      }
-    }
 
-    function showUnlocked() {
-      applyTexts('lt');
-      document.getElementById('locked-panel').style.display = 'none';
-      document.getElementById('unlocked-panel').style.display = 'block';
-    }
 
-    function lockDashboard() {
-      sessionStorage.removeItem('scout_auth');
-      applyTexts('en');
-      document.getElementById('locked-panel').style.display = 'block';
-      document.getElementById('unlocked-panel').style.display = 'none';
-      document.getElementById('scout-pass').value = '';
-      document.getElementById('lock-err').style.display = 'none';
-    }
 
     function exportAuditJson() {
       const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({
@@ -983,13 +961,7 @@ export function generateDashboardHtml({
       location.reload();
     }
 
-    document.getElementById('scout-pass')?.addEventListener('keyup', function(e) {
-      if (e.key === 'Enter') attemptUnlock();
-    });
-
-    if (sessionStorage.getItem('scout_auth') === '1') {
-      showUnlocked();
-    } else {
+ else {
       applyTexts('en');
     }
 

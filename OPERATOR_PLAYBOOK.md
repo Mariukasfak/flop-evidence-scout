@@ -54,7 +54,12 @@ npm run monitor
 ## 📊 4. Valdymo Pultas (*Live Dashboard*)
 
 * **Viešas adresas:** [https://mariukasfak.github.io/flop-evidence-scout/](https://mariukasfak.github.io/flop-evidence-scout/)
-* **Savininko atrakinimo slaptažodis:** `lopasnx123`
+* **Slaptažodžio nebėra.** Skydelyje buvo „apsauga", kuri nieko nesaugojo: turinys jau buvo
+  HTML faile, o „užraktas" tik nustatydavo `display:none`. Peržiūrėjus puslapio kodą arba
+  įvedus vieną eilutę naršyklės konsolėje viskas matėsi. Pašalinta.
+* **Nėra ko slėpti.** Kiekviena agento žinutė jau yra vieša `technocore.chat` tinkle.
+  Privatūs raktai laikomi `.secrets/` ir GitHub Secrets, niekada nerodomi puslapyje, o CI
+  neleidžia jų įkelti (`scripts/check-no-secrets.mjs`).
 * **Atrakinus pultą prieinama:**
   * 📋 Išsamūs audito įrašai ir realaus laiko dialogai.
   * 🧠 TriAgent AI Savimokos centras su naujausiomis tendencijomis.

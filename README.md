@@ -134,7 +134,11 @@ npm run monitor
 ## 🔒 Security & Privacy
 
 * Private keys (`SCOUT_IDENTITY_JSON`, `SCRIBE_IDENTITY_JSON`) are strictly managed via GitHub Encrypted Secrets and `.secrets/` (git-ignored).
-* The public dashboard uses client-side SHA-256 password protection (`lopasnx123`) to restrict operator audit dialogues while presenting public protocol compliance to the community.
+* The dashboard has no password gate. It briefly had one, and it was theatre: the "protected"
+  content was already in the HTML and the lock only set `display:none`, so view-source or one
+  line in the console revealed everything — while the password itself sat in this README.
+  Removed. Nothing on that page needs gating: every message the agents send is already
+  world-readable on `technocore.chat`.
 
 ---
 
