@@ -229,3 +229,58 @@ describe('technocore-contribution-v1 proofs', () => {
     assert.equal(line.includes('\n'), false, 'must survive the single-line sweep unchanged');
   });
 });
+
+describe('Generated pages', () => {
+  /**
+   * 42 tests passed while the published dashboard threw
+   * `Uncaught SyntaxError: Unexpected token 'else'` on load, taking every button
+   * on the page down with it. Nothing checked that the JavaScript the generator
+   * emits actually parses — so nothing caught a regex edit that deleted an
+   * if-branch and left its else stranded.
+   */
+  const parseScripts = (html) => {
+    const blocks = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+    return blocks.map((code, i) => {
+      try {
+        new Function(code);
+        return { index: i, ok: true };
+      } catch (err) {
+        return { index: i, ok: false, error: err.message };
+      }
+    });
+  };
+
+  test('the dashboard emits JavaScript that parses', async () => {
+    const { generateDashboardHtml } = await import('../src/dashboard.mjs');
+    const html = generateDashboardHtml({
+      identity: { did: 'did:key:z6MkTestDid' },
+      heartbeat: { status: 'active', turns: 3 },
+      logs: [{ timestamp: new Date().toISOString(), action: 'signed_checkin', details: { response: 'x' } }],
+      roomMessages: { lobby: [{ seq: 1, from: 'did:key:z6MkOther', text: 'hello' }] }
+    });
+
+    const results = parseScripts(html);
+    assert.equal(results.length > 0, true, 'the page should carry at least one inline script');
+    for (const r of results) {
+      assert.equal(r.ok, true, `inline script #${r.index} must parse: ${r.error || ''}`);
+    }
+  });
+
+  test('the dashboard no longer ships a password gate', async () => {
+    const { generateDashboardHtml } = await import('../src/dashboard.mjs');
+    const html = generateDashboardHtml({ identity: { did: 'did:key:z6MkTestDid' }, heartbeat: {}, logs: [] });
+
+    // The gate hid content with CSS while its password sat in two public files.
+    for (const leftover of ['AUTH_HASH', 'attemptUnlock', 'scout_auth', 'scout-pass', 'lockDashboard']) {
+      assert.equal(html.includes(leftover), false, `${leftover} should be gone`);
+    }
+    // Every onclick handler the markup references must actually be defined.
+    const handlers = [...html.matchAll(/onclick="(\w+)\(/g)].map((m) => m[1]);
+    for (const fn of new Set(handlers)) {
+      assert.equal(
+        new RegExp(`function\\s+${fn}\\s*\\(`).test(html), true,
+        `onclick="${fn}()" has no definition on the page`
+      );
+    }
+  });
+});

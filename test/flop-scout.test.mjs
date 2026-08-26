@@ -316,6 +316,7 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
       identityPath,
       auditLogPath,
       faucetAlertPath: path.join(tmpDir, 'faucet-alert.json'),
+      heartbeatPath: path.join(tmpDir, 'heartbeat.json'),
       serverUrl,
       room: 'lobby',
       docsDir: tmpDir
@@ -425,6 +426,7 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
       scribeIdentityPath: path.join(tmpDir, 'scribe.json'),
       auditLogPath,
       faucetAlertPath,
+      heartbeatPath: path.join(tmpDir, 'heartbeat.json'),
       serverUrl,
       room: 'noise',
       watchRooms: [],
@@ -439,6 +441,18 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
       'a test run must never create or modify the real faucet alert file'
     );
     assert.equal(fs.existsSync(faucetAlertPath), true, 'the alert belongs in the temp dir');
+
+    // Same class of bug, second instance: a hardcoded heartbeat path let a test
+    // run overwrite the real one, and the front page then published the mock
+    // server's "faucet radar: HIT" as live state.
+    const realHeartbeat = path.resolve('data/scout-heartbeat.json');
+    if (fs.existsSync(realHeartbeat)) {
+      const hb = JSON.parse(fs.readFileSync(realHeartbeat, 'utf8'));
+      assert.equal(
+        String(hb.serverUrl || '').includes('127.0.0.1'), false,
+        'a test run must never leave the mock server in the real heartbeat'
+      );
+    }
 
     const events = fs.readFileSync(auditLogPath, 'utf8').split('\n').filter(Boolean)
       .map((l) => JSON.parse(l).event).filter(Boolean);

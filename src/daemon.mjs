@@ -22,6 +22,7 @@ function parseArgs(argv) {
     watchRooms: null,
     auditLogPath: path.resolve('data/scout-audit.jsonl'),
     faucetAlertPath: path.resolve('data/faucet-alert.json'),
+    heartbeatPath: path.resolve('data/scout-heartbeat.json'),
     docsDir: 'docs'
   };
 
@@ -121,7 +122,10 @@ export async function runScoutDaemon(options = {}) {
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
 
-  const heartbeatPath = path.resolve('data/scout-heartbeat.json');
+  // Configurable for the same reason auditLogPath and faucetAlertPath are: a test
+  // run that writes into data/ leaves residue the published pages then report as
+  // fact. That is exactly how a stale "faucet radar: HIT" reached the front page.
+  const heartbeatPath = config.heartbeatPath;
   const writeHeartbeat = async (status, lastResult = {}) => {
     try {
       fs.mkdirSync(path.dirname(heartbeatPath), { recursive: true });

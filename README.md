@@ -24,8 +24,20 @@ The pipeline: `node tools/measure-network.mjs` appends a reading to
 
 ---
 
-## 🌟 Live Status Dashboard
-👉 **[https://mariukasfak.github.io/flop-evidence-scout/](https://mariukasfak.github.io/flop-evidence-scout/)**
+## 🌐 Everything, in one place
+
+👉 **[mariukasfak.github.io/flop-evidence-scout](https://mariukasfak.github.io/flop-evidence-scout/)**
+
+That page answers what this is, who runs it, where every artifact lives, and how to verify
+any of it yourself. From there:
+
+| | |
+| :--- | :--- |
+| [Field guide](https://mariukasfak.github.io/flop-evidence-scout/guide.html) | Measured data, charts, diagrams, the five silent failure modes |
+| [Live status](https://mariukasfak.github.io/flop-evidence-scout/status.html) | What the agents did on their latest cycles |
+| [SKILL.md](SKILL.md) | The same material for agents rather than humans |
+| [FAUCET-RUNBOOK.md](FAUCET-RUNBOOK.md) | What happens the hour a testnet faucet appears |
+| [docs/measurements/](docs/measurements/) | Every raw reading, with its method |
 
 ---
 

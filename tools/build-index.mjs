@@ -1,4 +1,72 @@
-<!doctype html>
+/**
+ * Builds docs/index.html — the front door.
+ *
+ * Until now the Pages root was the operator's status dashboard, which is a
+ * strange thing to land a stranger on: it answers "what is it doing right now"
+ * before anyone has been told what "it" is. The dashboard moved to status.html
+ * and this page answers the four questions a visitor actually arrives with —
+ * what this is, who runs it, where everything lives, and how to check any of it
+ * without taking a word on trust.
+ *
+ * Run: node tools/build-index.mjs
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+
+import { loadOrCreateIdentity, getDidShardedPath, getStateKey } from '../src/identity.mjs';
+
+const OUT = path.resolve('docs/index.html');
+const SERIES = path.resolve('docs/measurements/timeseries.json');
+
+const scout = loadOrCreateIdentity('.secrets/scout-identity.json', 'SCOUT_IDENTITY_JSON');
+const scribe = loadOrCreateIdentity('.secrets/scribe-identity.json', 'SCRIBE_IDENTITY_JSON');
+const scoutPath = getDidShardedPath(scout.did);
+const scribePath = getDidShardedPath(scribe.did);
+
+let heartbeat = {};
+const hbPath = path.resolve('data/scout-heartbeat.json');
+if (fs.existsSync(hbPath)) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(hbPath, 'utf8'));
+    // Belt and braces after a heartbeat from the test mock server reached this
+    // page and published "faucet radar: HIT" as live state. The root cause is
+    // fixed, but a public page should not restate whatever it finds on disk.
+    const fromMock = /127\.0\.0\.1|localhost/.test(String(parsed.serverUrl || ''));
+    if (fromMock) {
+      console.warn('[index] Heartbeat points at a local test server; ignoring it.');
+    } else {
+      heartbeat = parsed;
+    }
+  } catch { /* leave empty */ }
+}
+
+let series = { observations: [] };
+if (fs.existsSync(SERIES)) {
+  try { series = JSON.parse(fs.readFileSync(SERIES, 'utf8')); } catch { /* leave empty */ }
+}
+const lastReading = series.observations[series.observations.length - 1] || null;
+
+const n = (v) => (v === null || v === undefined ? '—' : Number(v).toLocaleString('en-US'));
+const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+const REPO = 'https://github.com/Mariukasfak/flop-evidence-scout';
+
+/** what · where · why it is there. The table is the point of this page. */
+const MAP = [
+  ['The field guide', 'guide.html', 'Measured throughput, DID population, charts and the five silent failure modes. Rebuilt hourly from fresh readings.'],
+  ['Live status', 'status.html', 'What the two agents did on their most recent cycles, with the full audit trail.'],
+  ['Same guide, for agents', `${REPO}/blob/main/SKILL.md`, 'The material a machine should read: no charts, no narrative, just the rules and the numbers.'],
+  ['Raw measurements', 'measurements/timeseries.json', 'Every reading, with how it was taken. Nothing smoothed, nothing back-filled.'],
+  ['Charts', 'charts/', 'Generated SVGs. Regenerated from the series, never hand-edited.'],
+  ['Contribution proofs', 'contributions.json', 'technocore-contribution-v1 signatures binding a DID to an exact commit of a published artifact.'],
+  ['Claim rehearsal receipt', 'claim-rehearsal-receipt.json', 'Weekly proof that both identities can sign a challenge, run on a machine that is not the operator’s.'],
+  ['Source watch baseline', 'watch/state.json', 'Fingerprints of the official sources, so a change to any of them is noticed within the hour.'],
+  ['Faucet runbook', `${REPO}/blob/main/FAUCET-RUNBOOK.md`, 'What happens the hour a testnet faucet appears — written now, while there is no time pressure.'],
+  ['Operator playbook', `${REPO}/blob/main/OPERATOR_PLAYBOOK.md`, 'Day-to-day operation: commands, secrets layout, custody.'],
+  ['Source code', REPO, 'All of it. MIT.']
+];
+
+const page = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -78,11 +146,11 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
 <section>
   <h2>Right now</h2>
   <div class="status">
-    <span class="pill"><span class="dot"></span>cycle_complete</span>
-    <span class="pill">cycles <span class="n">25</span></span>
-    <span class="pill">questions answered <span class="n">16</span></span>
-    <span class="pill">faucet radar <span class="n">clear</span></span>
-    <span class="pill">network DIDs <span class="n">≈126,566</span></span>
+    <span class="pill"><span class="dot"></span>${esc(heartbeat.status || 'scheduled')}</span>
+    <span class="pill">cycles <span class="n">${n(heartbeat.turns)}</span></span>
+    <span class="pill">questions answered <span class="n">${n(heartbeat.handledCount)}</span></span>
+    <span class="pill">faucet radar <span class="n">${heartbeat.faucetDiscovered ? 'HIT' : 'clear'}</span></span>
+    ${lastReading ? `<span class="pill">network DIDs <span class="n">≈${n(lastReading.sharded_did_estimate + lastReading.legacy_did_count)}</span></span>` : ''}
   </div>
   <p class="prose" style="font-size:14px;color:var(--ink-faint)">
     A cycle runs every 15 minutes in GitHub Actions, not on anyone's laptop.
@@ -101,14 +169,14 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
     <div class="id">
       <h3>Evidence Scout</h3>
       <p class="role">Reads the topical rooms, answers genuine questions, serves a signed mailbox.</p>
-      <p class="did">did:key:z6MkvJAr8ZTs5n4d14e4SGVFAxo8nWndZTin8vc23Aks3zgn</p>
-      <a href="https://technocore.chat/kv/did-85/2d0b660964458e">its note on the network →</a>
+      <p class="did">${esc(scout.did)}</p>
+      <a href="https://technocore.chat${scoutPath.fullPath}">its note on the network →</a>
     </div>
     <div class="id">
       <h3>Sentinel Scribe</h3>
       <p class="role">Watches the server-written event log and runs the faucet radar.</p>
-      <p class="did">did:key:z6Mkfdd1cRSrTaA1yuUC45a2dXpHe4zPf4cE1DC3DmCpELvW</p>
-      <a href="https://technocore.chat/kv/did-e0/dd0e551624140a">its note on the network →</a>
+      <p class="did">${esc(scribe.did)}</p>
+      <a href="https://technocore.chat${scribePath.fullPath}">its note on the network →</a>
     </div>
   </div>
 </section>
@@ -119,61 +187,11 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
     <table>
       <thead><tr><th>What</th><th>Where</th><th>Why it exists</th></tr></thead>
       <tbody>
-        <tr>
-          <td><a href="guide.html">The field guide</a></td>
-          <td><code>guide.html</code></td>
-          <td>Measured throughput, DID population, charts and the five silent failure modes. Rebuilt hourly from fresh readings.</td>
-        </tr>
-        <tr>
-          <td><a href="status.html">Live status</a></td>
-          <td><code>status.html</code></td>
-          <td>What the two agents did on their most recent cycles, with the full audit trail.</td>
-        </tr>
-        <tr>
-          <td><a href="https://github.com/Mariukasfak/flop-evidence-scout/blob/main/SKILL.md">Same guide, for agents</a></td>
-          <td><code>SKILL.md</code></td>
-          <td>The material a machine should read: no charts, no narrative, just the rules and the numbers.</td>
-        </tr>
-        <tr>
-          <td><a href="measurements/timeseries.json">Raw measurements</a></td>
-          <td><code>measurements/timeseries.json</code></td>
-          <td>Every reading, with how it was taken. Nothing smoothed, nothing back-filled.</td>
-        </tr>
-        <tr>
-          <td><a href="charts/">Charts</a></td>
-          <td><code>charts/</code></td>
-          <td>Generated SVGs. Regenerated from the series, never hand-edited.</td>
-        </tr>
-        <tr>
-          <td><a href="contributions.json">Contribution proofs</a></td>
-          <td><code>contributions.json</code></td>
-          <td>technocore-contribution-v1 signatures binding a DID to an exact commit of a published artifact.</td>
-        </tr>
-        <tr>
-          <td><a href="claim-rehearsal-receipt.json">Claim rehearsal receipt</a></td>
-          <td><code>claim-rehearsal-receipt.json</code></td>
-          <td>Weekly proof that both identities can sign a challenge, run on a machine that is not the operator’s.</td>
-        </tr>
-        <tr>
-          <td><a href="watch/state.json">Source watch baseline</a></td>
-          <td><code>watch/state.json</code></td>
-          <td>Fingerprints of the official sources, so a change to any of them is noticed within the hour.</td>
-        </tr>
-        <tr>
-          <td><a href="https://github.com/Mariukasfak/flop-evidence-scout/blob/main/FAUCET-RUNBOOK.md">Faucet runbook</a></td>
-          <td><code>FAUCET-RUNBOOK.md</code></td>
-          <td>What happens the hour a testnet faucet appears — written now, while there is no time pressure.</td>
-        </tr>
-        <tr>
-          <td><a href="https://github.com/Mariukasfak/flop-evidence-scout/blob/main/OPERATOR_PLAYBOOK.md">Operator playbook</a></td>
-          <td><code>OPERATOR_PLAYBOOK.md</code></td>
-          <td>Day-to-day operation: commands, secrets layout, custody.</td>
-        </tr>
-        <tr>
-          <td><a href="https://github.com/Mariukasfak/flop-evidence-scout">Source code</a></td>
-          <td><code>github repo</code></td>
-          <td>All of it. MIT.</td>
-        </tr>
+        ${MAP.map(([what, where, why]) => `<tr>
+          <td><a href="${esc(where)}">${esc(what)}</a></td>
+          <td><code>${esc(where.startsWith('http') ? where.replace(`${REPO}/blob/main/`, '').replace(REPO, 'github repo') : where)}</code></td>
+          <td>${esc(why)}</td>
+        </tr>`).join('\n        ')}
       </tbody>
     </table>
   </div>
@@ -199,13 +217,13 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
 <section>
   <h2>Check any of it yourself</h2>
   <pre># the Scout's profile, published by the agent itself
-curl https://technocore.chat/kv/did-85/2d0b660964458e
+curl https://technocore.chat${scoutPath.fullPath}
 
 # its persistent state — turn counter and per-room cursors
-curl https://technocore.chat/kv/scout/scout-852d0b660964458e
+curl https://technocore.chat/kv/scout/${getStateKey(scout.did, 'scout')}
 
 # presence, the convention 3,700+ agents follow
-curl https://technocore.chat/kv/technocore/hb-852d0b66
+curl https://technocore.chat/kv/technocore/hb-${scoutPath.fingerprint.slice(0, 8)}
 
 # and the limits this site quotes, from the server itself
 curl https://technocore.chat/.well-known/agent.json</pre>
@@ -227,10 +245,13 @@ curl https://technocore.chat/.well-known/agent.json</pre>
 </section>
 
 <footer>
-  <a href="https://github.com/Mariukasfak/flop-evidence-scout">github.com/Mariukasfak/flop-evidence-scout</a> · MIT · Built 2026-08-26T05:17Z.
+  ${REPO ? `<a href="${REPO}">${REPO.replace('https://', '')}</a> · MIT · ` : ''}Built ${new Date().toISOString().slice(0, 16)}Z.
   Corrections welcome as issues — especially if a number here has gone stale.
 </footer>
 
 </div>
 </body>
-</html>
+</html>`;
+
+fs.writeFileSync(OUT, page, 'utf8');
+console.log(`Wrote ${OUT} (${(page.length / 1024).toFixed(1)} KB, ${MAP.length} destinations)`);

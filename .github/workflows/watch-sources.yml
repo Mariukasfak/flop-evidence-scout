@@ -42,6 +42,7 @@ jobs:
           node tools/measure-network.mjs
           node tools/render-charts.mjs
           node tools/build-guide.mjs
+          node tools/build-index.mjs
 
       - name: Commit the new baseline
         run: |

@@ -961,9 +961,7 @@ export function generateDashboardHtml({
       location.reload();
     }
 
- else {
-      applyTexts('en');
-    }
+    applyTexts('en');
 
     // Initialize with bundled snapshot immediately (0ms wait, zero CORS)
     fetchLiveRoomMessages();
@@ -1047,7 +1045,7 @@ export async function updateDashboardFile(outputDir = 'docs', serverUrl = 'https
   const html = generateDashboardHtml({
     identity, scribeIdentity, heartbeat, logs: history, roomMessages, learningReport
   });
-  const targetFile = path.join(resolvedDir, 'index.html');
+  const targetFile = path.join(resolvedDir, 'status.html');
   fs.writeFileSync(targetFile, html, 'utf8');
   console.log(`[Dashboard] Generated live HTML status page with bundled room feeds at: ${targetFile}`);
   return targetFile;

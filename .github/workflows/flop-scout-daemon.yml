@@ -35,7 +35,9 @@ jobs:
           SCOUT_IDENTITY_JSON: ${{ secrets.SCOUT_IDENTITY_JSON }}
           SCRIBE_IDENTITY_JSON: ${{ secrets.SCRIBE_IDENTITY_JSON }}
           TECHNOCORE_URL: https://technocore.chat
-        run: node src/daemon.mjs --dry-run --url=https://technocore.chat
+        run: |
+          node src/daemon.mjs --dry-run --url=https://technocore.chat
+          node tools/build-index.mjs
 
       - name: Raise a GitHub issue if the faucet radar fired
         env:
