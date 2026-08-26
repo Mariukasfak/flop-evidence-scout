@@ -167,7 +167,7 @@ export class ScribeEngine {
       detailPayload = {
         targetAgent: this.scoutIdentity?.did ? `Scout <${this.scoutIdentity.did.slice(0, 14)}...>` : 'Scout Agent',
         mailbox: scoutMailbox,
-        reason: 'Dviejų agentų tinklo sinchronizacija per privačią pasirašytą pašto dėžutę (Co-op Mesh)',
+        reason: 'Peer sync between this operator’s two agents, via a private signed mailbox',
         response: outgoingMessage
       };
     } else if (!outgoingMessage && sinceCheckin > 4 * 60 * 60 * 1000) {
@@ -181,7 +181,7 @@ export class ScribeEngine {
       actionTaken = 'signed_checkin';
       this.localState.lastCheckin = new Date().toISOString();
       detailPayload = {
-        reason: 'Periodinis pasirašytas Sentinel būsenos check-in',
+        reason: 'Periodic signed Sentinel status check-in',
         response: outgoingMessage
       };
     }
@@ -205,7 +205,7 @@ export class ScribeEngine {
 
     if (!outgoingMessage) {
       detailPayload = {
-        reason: `Stebimas /r/${eventsRoom} ir tinklo tapatybių registras (įvykių seka: #${this.localState.lastEventsSeq})`,
+        reason: `Watching /r/${eventsRoom} and the identity registry (events seq #${this.localState.lastEventsSeq})`,
         discoveredEvents: eventMessages.length,
         discoveredRoomsCount: discoveredRooms.length
       };
@@ -221,7 +221,7 @@ export class ScribeEngine {
 
     if (faucetAlerts.length > 0) {
       detailPayload.faucetAlerts = faucetAlerts;
-      detailPayload.reason = `⚠️ FAUCET RADAR: aptikti kambariai ${faucetAlerts.map((h) => h.room).join(', ')}`;
+      detailPayload.reason = `⚠️ FAUCET RADAR: rooms detected — ${faucetAlerts.map((h) => h.room).join(', ')}`;
     }
     if (presenceError) detailPayload.presenceError = presenceError;
 

@@ -266,6 +266,23 @@ describe('Generated pages', () => {
     }
   });
 
+  test('every element the dashboard script touches exists in the markup', async () => {
+    const { generateDashboardHtml } = await import('../src/dashboard.mjs');
+    const html = generateDashboardHtml({
+      identity: { did: 'did:key:z6MkTestDid' },
+      heartbeat: { status: 'active', turns: 3 },
+      logs: [{ timestamp: new Date().toISOString(), action: 'signed_checkin', details: { response: 'x' } }]
+    });
+
+    // The reported failure was `Cannot set properties of null (setting
+    // 'innerText')`: the i18n pass still addressed lock-title and lock-desc
+    // after the gate that owned them was removed. One null reference threw
+    // during startup and took every later handler down with it.
+    const referenced = [...html.matchAll(/getElementById\('([^']+)'\)/g)].map((m) => m[1]);
+    const missing = [...new Set(referenced)].filter((id) => !html.includes(`id="${id}"`));
+    assert.deepEqual(missing, [], `script addresses elements that do not exist: ${missing.join(', ')}`);
+  });
+
   test('the dashboard no longer ships a password gate', async () => {
     const { generateDashboardHtml } = await import('../src/dashboard.mjs');
     const html = generateDashboardHtml({ identity: { did: 'did:key:z6MkTestDid' }, heartbeat: {}, logs: [] });

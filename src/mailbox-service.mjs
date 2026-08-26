@@ -194,7 +194,7 @@ export class MailboxService {
         details.routing = target.reason;
         details.inquiry = text;
         details.response = outgoing;
-        details.reason = `Atsakyta į pašto dėžutės užklausą apie ${verdict.topics.map((t) => t.topic).join(', ')}`;
+        details.reason = `Answered a mailbox request about ${verdict.topics.map((t) => t.topic).join(', ')}`;
       } catch (err) {
         action = `send_failed: ${err.message}`;
         skipped.push({ from: senderDid, reason: err.message });

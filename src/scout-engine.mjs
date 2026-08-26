@@ -178,7 +178,7 @@ export class ScoutEngine {
     let outgoingMessage = null;
     let targetRoom = room;
     let detailPayload = {
-      reason: `Peržiūrėti kambariai: ${rooms.join(', ')} (naujų žinučių: ${scanned}, tinkamų atsakyti: 0)`
+      reason: `Read ${rooms.join(', ')} — ${scanned} new messages, none worth answering`
     };
 
     if (candidate) {
@@ -192,7 +192,7 @@ export class ScoutEngine {
         targetAgent: candidate.author,
         room: candidate.room,
         inquiry: candidate.text,
-        reason: `Klausimas apie ${candidate.topics.map((t) => t.topic).join(', ')} (${candidate.reason})`,
+        reason: `Question about ${candidate.topics.map((t) => t.topic).join(', ')} (${candidate.reason})`,
         response: answer
       };
     } else if (
@@ -213,7 +213,7 @@ export class ScoutEngine {
       this.localState.lastCheckin = new Date().toISOString();
       detailPayload = {
         room: targetRoom,
-        reason: 'Periodinis Ed25519 pasirašytas būsenos pranešimas (kas 2 val.)',
+        reason: 'Periodic Ed25519-signed status message (every 2 hours)',
         response: outgoingMessage
       };
     }

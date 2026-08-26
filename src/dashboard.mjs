@@ -65,8 +65,8 @@ export function generateDashboardHtml({
   const status = isRecent ? 'ACTIVE · ONLINE' : 'SCHEDULED_IN_CLOUD';
   const lastHeartbeatFormatted = lastTime.toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'short', timeStyle: 'medium' }) + ' UTC';
 
-  const logRowsLt = logs.slice(-30).reverse().map((log, idx) => {
-    const time = log.timestamp ? new Date(log.timestamp).toLocaleTimeString('lt-LT') : '—';
+  const logRows = logs.slice(-30).reverse().map((log, idx) => {
+    const time = log.timestamp ? new Date(log.timestamp).toISOString().slice(11, 19) : '—';
     const rawAction = log.action || log.event || 'turn';
     let actionBadge;
     let detailContent;
@@ -82,11 +82,11 @@ export function generateDashboardHtml({
       actionBadge = `<span class="badge badge-success">answered_inquiry</span>`;
       detailContent = `
         <details class="row-details" open>
-          <summary>💬 <strong>Kam:</strong> <code>${e(log.details?.targetAgent || 'Agentas')}</code> — <em>${e(log.details?.reason || 'Atsakyta į užklausą')}</em></summary>
+          <summary>💬 <strong>To:</strong> <code>${e(log.details?.targetAgent || 'agent')}</code> — <em>${e(log.details?.reason || 'answered an inquiry')}</em></summary>
           <div class="expanded-box">
-            <p><strong>📍 Kambarys:</strong> <code>/r/${room}</code></p>
-            <p><strong>❓ Gautas klausimas:</strong> „${e(log.details?.inquiry || '—')}“</p>
-            <p><strong>💡 Išsiųstas atsakymas:</strong> <code>${e(log.details?.response || '—')}</code></p>
+            <p><strong>📍 Room:</strong> <code>/r/${room}</code></p>
+            <p><strong>❓ Their question:</strong> “${e(log.details?.inquiry || '—')}”</p>
+            <p><strong>💡 Our reply:</strong> <code>${e(log.details?.response || '—')}</code></p>
           </div>
         </details>
       `;
@@ -94,7 +94,7 @@ export function generateDashboardHtml({
       actionBadge = `<span class="badge badge-success">signed_checkin</span>`;
       detailContent = `
         <details class="row-details">
-          <summary>🔑 <strong>Ed25519 Check-in:</strong> pasirašytas pranešimas į <code>/r/${room}</code></summary>
+          <summary>🔑 <strong>Ed25519 Check-in:</strong> signed message to <code>/r/${room}</code></summary>
           <div class="expanded-box">
             <p><code>${e(log.details?.response || '—')}</code></p>
           </div>
@@ -104,32 +104,32 @@ export function generateDashboardHtml({
       actionBadge = `<span class="badge badge-success">${e(rawAction)}</span>`;
       detailContent = `
         <details class="row-details">
-          <summary>🤝 <strong>Vidinė sinchronizacija:</strong> ${e(log.details?.targetAgent || 'Scout ↔ Scribe')}</summary>
+          <summary>🤝 <strong>Internal peer sync:</strong> ${e(log.details?.targetAgent || 'Scout ↔ Scribe')}</summary>
           <div class="expanded-box">
-            <p><strong>📬 Pašto dėžutė:</strong> <code>${e(log.details?.mailbox || '—')}</code></p>
-            <p><strong>💡 Pasirašyta žinutė:</strong> <code>${e(log.details?.response || '—')}</code></p>
-            <p style="opacity:.7">Tai to paties operatoriaus du agentai, ne nepriklausomi dalyviai. Vyksta kas 6 val.</p>
+            <p><strong>📬 Mailbox:</strong> <code>${e(log.details?.mailbox || '—')}</code></p>
+            <p><strong>💡 Signed message:</strong> <code>${e(log.details?.response || '—')}</code></p>
+            <p style="opacity:.7">These are one operator's two agents, not independent parties. Every 6 hours.</p>
           </div>
         </details>
       `;
     } else if (rawAction === 'startup') {
-      actionBadge = `<span class="badge badge-info">ciklas pradėtas</span>`;
-      detailContent = `<div>Prisijungta prie <code>${e(log.server || 'technocore.chat')}</code></div>`;
+      actionBadge = `<span class="badge badge-info">cycle started</span>`;
+      detailContent = `<div>Connected to <code>${e(log.server || 'technocore.chat')}</code></div>`;
     } else if (rawAction === 'shutdown' || rawAction === 'cycle_complete') {
       // Every scheduled tick is one process that starts and exits. This line is
       // the tick finishing normally — not the agent falling over.
-      actionBadge = `<span class="badge badge-info">ciklas baigtas</span>`;
-      detailContent = `<div>Suplanuotas ciklas baigtas tvarkingai. Kitas – po 15 min.</div>`;
+      actionBadge = `<span class="badge badge-info">cycle complete</span>`;
+      detailContent = `<div>Scheduled cycle finished normally. Next one in 15 minutes.</div>`;
     } else if (rawAction.includes('error') || rawAction.includes('failed')) {
       actionBadge = `<span class="badge badge-warn">warning</span>`;
-      detailContent = `<div class="error-box">Klaida: ${e(log.error || 'Serverio ryšio sutrikimas')}</div>`;
+      detailContent = `<div class="error-box">Error: ${e(log.error || 'connection problem')}</div>`;
     } else if (rawAction.startsWith('monitoring_pacing') || rawAction.startsWith('skipped')) {
       actionBadge = `<span class="badge badge-info">rate_pacing</span>`;
       detailContent = `
         <details class="row-details">
-          <summary>📡 <strong>Stebima</strong> (Seq: #${seq})</summary>
+          <summary>📡 <strong>Watching</strong> (seq #${seq})</summary>
           <div class="expanded-box">
-            <p>${e(log.details?.reason || 'Kambariai skaitomi, laikomasi saugaus tempo.')}</p>
+            <p>${e(log.details?.reason || 'Rooms read; holding the safe posting pace.')}</p>
           </div>
         </details>
       `;
@@ -137,8 +137,8 @@ export function generateDashboardHtml({
       actionBadge = `<span class="badge badge-info">${e(rawAction)}</span>`;
       detailContent = `
         <details class="row-details">
-          <summary>📡 <strong>Stebima</strong> (Seq: #${seq})</summary>
-          <div class="expanded-box"><p>${e(log.details?.reason || 'Naujų tinkamų atsakyti žinučių nerasta.')}</p></div>
+          <summary>📡 <strong>Watching</strong> (seq #${seq})</summary>
+          <div class="expanded-box"><p>${e(log.details?.reason || 'No new messages worth answering.')}</p></div>
         </details>
       `;
     }
@@ -656,7 +656,7 @@ export function generateDashboardHtml({
             </tr>
           </thead>
           <tbody>
-            ${logRowsLt || '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">Laukiama naujų įvykių...</td></tr>'}
+            ${logRows || '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">Waiting for the first cycle…</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -704,113 +704,6 @@ export function generateDashboardHtml({
     let filterOnlyMine = false;
     let currentMessages = INITIAL_DATA.lobby || [];
 
-    const TEXTS = {
-      en: {
-        brandTitle: "🌐 FLOP / Technocore Evidence Scout",
-        brandSub: "Autonomous Dual Agent Mesh · 24/7 Network Presence & Protocol Readiness",
-        scoreTitle: "🔍 Independently Verifiable Evidence",
-        scoreSub: "Flop Labs has published no scoring formula or tiers. Every claim below can be checked with one plain GET against technocore.chat.",
-        scoreTier: "SIGNED MESSAGES",
-        meshTitle: "🤝 Autonomous Dual-Agent Collaboration Mesh",
-        nodeTitle: "Network Node",
-        nodeSub: "Rooms: /r/lobby & /r/events",
-        turnsTitle: "Executed Cycles",
-        turnsSub: "Cadence: every 15 min",
-        actionTitle: "Last Action",
-        handledTitle: "Processed Inquiries",
-        handledSub: "Co-op Mesh Knowledge",
-        roomFeedTitle: "📡 Live Technocore Feed",
-        readinessTitle: "🛡️ FLOP Airdrop & Protocol Readiness",
-        check1Title: "W3C did:key Identity Mesh",
-        check1Desc: "Two unique Ed25519 cryptographic keypairs registered on Technocore.",
-        check2Title: "Cryptographic Signatures",
-        check2Desc: "Every room message & check-in signed with unpadded base64url.",
-        check3Title: "/kv/ State Continuity",
-        check3Desc: "Durable state persistence establishes 'agents live here' metric.",
-        check4Title: "Anti-Spam & Anti-Sybil Guardrails",
-        check4Desc: "Staggered execution, rate pacing and SHA-256 deduplication.",
-        check5Title: "24/7 Cloud Operations",
-        check5Desc: "Continuous autonomous cycles running via GitHub Actions.",
-        check6Title: "Testnet Faucet Radar Active",
-        check6Desc: "Scribe agent actively monitors /r/events for testnet faucet launch.",
-        lockTitle: "Operator Audit Logs & Dialogue Inspector",
-        lockDesc: "Public protocol readiness is verified above. Detailed agent dialogues, inquiries, and audit logs are restricted to the operator.",
-        lockPlaceholder: "Enter password to unlock...",
-        lockBtn: "Unlock",
-        lockErr: "Invalid password. Please try again.",
-        footer: 'FLOP Evidence Scout · Official GitHub Repo: <a href="https://github.com/Mariukasfak/flop-evidence-scout" target="_blank">Mariukasfak/flop-evidence-scout</a> · Node: technocore.chat'
-      },
-      lt: {
-        brandTitle: "🌐 FLOP / Technocore Evidence Scout · Savininko Pultas",
-        brandSub: "Autonominis 2 agentų tinklas · 24/7 stebėsena ir airdrop atitikties suvestinė",
-        scoreTitle: "🔍 Nepriklausomai patikrinami įrodymai",
-        scoreSub: "Flop Labs nėra paskelbę jokios vertinimo formulės ar pakopų. Kiekvieną teiginį galima patikrinti viena GET užklausa.",
-        scoreTier: "PASIRAŠYTOS ŽINUTĖS",
-        meshTitle: "🤝 Autonominis Dviejų Agentų Bendradarbiavimo Tinklas",
-        nodeTitle: "Tinklo Mazgas",
-        nodeSub: "Kambariai: /r/lobby ir /r/events",
-        turnsTitle: "Atlikti Ciklai",
-        turnsSub: "Taktas: kas 15 min.",
-        actionTitle: "Paskutinis Veiksmas",
-        handledTitle: "Apdoroti Klausimai",
-        handledSub: "Žinių pagalba kitiems agentams",
-        roomFeedTitle: "📡 Gyvas Technocore srautas",
-        readinessTitle: "🛡️ FLOP Airdrop & Protokolo Pasirengimas",
-        check1Title: "W3C did:key tapatybių tinklas",
-        check1Desc: "Dvi unikalios Ed25519 raktų poros su nuolatiniais DID tinkle.",
-        check2Title: "Kriptografiniai parašai",
-        check2Desc: "Kiekvienas pranešimas pasirašytas privačiu raktu.",
-        check3Title: "/kv/ būsenos tęstinumas",
-        check3Desc: "Ilgalaikė atmintis įrodo „agents live here“ metriką.",
-        check4Title: "Apsauga nuo SPAM ir Sybil",
-        check4Desc: "Paeilinis vykdymas, rate pacing ir SHA-256 deduplikacija.",
-        check5Title: "24/7 veikimas debesyje",
-        check5Desc: "GitHub Actions suplanuoti ciklai be jūsų kompiuterio.",
-        check6Title: "Testnet Faucet Radaras Aktyvus",
-        check6Desc: "Scribe agentas stebi /r/events bandomojo krano atsiradimui.",
-        lockTitle: "Savininko audito žurnalas ir dialogų inspektorius",
-        lockDesc: "Airdrop atitikties suvestinė yra vieša. Išsamūs agentų dialogai, klausimai ir techniniai žurnalai apsaugoti slaptažodžiu.",
-        lockPlaceholder: "Įveskite slaptažodį...",
-        lockBtn: "Atrakinti",
-        lockErr: "Neteisingas slaptažodis. Bandykite dar kartą.",
-        footer: 'FLOP Evidence Scout · GitHub Repo: <a href="https://github.com/Mariukasfak/flop-evidence-scout" target="_blank">Mariukasfak/flop-evidence-scout</a> · Atnaujinta realiu laiku'
-      }
-    };
-
-    function applyTexts(lang) {
-      const t = TEXTS[lang];
-      document.getElementById('brand-title').innerText = t.brandTitle;
-      document.getElementById('brand-sub').innerText = t.brandSub;
-      document.getElementById('score-title').innerText = t.scoreTitle;
-      document.getElementById('score-sub').innerText = t.scoreSub;
-      document.getElementById('score-tier').innerText = t.scoreTier;
-      document.getElementById('mesh-title').innerText = t.meshTitle;
-      document.getElementById('card-node-title').innerText = t.nodeTitle;
-      document.getElementById('card-node-sub').innerText = t.nodeSub;
-      document.getElementById('card-turns-title').innerText = t.turnsTitle;
-      document.getElementById('card-turns-sub').innerText = t.turnsSub;
-      document.getElementById('card-action-title').innerText = t.actionTitle;
-      document.getElementById('card-handled-title').innerText = t.handledTitle;
-      document.getElementById('card-handled-sub').innerText = t.handledSub;
-      document.getElementById('room-feed-title').innerText = t.roomFeedTitle;
-      document.getElementById('readiness-title').innerText = t.readinessTitle;
-      document.getElementById('check-1-title').innerText = t.check1Title;
-      document.getElementById('check-1-desc').innerText = t.check1Desc;
-      document.getElementById('check-2-title').innerText = t.check2Title;
-      document.getElementById('check-2-desc').innerText = t.check2Desc;
-      document.getElementById('check-3-title').innerText = t.check3Title;
-      document.getElementById('check-3-desc').innerText = t.check3Desc;
-      document.getElementById('check-4-title').innerText = t.check4Title;
-      document.getElementById('check-4-desc').innerText = t.check4Desc;
-      document.getElementById('check-5-title').innerText = t.check5Title;
-      document.getElementById('check-5-desc').innerText = t.check5Desc;
-      document.getElementById('check-6-title').innerText = t.check6Title;
-      document.getElementById('check-6-desc').innerText = t.check6Desc;
-      document.getElementById('lock-title').innerText = t.lockTitle;
-      document.getElementById('lock-desc').innerText = t.lockDesc;
-      document.getElementById('unlock-btn').innerText = t.lockBtn;
-      document.getElementById('footer-text').innerHTML = t.footer;
-    }
 
 
 
@@ -961,7 +854,6 @@ export function generateDashboardHtml({
       location.reload();
     }
 
-    applyTexts('en');
 
     // Initialize with bundled snapshot immediately (0ms wait, zero CORS)
     fetchLiveRoomMessages();
