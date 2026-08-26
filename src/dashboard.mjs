@@ -661,29 +661,53 @@ export function generateDashboardHtml({
         </table>
       </div>
 
-      <!-- TriAgent Continuous Learning & Optimization Card -->
-      <h2 class="section-title">🧠 TriAgent AI Savimokos ir Optimizavimo Centras</h2>
+      <!-- What the archives say about the reply filter -->
+      <h2 class="section-title">🧠 Is the reply filter calibrated?</h2>
       <div class="card" style="margin-bottom: 24px; font-size: 0.85rem; line-height: 1.6;">
-        <div style="display: flex; justify-content: space-between; flex-wrap: wrap; margin-bottom: 12px; border-bottom: 1px solid var(--card-border); padding-bottom: 10px; gap: 10px;">
-          <div>📦 <strong>Išanalizuota žinučių:</strong> <span style="color: #38bdf8; font-weight: bold;">${learningReport?.metrics?.totalMessagesArchived || 0}</span></div>
-          <div>👥 <strong>Unikalių dalyvių:</strong> <span style="color: #34d399; font-weight: bold;">${learningReport?.metrics?.uniqueParticipantsCount || 0}</span></div>
-          <div>🎯 <strong>Aptiktos žinių spragos:</strong> <span style="color: #fbbf24; font-weight: bold;">${learningReport?.metrics?.unansweredInquiriesCount || 0}</span></div>
+        <div style="display:flex; justify-content:space-between; flex-wrap:wrap; margin-bottom:12px; border-bottom:1px solid var(--card-border); padding-bottom:10px; gap:10px;">
+          <div>📦 <strong>Messages studied:</strong> <span style="color:#38bdf8;font-weight:bold;">${learningReport?.corpus?.messages ?? 0}</span></div>
+          <div>👥 <strong>Distinct writers:</strong> <span style="color:#34d399;font-weight:bold;">${learningReport?.corpus?.distinctWriters ?? 0}</span></div>
+          <div>💬 <strong>Worth answering:</strong> <span style="color:#fbbf24;font-weight:bold;">${((learningReport?.answerRate ?? 0) * 100).toFixed(1)}%</span></div>
         </div>
-        <div style="color: var(--text-muted); margin-bottom: 8px;"><strong>💡 Naujausios TriAgent Optimizavimo Rekomendacijos:</strong></div>
-        <div style="display: grid; gap: 8px;">
+
+        <div style="color: var(--text-muted); margin-bottom:6px;"><strong>Why the agent stayed silent</strong> — every refusal, by reason:</div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px;">
+          ${Object.entries(learningReport?.refusalsByReason || {}).map(([reason, count]) =>
+            `<span class="badge badge-info">${escapeHtml(reason)} · ${escapeHtml(count)}</span>`).join('')
+            || '<span style="color:var(--text-muted);">No archives analysed yet.</span>'}
+        </div>
+
+        <div style="color: var(--text-muted); margin-bottom:6px;"><strong>Rooms ranked by signal</strong> — on-topic share against boilerplate share:</div>
+        <div style="display:grid; gap:4px; margin-bottom:14px;">
+          ${Object.entries(learningReport?.roomsBySignal || {}).slice(0, 8).map(([room, r]) => `
+            <div style="display:flex; gap:10px; align-items:center;">
+              <code style="min-width:150px;">/r/${escapeHtml(room)}</code>
+              <div style="flex:1; height:6px; background:#0d1117; border-radius:3px; overflow:hidden;">
+                <div style="width:${Math.round(Math.min(1, (r.signalScore || 0) / 0.5) * 100)}%; height:100%; background:#38bdf8;"></div>
+              </div>
+              <span style="min-width:52px; text-align:right; color:var(--text-muted);">${escapeHtml(r.signalScore)}</span>
+              <span style="min-width:96px; text-align:right; color:var(--text-muted);">${Math.round((r.boilerplateShare || 0) * 100)}% boilerplate</span>
+            </div>`).join('')
+            || '<div style="color:var(--text-muted);">No rooms analysed yet.</div>'}
+        </div>
+
+        <div style="display:grid; gap:8px;">
           ${(learningReport?.recommendations || []).map(r => `
-            <div style="background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 10px 14px;">
-              <span class="badge ${r.priority === 'HIGH' ? 'badge-warn' : 'badge-info'}" style="margin-right: 6px;">[${r.priority}] ${r.area}</span>
-              <strong>${r.insight}</strong>
-              <div style="color: #38bdf8; font-size: 0.8rem; margin-top: 4px;">➡️ ${r.action}</div>
-            </div>
-          `).join('') || '<div style="color: var(--text-muted);">Laukiama naujų pokalbių archyvų analizei...</div>'}
+            <div style="background:#0d1117; border:1px solid #21262d; border-radius:6px; padding:10px 14px;">
+              <span class="badge ${r.priority === 'HIGH' ? 'badge-warn' : 'badge-info'}" style="margin-right:6px;">${escapeHtml(r.priority)} · ${escapeHtml(r.area)}</span>
+              <strong>${escapeHtml(r.insight)}</strong>
+              <div style="color:#38bdf8; font-size:0.8rem; margin-top:4px;">➡️ ${escapeHtml(r.action)}</div>
+            </div>`).join('')
+            || '<div style="color:var(--text-muted);">Waiting for the next batch of archives.</div>'}
         </div>
       </div>
 
-      <h2 class="section-title">📡 Kaip veikia saugaus tempo (Rate Pacing) taisyklė</h2>
+      <h2 class="section-title">📡 Why most cycles post nothing</h2>
       <div class="card" style="margin-bottom: 24px; font-size: 0.85rem; color: var(--text-muted); line-height: 1.6;">
-        <p>💡 <strong>Kodėl rodoma <code>rate_pacing</code>?</strong> „Technocore“ tinkle veikia griežta apsauga nuo SPAM ir Sybil atakų. Mūsų agento apsaugos filtras riboja siunčiamus pasirašytus pranešimus iki saugaus tempo (1–4 pranešimai per valandą). Tarp šių taktų agentas toliau skaito kambarį, seka naujausias žinutes ir saugo resursus.</p>
+        <p>The server permits 300 writes a minute per IP, so the pacing here is a judgement about
+        spam rather than a technical limit — a handful of signed messages an hour, and silence the
+        rest of the time. On a network where the great majority of traffic is presence boilerplate,
+        having nothing to say is the ordinary case, not a fault.</p>
       </div>
     </div>
 
