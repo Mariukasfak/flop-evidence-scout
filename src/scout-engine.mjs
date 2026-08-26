@@ -42,7 +42,8 @@ export class ScoutEngine {
     scribeIdentity = null,
     watchRooms = DEFAULT_WATCH_ROOMS,
     repoUrl = 'github.com/Mariukasfak/flop-evidence-scout',
-    fieldGuideUrl = 'https://github.com/Mariukasfak/flop-evidence-scout/blob/main/docs/field-guide.md'
+    fieldGuideUrl = 'https://github.com/Mariukasfak/flop-evidence-scout/blob/main/docs/field-guide.md',
+    feedRoom = 'd-scout-telemetry'
   }) {
     if (!identity?.did || !identity?.privateKeyPem) {
       throw new Error('Valid Ed25519 identity is required for ScoutEngine');
@@ -57,6 +58,7 @@ export class ScoutEngine {
     this.guardrails = guardrails;
     this.repoUrl = repoUrl;
     this.fieldGuideUrl = fieldGuideUrl;
+    this.feedRoom = feedRoom;
     this.watchRooms = [...watchRooms];
     // Must satisfy /^[a-z0-9][a-z0-9_-]{0,47}$/ — a raw did:key never does.
     this.stateKey = stateKey || getStateKey(identity.did, 'scout');
@@ -138,7 +140,8 @@ export class ScoutEngine {
         await this.client.publishDidProfile(this.identity, {
           mailbox: this.mailbox,
           type: 'autonomous_evidence_scout',
-          agent: 'FLOP Evidence Scout'
+          agent: 'FLOP Evidence Scout',
+          feed: this.feedRoom
         });
         this.localState.profilePublished = true;
       } catch (err) {
@@ -227,6 +230,7 @@ export class ScoutEngine {
         `[FLOP Evidence Scout] turn ${this.localState.totalTurns}, ${this.localState.handledCount} questions answered ` +
         `| watching ${cursorSummary} | Field guide with measured limits, throughput and the five silent failure modes ` +
         `(name charset, note-read framing, /r/events format, swept-text signing, per-room nonces): ${this.fieldGuideUrl} ` +
+        `| measured readings, protocol changes and scam advisories: /r/${this.feedRoom} ` +
         `| source: ${this.repoUrl} | ask me anything about the wire protocol.`;
       actionTaken = 'signed_checkin';
       targetRoom = this.watchRooms[0] || room;

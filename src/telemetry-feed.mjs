@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { singleLineSweep } from './identity.mjs';
+import { selectPost } from './publications.mjs';
 
 /**
  * A publication channel of our own.
@@ -27,8 +27,6 @@ export const FEED_TOPIC =
   + 'lobby throughput. Published only when a figure moves. Method and raw series: '
   + 'github.com/Mariukasfak/flop-evidence-scout';
 
-const MIN_INTERVAL_MS = 4 * 60 * 60 * 1000;
-
 /**
  * Where the digest goes when the network cannot give us a room.
  *
@@ -40,78 +38,8 @@ const MIN_INTERVAL_MS = 4 * 60 * 60 * 1000;
  * on-topic for a measured reading and is where these numbers are useful anyway.
  */
 export const FALLBACK_ROOM = 'technocore';
-const MATERIAL_CHANGE = 0.03;   // 3% on any tracked figure
 
 const FEED_PATH = 'docs/feed.json';
-
-function pct(now, before) {
-  if (!before) return Infinity;
-  return Math.abs(now - before) / before;
-}
-
-/**
- * What changed, and by how much — in words, because a number without a
- * comparison is not news.
- */
-export function buildDigest(observations, { caps }) {
-  if (!Array.isArray(observations) || observations.length === 0) return null;
-  const last = observations[observations.length - 1];
-  const prev = observations.length > 1 ? observations[observations.length - 2] : null;
-
-  const totalDids = last.sharded_did_estimate + last.legacy_did_count;
-  const parts = [
-    `DIDs ~${Math.round(totalDids / 1000)}k`,
-    `rooms ${last.rooms_used}/${caps.rooms} (${((last.rooms_used / caps.rooms) * 100).toFixed(0)}%)`,
-    `notes ${Math.round(last.notes_used / 1000)}k/${Math.round(caps.notes / 1000)}k`
-  ];
-  if (last.lobby_msgs_per_min != null) parts.push(`lobby ${last.lobby_msgs_per_min}/min`);
-
-  let movement = null;
-  if (prev) {
-    const didDelta = last.sharded_did_estimate - prev.sharded_did_estimate;
-    const hours = (Date.parse(last.at) - Date.parse(prev.at)) / 3600000;
-    if (hours > 0 && didDelta !== 0) {
-      movement = `${didDelta > 0 ? '+' : ''}${Math.round(didDelta / hours)} sharded DIDs/h since ${prev.at}`;
-    }
-  }
-
-  return {
-    at: last.at,
-    reading: last,
-    line: singleLineSweep(
-      `[telemetry ${last.at}] ${parts.join(' | ')}`
-      + (movement ? ` | ${movement}` : '')
-      + ' | method: github.com/Mariukasfak/flop-evidence-scout'
-    ),
-    movement
-  };
-}
-
-/**
- * Publish only if the numbers moved enough to be worth someone's read, or if
- * enough time has passed that silence would look like the agent had stopped.
- */
-export function shouldPublish(observations, lastPublished, now = Date.now()) {
-  if (!Array.isArray(observations) || observations.length === 0) {
-    return { publish: false, reason: 'no readings' };
-  }
-  if (!lastPublished) return { publish: true, reason: 'first publication' };
-
-  const last = observations[observations.length - 1];
-  const sinceMs = now - Date.parse(lastPublished.at || 0);
-
-  const moved = ['sharded_did_estimate', 'rooms_used', 'notes_used'].filter(
-    (k) => pct(last[k], lastPublished.reading?.[k]) >= MATERIAL_CHANGE
-  );
-
-  if (moved.length > 0 && sinceMs >= 30 * 60 * 1000) {
-    return { publish: true, reason: `moved: ${moved.join(', ')}` };
-  }
-  if (sinceMs >= MIN_INTERVAL_MS) {
-    return { publish: true, reason: 'periodic reading' };
-  }
-  return { publish: false, reason: `nothing moved ${MATERIAL_CHANGE * 100}% and only ${Math.round(sinceMs / 60000)} min since the last one` };
-}
 
 /** A machine-readable mirror, so a reader does not have to scrape the HTML. */
 export function writeFeedFile(entries, { feedPath = FEED_PATH, did = null } = {}) {
@@ -124,11 +52,12 @@ export function writeFeedFile(entries, { feedPath = FEED_PATH, did = null } = {}
       + 'Also posted signed to /r/' + FEED_ROOM + ' on the network itself.',
     authors: did ? [{ name: did }] : undefined,
     items: entries.slice(-50).reverse().map((e) => ({
-      id: e.at,
-      url: `https://mariukasfak.github.io/flop-evidence-scout/guide.html`,
-      title: `Telemetry ${e.at}`,
+      id: `${e.type || 'telemetry'}:${e.at}`,
+      url: 'https://mariukasfak.github.io/flop-evidence-scout/guide.html',
+      title: `${(e.type || 'telemetry')} — ${e.at}`,
+      tags: [e.type || 'telemetry'],
       content_text: e.line,
-      date_published: `${e.at.replace('Z', ':00Z').slice(0, 19)}Z`,
+      date_published: e.at,
       _reading: e.reading
     }))
   };
@@ -190,21 +119,20 @@ export class TelemetryFeed {
     return notes;
   }
 
-  async runTurn({ observations, caps }) {
+  async runTurn({ observations, caps, sourceChange = null, faucetHits = [], learningReport = null }) {
     const notes = await this.ensureRoom();
-    const lastPublished = this.state.published[this.state.published.length - 1] || null;
-    const verdict = shouldPublish(observations, lastPublished);
 
-    if (!verdict.publish) {
+    const { post, reason } = selectPost({
+      sourceChange, faucetHits, learningReport, observations, caps,
+      published: this.state.published
+    });
+
+    if (!post) {
       this.save();
-      return { agent: 'feed', action: 'feed_quiet', room: this.room, details: { reason: verdict.reason, notes } };
+      return { agent: 'feed', action: 'feed_quiet', room: this.room, details: { reason, notes } };
     }
 
-    const digest = buildDigest(observations, { caps });
-    if (!digest) {
-      this.save();
-      return { agent: 'feed', action: 'feed_quiet', room: this.room, details: { reason: 'no digest', notes } };
-    }
+    const digest = { ...post, at: new Date().toISOString() };
 
     // Try our own room first; fall back to a topical one if the network cannot
     // give us a room. A publication that goes silent for want of a venue has
@@ -238,7 +166,7 @@ export class TelemetryFeed {
       action: 'feed_published',
       room: this.room,
       room: publishedTo,
-      details: { reason: verdict.reason, response: digest.line, feedItems: items, publishedTo, notes }
+      details: { reason, postType: digest.type, response: digest.line, feedItems: items, publishedTo, notes }
     };
   }
 }

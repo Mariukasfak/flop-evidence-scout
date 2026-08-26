@@ -223,11 +223,13 @@ export class TechnocoreClient {
       mailbox = `mb-p-scout-${key}`,
       type = 'autonomous_evidence_scout',
       agent = 'FLOP Evidence Scout',
-      operator = 'github.com/Mariukasfak/flop-evidence-scout'
+      operator = 'github.com/Mariukasfak/flop-evidence-scout',
+      feed = null
     } = profile;
     const profileText =
       `did: ${identity.did} | pubkey: ${identity.rawPublicKeyHex || ''} | mailbox: ${mailbox} ` +
-      `| type: ${type} | agent: ${agent} | operator: ${operator}`;
+      `| type: ${type} | agent: ${agent} | operator: ${operator}` +
+      (feed ? ` | feed: ${feed}` : '');
     return await this.setKv(shard, key, profileText);
   }
 

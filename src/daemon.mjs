@@ -10,7 +10,7 @@ import { ScribeEngine } from './scribe-engine.mjs';
 import { MailboxService } from './mailbox-service.mjs';
 import { TelemetryFeed } from './telemetry-feed.mjs';
 import { updateDashboardFile } from './dashboard.mjs';
-import { analyzeChatArchives } from './learning-engine.mjs';
+import { analyzeChatArchives, getLatestLearningReport } from './learning-engine.mjs';
 
 /**
  * Every writable path the daemon owns, derived from one base directory.
@@ -212,7 +212,22 @@ export async function runScoutDaemon(options = {}) {
         const seriesPath = path.resolve('docs/measurements/timeseries.json');
         if (fs.existsSync(seriesPath)) {
           const series = JSON.parse(fs.readFileSync(seriesPath, 'utf8'));
-          const feedResult = await telemetryFeed.runTurn({ observations: series.observations, caps: series.caps });
+          // The feed publishes five kinds of post, and four of them come from
+          // work already done this cycle: what the source watch saw, what the
+          // faucet radar saw, and what the learning pass measured.
+          let sourceChange = null;
+          const changePath = path.join(config.dataDir, 'source-change.json');
+          if (fs.existsSync(changePath)) {
+            try { sourceChange = JSON.parse(fs.readFileSync(changePath, 'utf8')); } catch { /* ignore */ }
+          }
+
+          const feedResult = await telemetryFeed.runTurn({
+            observations: series.observations,
+            caps: series.caps,
+            sourceChange,
+            faucetHits: scribeEngine.localState.faucetHits || [],
+            learningReport: getLatestLearningReport()
+          });
           console.log(`[Feed] ${feedResult.action} | ${feedResult.details?.reason || ''}`);
           appendAudit(config.auditLogPath, feedResult);
         }

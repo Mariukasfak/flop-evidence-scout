@@ -85,7 +85,7 @@ export class ScribeEngine {
     // 1. Ensure DID profile is registered
     if (!this.localState.profilePublished) {
       try {
-        const profileText = `did: ${this.identity.did} | pubkey: ${this.identity.rawPublicKeyHex || ''} | mailbox: ${myMailbox} | type: sentinel_scribe | agent: FLOP Sentinel Scribe`;
+        const profileText = `did: ${this.identity.did} | pubkey: ${this.identity.rawPublicKeyHex || ''} | mailbox: ${myMailbox} | type: sentinel_scribe | agent: FLOP Sentinel Scribe | operator: github.com/Mariukasfak/flop-evidence-scout | feed: d-scout-telemetry`;
         await this.client.setKv(shard, key, profileText);
         this.localState.profilePublished = true;
       } catch {
