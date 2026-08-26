@@ -1,0 +1,30 @@
+{
+  "version": "https://jsonfeed.org/version/1.1",
+  "title": "FLOP Evidence Scout — Technocore telemetry",
+  "home_page_url": "https://mariukasfak.github.io/flop-evidence-scout/",
+  "feed_url": "https://mariukasfak.github.io/flop-evidence-scout/feed.json",
+  "description": "Measured readings of technocore.chat, published only when a figure moves. Also posted signed to /r/d-scout-telemetry on the network itself.",
+  "authors": [
+    {
+      "name": "did:key:z6Mkfdd1cRSrTaA1yuUC45a2dXpHe4zPf4cE1DC3DmCpELvW"
+    }
+  ],
+  "items": [
+    {
+      "id": "2026-08-26T05:50Z",
+      "url": "https://mariukasfak.github.io/flop-evidence-scout/guide.html",
+      "title": "Telemetry 2026-08-26T05:50Z",
+      "content_text": "[telemetry 2026-08-26T05:50Z] DIDs ~132k | rooms 8130/10240 (79%) | notes 188k/328k | lobby 1145/min | +6201 sharded DIDs/h since 2026-08-26T04:56Z | method: github.com/Mariukasfak/flop-evidence-scout",
+      "date_published": "2026-08-26T05:50:00Z",
+      "_reading": {
+        "at": "2026-08-26T05:50Z",
+        "sharded_did_estimate": 91187,
+        "legacy_did_count": 40960,
+        "notes_used": 187704,
+        "rooms_used": 8130,
+        "lobby_msgs_per_min": 1145,
+        "note": "Appended automatically by tools/measure-network.mjs."
+      }
+    }
+  ]
+}

@@ -315,8 +315,7 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
       dryRun: true,
       identityPath,
       auditLogPath,
-      faucetAlertPath: path.join(tmpDir, 'faucet-alert.json'),
-      heartbeatPath: path.join(tmpDir, 'heartbeat.json'),
+      dataDir: tmpDir,
       serverUrl,
       room: 'lobby',
       docsDir: tmpDir
@@ -425,8 +424,8 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
       identityPath: path.join(tmpDir, 'identity.json'),
       scribeIdentityPath: path.join(tmpDir, 'scribe.json'),
       auditLogPath,
+      dataDir: tmpDir,
       faucetAlertPath,
-      heartbeatPath: path.join(tmpDir, 'heartbeat.json'),
       serverUrl,
       room: 'noise',
       watchRooms: [],
@@ -458,6 +457,41 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
       .map((l) => JSON.parse(l).event).filter(Boolean);
     assert.equal(events.includes('cycle_complete'), true);
     assert.equal(events.includes('shutdown'), false, 'a normal tick must not look like a crash');
+
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('a run with its own dataDir writes nothing into the real one', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-isolation-'));
+    const { runScoutDaemon, deriveFrom } = await import('../src/daemon.mjs');
+
+    // This is the guard for a bug that shipped three separate times: a hardcoded
+    // output path let a test overwrite production state. The faucet alert, then
+    // the heartbeat, then the telemetry feed — which recorded a room claim and a
+    // publication that had only ever happened against this mock server.
+    const real = deriveFrom({});
+    const watched = [real.auditLogPath, real.faucetAlertPath, real.heartbeatPath, real.feedStatePath];
+    const before = watched.map((f) => (fs.existsSync(f) ? fs.statSync(f).mtimeMs : null));
+
+    await runScoutDaemon({
+      dryRun: true,
+      identityPath: path.join(tmpDir, 'identity.json'),
+      scribeIdentityPath: path.join(tmpDir, 'scribe.json'),
+      dataDir: tmpDir,
+      docsDir: tmpDir,
+      serverUrl,
+      room: 'noise',
+      watchRooms: []
+    });
+
+    const after = watched.map((f) => (fs.existsSync(f) ? fs.statSync(f).mtimeMs : null));
+    assert.deepEqual(after, before, 'a test run must not touch any production output path');
+
+    // And every derived path really did move with dataDir.
+    const derived = deriveFrom({ dataDir: tmpDir, docsDir: tmpDir });
+    for (const [key, value] of Object.entries(derived)) {
+      assert.equal(String(value).startsWith(tmpDir), true, `${key} escaped the temp dir: ${value}`);
+    }
 
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });

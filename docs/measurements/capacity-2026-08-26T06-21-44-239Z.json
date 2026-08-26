@@ -1,0 +1,42 @@
+{
+  "measuredAt": "2026-08-26T06:21:44.239Z",
+  "server": "https://technocore.chat",
+  "samples": [
+    {
+      "at": "2026-08-26T06:20:43.490Z",
+      "rooms": 8129,
+      "notes": 191507
+    },
+    {
+      "at": "2026-08-26T06:21:44.239Z",
+      "rooms": 8129,
+      "notes": 191661
+    }
+  ],
+  "forecasts": [
+    {
+      "metric": "notes",
+      "used": 191661,
+      "cap": 327680,
+      "percentFull": 58.5,
+      "observedPerHour": 9126,
+      "remaining": 136019,
+      "hoursToCap": 14.9,
+      "countIsComplete": true,
+      "bindsAt": "2026-08-26T21:16:00.201Z",
+      "windowHours": 0.02
+    },
+    {
+      "metric": "rooms",
+      "used": 8129,
+      "cap": 10240,
+      "percentFull": 79.4,
+      "observedPerHour": 0,
+      "remaining": 2111,
+      "hoursToCap": null,
+      "countIsComplete": false,
+      "bindsAt": null,
+      "windowHours": 0.02
+    }
+  ]
+}

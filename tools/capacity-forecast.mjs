@@ -11,6 +11,14 @@
  * moves both ways because the reaper reclaims idle rooms, so a naive slope there
  * is meaningless.
  *
+ * IMPORTANT, and learned the hard way: the room number on /rooms counts only
+ * ENUMERABLE rooms. Private `p-` rooms are reachable but never listed, and they
+ * still consume the cap. On 2026-08-26 /rooms reported 8128 of 10240 — 79% —
+ * while a room creation was already being refused with "room limit reached". The
+ * gap was roughly two thousand invisible rooms. So the room forecast below is a
+ * LOWER BOUND on fill and an UPPER BOUND on time remaining, and it says so in
+ * its own output rather than quietly misleading whoever reads it.
+ *
  * Run: node tools/capacity-forecast.mjs [--samples 3] [--interval 300]
  */
 import fs from 'node:fs';
@@ -65,6 +73,8 @@ function forecast(label, first, last) {
     // A negative or zero rate means it is not filling; say so rather than
     // printing an infinity or a nonsense date.
     hoursToCap: perHour > 0 ? Number((remaining / perHour).toFixed(1)) : null,
+    // See the header note: for rooms this is a lower bound on fill.
+    countIsComplete: label !== 'rooms',
     bindsAt: perHour > 0 ? new Date(last.at + (remaining / perHour) * 3_600_000).toISOString() : null,
     windowHours: Number(hours.toFixed(2))
   };
@@ -101,6 +111,10 @@ async function main() {
     const eta = f.hoursToCap === null ? 'not filling' : `${f.hoursToCap} h  (~${f.bindsAt})`;
     console.log(`${f.metric.padEnd(6)} ${f.used}/${f.cap} (${f.percentFull}%)  +${f.observedPerHour}/h  ->  ${eta}`);
   }
+  console.log(`
+Window: ${result.forecasts[0]?.windowHours ?? '?'} h. A short window during a burst extrapolates to nonsense.`);
+  console.log('Rooms: /rooms counts only enumerable rooms; private p- rooms consume the cap and are never listed,');
+  console.log('so the room figure is a floor and its time-to-cap is a ceiling. Confirm by attempting a room creation.');
 
   fs.mkdirSync(OUT_DIR, { recursive: true });
   const file = path.join(OUT_DIR, `capacity-${new Date(last.at).toISOString().replace(/[:.]/g, '-')}.json`);

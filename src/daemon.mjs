@@ -8,8 +8,33 @@ import { Guardrails } from './guardrails.mjs';
 import { ScoutEngine } from './scout-engine.mjs';
 import { ScribeEngine } from './scribe-engine.mjs';
 import { MailboxService } from './mailbox-service.mjs';
+import { TelemetryFeed } from './telemetry-feed.mjs';
 import { updateDashboardFile } from './dashboard.mjs';
 import { analyzeChatArchives } from './learning-engine.mjs';
+
+/**
+ * Every writable path the daemon owns, derived from one base directory.
+ *
+ * This exists because the same bug shipped three times: a hardcoded path let a
+ * test run overwrite production state — the faucet alert, then the heartbeat,
+ * then the telemetry feed, which recorded a room claim and a publication that
+ * had only ever happened against a mock server. Deriving them all from dataDir
+ * makes that impossible rather than merely fixed.
+ */
+export function deriveFrom(o) {
+  const dataDir = o.dataDir || path.resolve('data');
+  const docsDir = o.docsDir || 'docs';
+  return {
+    dataDir,
+    docsDir,
+    auditLogPath: o.auditLogPath || path.join(dataDir, 'scout-audit.jsonl'),
+    faucetAlertPath: o.faucetAlertPath || path.join(dataDir, 'faucet-alert.json'),
+    heartbeatPath: o.heartbeatPath || path.join(dataDir, 'scout-heartbeat.json'),
+    feedStatePath: o.feedStatePath || path.join(dataDir, 'feed-state.json'),
+    feedPath: o.feedPath || path.join(docsDir, 'feed.json'),
+    chatArchiveDir: o.chatArchiveDir || path.join(dataDir, 'chats')
+  };
+}
 
 function parseArgs(argv) {
   const options = {
@@ -20,11 +45,11 @@ function parseArgs(argv) {
     serverUrl: process.env.TECHNOCORE_URL || 'https://technocore.chat',
     room: 'lobby',
     watchRooms: null,
-    auditLogPath: path.resolve('data/scout-audit.jsonl'),
-    faucetAlertPath: path.resolve('data/faucet-alert.json'),
-    heartbeatPath: path.resolve('data/scout-heartbeat.json'),
+    dataDir: path.resolve('data'),
     docsDir: 'docs'
   };
+
+
 
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];
@@ -35,6 +60,7 @@ function parseArgs(argv) {
     else if (arg.startsWith('--room=')) options.room = arg.slice(7);
     else if (arg.startsWith('--rooms=')) options.watchRooms = arg.slice(8).split(',').map((r) => r.trim()).filter(Boolean);
     else if (arg.startsWith('--docs-dir=')) options.docsDir = arg.slice(11);
+    else if (arg.startsWith('--data-dir=')) options.dataDir = path.resolve(arg.slice(11));
   }
 
   return options;
@@ -50,9 +76,9 @@ function appendAudit(logPath, record) {
   }
 }
 
-export function archiveRoomMessages(room, messages = []) {
+export function archiveRoomMessages(room, messages = [], archiveDir = path.resolve('data/chats')) {
   if (!Array.isArray(messages) || messages.length === 0) return;
-  const archivePath = path.resolve(`data/chats/${room}-archive.jsonl`);
+  const archivePath = path.join(archiveDir, `${room}-archive.jsonl`);
   try {
     fs.mkdirSync(path.dirname(archivePath), { recursive: true });
     const existingSeqs = new Set();
@@ -78,7 +104,11 @@ export function archiveRoomMessages(room, messages = []) {
 }
 
 export async function runScoutDaemon(options = {}) {
-  const config = { ...parseArgs(process.argv), ...options };
+  const parsed = parseArgs(process.argv);
+  const merged = { ...parsed, ...options };
+  // Re-derive after the caller's overrides, so passing only dataDir moves
+  // every output rather than just the ones the caller thought to name.
+  const config = { ...merged, ...deriveFrom(merged) };
   
   // 1. Initialize Scout Agent (Agent #1)
   const scoutIdentity = loadOrCreateIdentity(config.identityPath, 'SCOUT_IDENTITY_JSON');
@@ -108,6 +138,16 @@ export async function runScoutDaemon(options = {}) {
     identity: scoutIdentity,
     client,
     guardrails: new Guardrails({ maxPerHour: 2, minCooldownMs: 30_000 })
+  });
+
+  // A channel of our own. Measurements have been going into a web page nobody on
+  // the network can read; an owned d- room is a publication the swarm cannot
+  // flood, advertised free by its topic note in /rooms.
+  const telemetryFeed = new TelemetryFeed({
+    identity: scribeIdentity,
+    client,
+    statePath: config.feedStatePath,
+    feedPath: config.feedPath
   });
 
   console.log(`[Dual Agent Mesh] Connected to: ${config.serverUrl} (Rooms: ${config.room} & events)`);
@@ -167,6 +207,19 @@ export async function runScoutDaemon(options = {}) {
       console.log(`[Scout #${scoutResult.turns}] Action: ${scoutResult.action} | Seq: ${scoutResult.lastSeenSeq}`);
       appendAudit(config.auditLogPath, { agent: 'scout', ...scoutResult });
 
+      // Step D: publish a telemetry digest, but only when a figure has moved.
+      try {
+        const seriesPath = path.resolve('docs/measurements/timeseries.json');
+        if (fs.existsSync(seriesPath)) {
+          const series = JSON.parse(fs.readFileSync(seriesPath, 'utf8'));
+          const feedResult = await telemetryFeed.runTurn({ observations: series.observations, caps: series.caps });
+          console.log(`[Feed] ${feedResult.action} | ${feedResult.details?.reason || ''}`);
+          appendAudit(config.auditLogPath, feedResult);
+        }
+      } catch (err) {
+        console.warn('[Feed] skipped:', err.message);
+      }
+
       // Archive every room the Scout actually works, not just the primary one.
       // Only lobby and events were being archived, so the learning pass could
       // only ever study the firehose the agent deliberately ignores — and never
@@ -174,7 +227,7 @@ export async function runScoutDaemon(options = {}) {
       for (const archiveRoom of new Set([config.room, ...scoutEngine.watchRooms])) {
         try {
           const data = await client.readRoom(archiveRoom, { limit: 25 });
-          if (data.messages) archiveRoomMessages(archiveRoom, data.messages);
+          if (data.messages) archiveRoomMessages(archiveRoom, data.messages, config.chatArchiveDir);
         } catch { /* a room that cannot be read is not worth failing the cycle */ }
       }
 
