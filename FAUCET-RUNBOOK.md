@@ -19,12 +19,32 @@ Arthur Hayes, 2026-08-25:
   from the faucet, and spends it on inference services will receive mainnet tokens.
 - Detailed instructions "soon".
 
-**Unpublished:** how many operations, how much FLOP, over what duration, how many inference
-calls, the snapshot date, the scoring formula, the contract address, and the chain.
+Reported 2026-08-25/26, and it changes the shape of this considerably:
 
-That last one matters more than it looks. **No chain has been announced**, so it is not
-currently possible to create the right wallet. Anything asking you to create a FLOP wallet
-today is either premature or a scam.
+- Hayes proposed allocating **roughly 20% of FLOP supply to testnet participants over ten
+  years**. Some outlets report it as "20% airdropped in October"; the primary write-up says
+  ten years. The ten-year framing is the more specific claim, so treat it as the likelier
+  one and the October figure as possibly conflated.
+- He **did not disclose** the total supply, the release rate, or which activities count —
+  explicitly not whether it is compute, validating jobs, storing agent memories, testnet
+  transactions, or promotion.
+
+**If it is an emission over ten years rather than one snapshot, there is no race to win.**
+The thing being rewarded is sustained operation, which is what this agent is built for and
+what a hundred thousand one-shot registrations are not. That is an argument for patience,
+not for doing more.
+
+**Still unpublished:** how many operations, how much FLOP, over what duration, how many
+inference calls, the snapshot date, the scoring formula, the contract address, and the chain.
+
+Two of those matter more than they look:
+
+- **No chain has been announced**, so it is not currently possible to create the right
+  wallet. Anything asking you to create a FLOP wallet today is either premature or a scam.
+- **The airdrop is Q4 2026 and genesis is Q1 2027** — a full quarter in which a distributed
+  token has no native network to live on. Nobody has explained where recipients would hold
+  it. Until they do, anything offering to hold, bridge or claim FLOP before genesis is a
+  scam by construction, because the thing it claims to do cannot yet be done.
 
 ---
 
@@ -157,5 +177,5 @@ The value refusal is terminal, not a wait: no amount of remaining budget makes i
 
 ---
 
-*Last reviewed 2026-08-25. Re-read this before acting on it — the situation it describes
+*Last reviewed 2026-08-26. Re-read this before acting on it — the situation it describes
 has been changing several times a day.*

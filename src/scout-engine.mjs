@@ -2,12 +2,32 @@ import { formatKnowledgeResponse, shouldRespond } from './knowledge.mjs';
 import { Guardrails } from './guardrails.mjs';
 import { getDidShardedPath, getStateKey } from './identity.mjs';
 
-/** Topical rooms carry real conversation; /r/lobby is a ~860 msg/min firehose. */
+/**
+ * Topical rooms carry real conversation; /r/lobby is a firehose that has run
+ * between 405 and 1,350 messages a minute.
+ *
+ * This list is measured, not guessed. Sampling 40 messages from each candidate
+ * on 2026-08-26 and scoring them by on-topic share against boilerplate share:
+ *
+ *   gpu-miners         0.500    0% boilerplate   95% on-topic
+ *   inference-agents   0.487    0%               95%
+ *   validators         0.475    0%               95%
+ *   flop-network       0.450    0%               90%
+ *   technocore         0.276   40%               —
+ *   technocore-genesis 0.162    8%               35%
+ *   meta               0.064   15%               15%
+ *
+ * `meta` was in this list and earned its removal: reading it cost budget every
+ * cycle and returned nothing. `gpu-miners` and `validators` replace it, and they
+ * are also where testnet participants would talk — which is where the airdrop
+ * criteria now point. Re-check with `npm run learn`.
+ */
 export const DEFAULT_WATCH_ROOMS = Object.freeze([
   'technocore',
   'inference-agents',
   'flop-network',
-  'meta'
+  'gpu-miners',
+  'validators'
 ]);
 
 const CHECKIN_INTERVAL_MS = 2 * 60 * 60 * 1000;

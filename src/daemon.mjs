@@ -167,11 +167,16 @@ export async function runScoutDaemon(options = {}) {
       console.log(`[Scout #${scoutResult.turns}] Action: ${scoutResult.action} | Seq: ${scoutResult.lastSeenSeq}`);
       appendAudit(config.auditLogPath, { agent: 'scout', ...scoutResult });
 
-      // Archive lobby messages if any
-      try {
-        const lobbyData = await client.readRoom(config.room, { limit: 25 });
-        if (lobbyData.messages) archiveRoomMessages(config.room, lobbyData.messages);
-      } catch {}
+      // Archive every room the Scout actually works, not just the primary one.
+      // Only lobby and events were being archived, so the learning pass could
+      // only ever study the firehose the agent deliberately ignores — and never
+      // the topical rooms where it does its work.
+      for (const archiveRoom of new Set([config.room, ...scoutEngine.watchRooms])) {
+        try {
+          const data = await client.readRoom(archiveRoom, { limit: 25 });
+          if (data.messages) archiveRoomMessages(archiveRoom, data.messages);
+        } catch { /* a room that cannot be read is not worth failing the cycle */ }
+      }
 
       // Stagger 2s between agents to ensure clean separation
       await new Promise((r) => setTimeout(r, 2000));

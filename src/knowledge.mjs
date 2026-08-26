@@ -77,6 +77,20 @@ export const VERIFIED_FACTS = Object.freeze([
     source: 'technocore.chat /.well-known/agent.json (measured 2026-08-25)'
   },
   {
+    topic: 'testnet_allocation',
+    keywords: ['allocation', 'supply', '20%', 'tokenomics', 'emission', 'distribution', 'paskirstymas', 'emisija'],
+    summary_en: 'Reported 2026-08-25/26: Hayes proposed allocating roughly 20% of FLOP supply to testnet participants over TEN YEARS — an emission, not a single snapshot. He did not disclose the total supply, the release rate, or which activities count. Outlets differ: some report "20% airdropped in October", the primary write-up says 20% over ten years. Treat the ten-year framing as the more specific claim and the October figure as possibly conflated. Airdrop is still slated for Q4 2026, genesis Q1 2027.',
+    summary_lt: 'Pranešta 2026-08-25/26: Hayes pasiūlė skirti apie 20% FLOP pasiūlos testnet dalyviams per DEŠIMT METŲ – tai emisija, ne vienkartinis snapshot. Nepaskelbta nei bendra pasiūla, nei išleidimo tempas, nei kokia veikla įskaitoma. Šaltiniai skiriasi: vieni rašo „20% airdrop spalį", pirminis straipsnis – 20% per dešimt metų. Airdrop tebeplanuojamas 2026 Q4, genesis – 2027 Q1.',
+    source: 'crypto.news / Bloomingbit, 2026-08-25/26 — reported, not confirmed on flop.finance'
+  },
+  {
+    topic: 'pre_genesis_gap',
+    keywords: ['genesis', 'mainnet', 'custody', 'hold', 'bridge', 'chain', 'grandine'],
+    summary_en: 'An open question nobody has answered: the airdrop is slated for Q4 2026 but the Flop Network genesis block is Q1 2027, so there is a quarter in which a distributed token has no native chain to live on. No chain has been announced at all. Practical consequence: it is not currently possible to create a correct FLOP wallet, and anything offering to hold, bridge or claim FLOP before genesis should be treated as a scam.',
+    summary_lt: 'Atviras klausimas, į kurį niekas neatsakė: airdrop planuojamas 2026 Q4, o Flop Network genesis blokas – 2027 Q1, tad lieka ketvirtis, kai paskirstytas tokenas neturi savo grandinės. Grandinė apskritai nepaskelbta. Praktinė išvada: teisingos FLOP piniginės sukurti šiuo metu neįmanoma, o bet kas, siūlantis laikyti, perkelti ar atsiimti FLOP iki genesis, laikytinas sukčiumi.',
+    source: 'crypto.news analysis, 2026-08-25 — the gap is noted, not resolved'
+  },
+  {
     topic: 'airdrop_tasks',
     keywords: ['task', 'tasks', 'quest', 'bounty', 'reward', 'uzduotis', 'užduotis', 'uzduotys', 'užduotys'],
     summary_en: 'Reported 2026-08-25: Arthur Hayes stated there will be specific tasks for AI agents that require a unique did:key, rewarded with airdropped $FLOP. The tasks themselves, any scoring, allocation sizes and a snapshot date remain unpublished — and flop.finance still shows no token, no presale and no claim page. Keep one persistent DID; do not treat volume as a substitute for a task nobody has announced yet.',
@@ -164,7 +178,12 @@ const BOILERPLATE_PATTERNS = [
   /node (?:online|active)/i,
   /continuous participation/i,
   /public contribution \[/i,
-  /obtain an auth key/i
+  /obtain an auth key/i,
+  // Surfaced by the learning pass: the same two sentences from four different
+  // DIDs, each carrying a different X link. A mass-produced template, not a
+  // contribution anyone can read.
+  /i published a technocore contribution/i,
+  /it helps people understand technocore/i
 ];
 
 function escapeRegExp(value) {
@@ -202,6 +221,15 @@ export function findRelevantKnowledge(query, { fallback = true } = {}) {
  * Every condition has to hold — being silent is the correct default on a network
  * that already carries ~860 messages a minute.
  */
+/**
+ * A URL's query string is not a question mark, whatever `includes('?')` thinks.
+ * The learning pass caught this: four messages qualified as "questions" purely
+ * because they carried `https://x.com/…?s=20`.
+ */
+export function stripUrls(text) {
+  return String(text ?? '').replace(/https?:\/\/\S+/gi, ' ');
+}
+
 export function shouldRespond(text, { selfDid = null, minLength = 20, maxLength = 1200 } = {}) {
   const value = typeof text === 'string' ? text.trim() : '';
 
@@ -210,7 +238,9 @@ export function shouldRespond(text, { selfDid = null, minLength = 20, maxLength 
   if (isBoilerplate(value)) return { respond: false, reason: 'boilerplate', topics: [] };
 
   const addressedToUs = Boolean(selfDid) && value.includes(selfDid);
-  const isQuestion = value.includes('?') || /\b(how|what|where|why|which|help|kaip|kodėl|kodel|kur|kada|koks|padėk|padek)\b/i.test(value);
+  const withoutUrls = stripUrls(value);
+  const isQuestion = withoutUrls.includes('?')
+    || /\b(how|what|where|why|which|help|kaip|kodėl|kodel|kur|kada|koks|padėk|padek)\b/i.test(withoutUrls);
 
   if (!isQuestion && !addressedToUs) return { respond: false, reason: 'not_a_question', topics: [] };
   if (!hasStrongTerm(value) && !addressedToUs) return { respond: false, reason: 'off_topic', topics: [] };
