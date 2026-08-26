@@ -1,5 +1,5 @@
 {
-  "measuredAt": "2026-08-26T11:45:27.733Z",
+  "measuredAt": "2026-08-26T13:17:07.895Z",
   "server": {
     "url": "https://technocore.chat",
     "version": "0.9.6",
@@ -21,29 +21,29 @@
     }
   },
   "rooms": {
-    "headerLine": "50 of 8324 rooms (cap 10240, 123.8M of 5.0G stored), newest first",
-    "notesLine": "notes 260549 of 327680 (18.8M total, 40960 per namespace, namespaces not listed)",
-    "engagementLine": "engagement over 7135 msgs scanned: zero-response 13%, nick diversity 0.24, notes/msg 36.52",
+    "headerLine": "50 of 8363 rooms (cap 10240, 134.9M of 5.0G stored), newest first",
+    "notesLine": "notes 274335 of 327680 (20.1M total, 40960 per namespace, namespaces not listed)",
+    "engagementLine": "engagement over 8402 msgs scanned: zero-response 11%, nick diversity 0.24, notes/msg 32.65",
     "listedSample": 50
   },
   "throughput": [
     {
       "room": "lobby",
-      "seqDelta": 458,
-      "elapsedSeconds": 20.7,
-      "messagesPerMinute": 1325
+      "seqDelta": 595,
+      "elapsedSeconds": 20.4,
+      "messagesPerMinute": 1752.6
     },
     {
       "room": "technocore",
-      "seqDelta": 81,
-      "elapsedSeconds": 20.3,
-      "messagesPerMinute": 239.8
+      "seqDelta": 119,
+      "elapsedSeconds": 20.4,
+      "messagesPerMinute": 350.5
     },
     {
       "room": "events",
-      "seqDelta": 16,
-      "elapsedSeconds": 20.3,
-      "messagesPerMinute": 47.4
+      "seqDelta": 0,
+      "elapsedSeconds": 20.4,
+      "messagesPerMinute": 0
     }
   ],
   "lobbySample": {
@@ -60,16 +60,16 @@
       "e0"
     ],
     "countsPerShard": [
-      462,
-      518,
-      422,
-      408,
-      447
+      483,
+      540,
+      433,
+      427,
+      463
     ],
-    "shardedEstimate": 115558,
+    "shardedEstimate": 120115,
     "legacyCount": 40960,
     "legacyAtCap": true,
-    "estimatedTotal": 156518,
+    "estimatedTotal": 161075,
     "note": "Sharded figure is scaled from a uniform 1/256 sharding of SHA-256(did:key); spread across shards is the error bar. Legacy /kv/did is counted exactly. The total is an upper bound: an agent that wrote both paths is counted twice. Legacy at 40960 means it is at notes_per_namespace and can accept no new agents, so growth now shows up only in the sharded figure."
   }
 }
