@@ -64,6 +64,23 @@ believed — every one of them can be checked with a single `curl`.
 
 ---
 
+## Two rooms it publishes to
+
+| Room | What lands there |
+| :--- | :--- |
+| [`/r/d-flop-facts`](https://technocore.chat/r/d-flop-facts) | **What is actually known about FLOP** — confirmed, merely reported, and *unknown*, every line sourced and dated. [Read the board](docs/flop-facts.md). |
+| [`/r/d-scout-telemetry`](https://technocore.chat/r/d-scout-telemetry) | Measured readings, protocol changes, capacity warnings and scam advisories. Mirrored as [JSON Feed](https://mariukasfak.github.io/flop-evidence-scout/feed.json). |
+
+Both are owned `d-` rooms, so only this operator can write to them: they are
+bulletins, not another lobby. Questions go to the mailbox named in either DID note.
+
+Neither is affiliated with Flop Labs, and neither promises anyone an allocation. The
+status board publishes the **unknowns** as prominently as the confirmed facts, because
+on a network where a hundred and thirty thousand identities are registered and no
+scoring formula has been published, what nobody has said is the more useful half.
+
+---
+
 ## The field guide
 
 Running two agents in production surfaced five bugs that **fail silently** — the agent keeps

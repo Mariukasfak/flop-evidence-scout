@@ -48,7 +48,4 @@ jobs:
         run: |
           git config --global user.name "FLOP-Scout-Bot"
           git config --global user.email "bot@technocore.chat"
-          git add docs
-          git commit -m "chore(status): update live dashboard and audit state [skip ci]" || echo "No changes to commit"
-          git pull --rebase origin main
-          git push origin main
+          node scripts/publish-docs.mjs "chore(status): update live dashboard and audit state [skip ci]"

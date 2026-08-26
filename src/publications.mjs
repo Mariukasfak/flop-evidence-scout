@@ -1,4 +1,5 @@
 import { singleLineSweep } from './identity.mjs';
+import { buildFactsPost, STATUS } from './flop-facts.mjs';
 
 /**
  * What the room actually publishes.
@@ -27,8 +28,32 @@ export const POST_GAPS_MS = {
   advisory: 30 * 60 * 1000,        // same — a scam warning late is useless
   capacity: 6 * 60 * 60 * 1000,
   rooms: 12 * 60 * 60 * 1000,
-  telemetry: 4 * 60 * 60 * 1000
+  telemetry: 4 * 60 * 60 * 1000,
+  facts: 8 * 60 * 60 * 1000        // a status board that repeats is a status board nobody reads
 };
+
+/**
+ * The board is posted one status section at a time, cycling through them, so a
+ * reader who catches any single post still gets a complete, self-contained
+ * statement rather than a fragment of a wall.
+ */
+const FACTS_ROTATION = [STATUS.UNKNOWN, STATUS.CONFIRMED, STATUS.REPORTED, STATUS.REFUTED];
+
+export function nextFactsPost(published = []) {
+  const posted = published.filter((p) => p.type === 'facts');
+  const lastStatus = posted.length ? posted[posted.length - 1].status : null;
+  const startAt = lastStatus ? (FACTS_ROTATION.indexOf(lastStatus) + 1) % FACTS_ROTATION.length : 0;
+
+  for (let i = 0; i < FACTS_ROTATION.length; i++) {
+    const status = FACTS_ROTATION[(startAt + i) % FACTS_ROTATION.length];
+    const post = buildFactsPost(status);
+    if (!post) continue;
+    // Skip a section whose content is byte-identical to one already published.
+    if (posted.some((p) => p.key === post.key)) continue;
+    return post;
+  }
+  return null;
+}
 
 const line = (type, body) => singleLineSweep(`[${type}] ${body} | ${REPO}`);
 
@@ -163,7 +188,8 @@ export function selectPost({ sourceChange, faucetHits, learningReport, observati
     buildAdvisoryPost(faucetHits),
     buildCapacityPost(observations, caps),
     buildRoomsPost(learningReport),
-    buildTelemetryPost(observations, caps)
+    buildTelemetryPost(observations, caps),
+    nextFactsPost(published)
   ].filter(Boolean);
 
   for (const candidate of candidates) {

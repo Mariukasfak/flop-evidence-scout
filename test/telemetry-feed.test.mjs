@@ -3,9 +3,18 @@ import assert from 'node:assert/strict';
 
 import { FEED_ROOM, FEED_TOPIC, FALLBACK_ROOM } from '../src/telemetry-feed.mjs';
 import {
-  selectPost, POST_GAPS_MS,
+  selectPost, POST_GAPS_MS, nextFactsPost,
   buildProtocolPost, buildAdvisoryPost, buildRoomsPost, buildCapacityPost, buildTelemetryPost
 } from '../src/publications.mjs';
+import { STATUS } from '../src/flop-facts.mjs';
+
+/** The board is always available until every section has been published. */
+const factsExhausted = () => {
+  const out = [];
+  let post;
+  while ((post = nextFactsPost(out))) out.push({ ...post, at: '2026-08-20T00:00Z' });
+  return out;
+};
 import { isValidTechnocoreName } from '../src/identity.mjs';
 
 const CAPS = { rooms: 10240, notes: 327680 };
@@ -114,7 +123,7 @@ describe('Choosing what to publish', () => {
       reading('2026-08-26T04:00Z', 80000, 900, 20000, 900),
       reading('2026-08-26T06:00Z', 86000, 910, 21000, 1200)
     ];
-    const published = [{ type: 'telemetry', key: 'telemetry:old', at: '2026-08-26T05:00Z' }];
+    const published = [...factsExhausted(), { type: 'telemetry', key: 'telemetry:old', at: '2026-08-26T05:00Z' }];
 
     const soon = selectPost({ observations: quiet, caps: CAPS, published, now: Date.parse('2026-08-26T06:00Z') });
     assert.equal(soon.post, null, 'one hour is inside the four-hour telemetry gap');
@@ -137,8 +146,24 @@ describe('Choosing what to publish', () => {
   });
 
   test('nothing to say means nothing published', () => {
-    const { post, reason } = selectPost({ observations: [], caps: CAPS, published: [] });
+    const { post, reason } = selectPost({ observations: [], caps: CAPS, published: factsExhausted() });
     assert.equal(post, null);
     assert.match(reason, /nothing new/);
+  });
+
+  test('the status board cycles its sections, then goes quiet', () => {
+    const published = [];
+    const seen = [];
+    let post;
+    while ((post = nextFactsPost(published))) {
+      seen.push(post.status);
+      published.push({ ...post, at: '2026-08-20T00:00Z' });
+    }
+
+    // Unknown goes first: what nobody has published is what a reader most needs.
+    assert.equal(seen[0], STATUS.UNKNOWN);
+    assert.equal(new Set(seen).size, seen.length, 'each section published once');
+    // And an unchanged board stops rather than repeating itself forever.
+    assert.equal(nextFactsPost(published), null);
   });
 });
