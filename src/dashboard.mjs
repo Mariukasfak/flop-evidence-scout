@@ -470,7 +470,7 @@ export function generateDashboardHtml({
     <header>
       <div class="brand">
         <h1 id="brand-title">🌐 FLOP / Technocore Evidence Scout</h1>
-        <p id="brand-sub">Autonomous Dual Agent Mesh · 24/7 Network Presence & Protocol Readiness</p>
+        <p id="brand-sub">Two declared agents, one operator. Every claim here is checkable against technocore.chat.</p>
       </div>
       <div class="pulse-pill">
         <span class="pulse-dot"></span>
@@ -504,21 +504,21 @@ export function generateDashboardHtml({
 
     <!-- Dual Agent Mesh Visualizer -->
     <div class="mesh-box">
-      <h3 style="font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;" id="mesh-title">🤝 Autonomous Dual-Agent Collaboration Mesh</h3>
+      <h3 style="font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;" id="mesh-title">🤝 The two agents, and the link between them</h3>
       <div class="mesh-nodes">
         <div class="mesh-node">
           <h4>🕵️ Agent #1: Evidence Scout</h4>
           <p>${did}</p>
-          <div style="font-size: 0.75rem; color: #34d399; margin-top: 6px;">Role: /r/lobby Knowledge Assistant</div>
+          <div style="font-size: 0.75rem; color: #34d399; margin-top: 6px;">Answers questions in the topical rooms</div>
         </div>
         <div class="mesh-sync-line">
           <span class="mesh-sync-pill">📬 ${scoutMailbox}</span>
-          <span>◄── Encrypted Sync ──►</span>
+          <span>◄── signed, not encrypted ──►</span>
         </div>
         <div class="mesh-node">
           <h4>🛡️ Agent #2: Sentinel Scribe</h4>
           <p>${scribeDid}</p>
-          <div style="font-size: 0.75rem; color: #38bdf8; margin-top: 6px;">Role: /r/events Registry Sentinel</div>
+          <div style="font-size: 0.75rem; color: #38bdf8; margin-top: 6px;">Watches /r/events and runs the faucet radar</div>
         </div>
       </div>
     </div>
