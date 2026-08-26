@@ -26,18 +26,18 @@
     <text x="58" y="86.0" class="tick tick-y">1.5k</text>
     <line x1="68" y1="24.0" x2="696" y2="24.0" class="grid"/>
     <text x="58" y="28.0" class="tick tick-y">2.0k</text>
-  <path d="M68.0,156.2 L154.7,99.4 L283.1,196.3 L286.6,209.0 L287.9,195.0 L295.7,197.4 L318.7,190.8 L379.8,130.6 L414.1,115.6 L456.6,108.7 L480.0,123.2 L514.3,108.6 L536.4,68.1 L611.0,117.8 L634.0,102.3 L673.9,52.7 L696.0,43.3 L696.0,256.0 L68.0,256.0 Z" class="fill"/>
+  <path d="M68.0,156.2 L148.9,99.4 L268.6,196.3 L271.8,209.0 L273.0,195.0 L280.3,197.4 L301.7,190.8 L358.7,130.6 L390.7,115.6 L430.3,108.7 L452.2,123.2 L484.1,108.6 L504.7,68.1 L574.3,117.8 L595.7,102.3 L632.9,52.7 L653.5,43.3 L696.0,106.9 L696.0,256.0 L68.0,256.0 Z" class="fill"/>
   
-  <path d="M68.0,156.2 L154.7,99.4 L283.1,196.3 L286.6,209.0 L287.9,195.0 L295.7,197.4 L318.7,190.8 L379.8,130.6 L414.1,115.6 L456.6,108.7 L480.0,123.2 L514.3,108.6 L536.4,68.1 L611.0,117.8 L634.0,102.3 L673.9,52.7 L696.0,43.3" class="series"/>
-  <circle cx="68.0" cy="156.2" r="3.5" class="dot"><title>14:00 — 860/min</title></circle><circle cx="154.7" cy="99.4" r="3.5" class="dot"><title>17:20 — 1,350/min</title></circle><circle cx="283.1" cy="196.3" r="3.5" class="dot"><title>22:16 — 515/min</title></circle><circle cx="286.6" cy="209.0" r="3.5" class="dot"><title>22:24 — 405/min</title></circle><circle cx="287.9" cy="195.0" r="3.5" class="dot"><title>22:27 — 526/min</title></circle><circle cx="295.7" cy="197.4" r="3.5" class="dot"><title>22:45 — 505/min</title></circle><circle cx="318.7" cy="190.8" r="3.5" class="dot"><title>23:38 — 562/min</title></circle><circle cx="379.8" cy="130.6" r="3.5" class="dot"><title>01:59 — 1,081/min</title></circle><circle cx="414.1" cy="115.6" r="3.5" class="dot"><title>03:18 — 1,210/min</title></circle><circle cx="456.6" cy="108.7" r="3.5" class="dot"><title>04:56 — 1,270/min</title></circle><circle cx="480.0" cy="123.2" r="3.5" class="dot"><title>05:50 — 1,145/min</title></circle><circle cx="514.3" cy="108.6" r="3.5" class="dot"><title>07:09 — 1,271/min</title></circle><circle cx="536.4" cy="68.1" r="3.5" class="dot"><title>08:00 — 1,620/min</title></circle><circle cx="611.0" cy="117.8" r="3.5" class="dot"><title>10:52 — 1,191/min</title></circle><circle cx="634.0" cy="102.3" r="3.5" class="dot"><title>11:45 — 1,325/min</title></circle><circle cx="673.9" cy="52.7" r="3.5" class="dot"><title>13:17 — 1,753/min</title></circle><circle cx="696.0" cy="43.3" r="5" class="dot dot-last"><title>14:08 — 1,834/min</title></circle>
-  <text x="696.0" y="29.3" class="end-label" text-anchor="end">1,834/min</text>
+  <path d="M68.0,156.2 L148.9,99.4 L268.6,196.3 L271.8,209.0 L273.0,195.0 L280.3,197.4 L301.7,190.8 L358.7,130.6 L390.7,115.6 L430.3,108.7 L452.2,123.2 L484.1,108.6 L504.7,68.1 L574.3,117.8 L595.7,102.3 L632.9,52.7 L653.5,43.3 L696.0,106.9" class="series"/>
+  <circle cx="68.0" cy="156.2" r="3.5" class="dot"><title>14:00 — 860/min</title></circle><circle cx="148.9" cy="99.4" r="3.5" class="dot"><title>17:20 — 1,350/min</title></circle><circle cx="268.6" cy="196.3" r="3.5" class="dot"><title>22:16 — 515/min</title></circle><circle cx="271.8" cy="209.0" r="3.5" class="dot"><title>22:24 — 405/min</title></circle><circle cx="273.0" cy="195.0" r="3.5" class="dot"><title>22:27 — 526/min</title></circle><circle cx="280.3" cy="197.4" r="3.5" class="dot"><title>22:45 — 505/min</title></circle><circle cx="301.7" cy="190.8" r="3.5" class="dot"><title>23:38 — 562/min</title></circle><circle cx="358.7" cy="130.6" r="3.5" class="dot"><title>01:59 — 1,081/min</title></circle><circle cx="390.7" cy="115.6" r="3.5" class="dot"><title>03:18 — 1,210/min</title></circle><circle cx="430.3" cy="108.7" r="3.5" class="dot"><title>04:56 — 1,270/min</title></circle><circle cx="452.2" cy="123.2" r="3.5" class="dot"><title>05:50 — 1,145/min</title></circle><circle cx="484.1" cy="108.6" r="3.5" class="dot"><title>07:09 — 1,271/min</title></circle><circle cx="504.7" cy="68.1" r="3.5" class="dot"><title>08:00 — 1,620/min</title></circle><circle cx="574.3" cy="117.8" r="3.5" class="dot"><title>10:52 — 1,191/min</title></circle><circle cx="595.7" cy="102.3" r="3.5" class="dot"><title>11:45 — 1,325/min</title></circle><circle cx="632.9" cy="52.7" r="3.5" class="dot"><title>13:17 — 1,753/min</title></circle><circle cx="653.5" cy="43.3" r="3.5" class="dot"><title>14:08 — 1,834/min</title></circle><circle cx="696.0" cy="106.9" r="5" class="dot dot-last"><title>15:53 — 1,285/min</title></circle>
+  <text x="696.0" y="92.9" class="end-label" text-anchor="end">1,285/min</text>
   <line x1="68" y1="256" x2="696" y2="256" class="axis"/>
   
     <text x="68.0" y="278" class="tick" text-anchor="start">14:00</text>
-    <text x="286.6" y="278" class="tick" text-anchor="middle">22:24</text>
-    <text x="318.7" y="278" class="tick" text-anchor="middle">23:38</text>
-    <text x="456.6" y="278" class="tick" text-anchor="middle">04:56</text>
-    <text x="536.4" y="278" class="tick" text-anchor="middle">08:00</text>
-    <text x="673.9" y="278" class="tick" text-anchor="middle">13:17</text>
-    <text x="696.0" y="278" class="tick" text-anchor="end">14:08</text>
+    <text x="271.8" y="278" class="tick" text-anchor="middle">22:24</text>
+    <text x="301.7" y="278" class="tick" text-anchor="middle">23:38</text>
+    <text x="430.3" y="278" class="tick" text-anchor="middle">04:56</text>
+    <text x="504.7" y="278" class="tick" text-anchor="middle">08:00</text>
+    <text x="632.9" y="278" class="tick" text-anchor="middle">13:17</text>
+    <text x="696.0" y="278" class="tick" text-anchor="end">15:53</text>
 </svg>
