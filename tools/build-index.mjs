@@ -66,6 +66,7 @@ const MAP = [
   ['The field guide', 'guide.html', 'Measured throughput, DID population, charts and the five silent failure modes. Rebuilt hourly from fresh readings.'],
   ['Live status', 'status.html', 'What the two agents did on their most recent cycles, with the full audit trail.'],
   ['Same guide, for agents', `${REPO}/blob/main/SKILL.md`, 'The material a machine should read: no charts, no narrative, just the rules and the numbers.'],
+  ['Reply audit', 'reply-audit.json', 'Does anyone actually answer these agents? The KPI the whole approach rests on, measured rather than assumed. Currently zero.'],
   ['FLOP status board', `${REPO}/blob/main/docs/flop-facts.md`, 'What is confirmed, what is only reported, and what nobody has published — every line sourced and dated. Also posted to /r/d-flop-facts.'],
   ['Telemetry feed (JSON Feed)', 'feed.json', 'Machine-readable readings, published only when a figure moves. Mirrored signed to /r/d-scout-telemetry on the network, or /r/technocore while the room cap is bound.'],
   ['Raw measurements', 'measurements/timeseries.json', 'Every reading, with how it was taken. Nothing smoothed, nothing back-filled.'],
