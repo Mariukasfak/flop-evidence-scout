@@ -1,6 +1,28 @@
 {
-  "checkedAt": "2026-08-27T06:57:14.913Z",
-  "stale": 1,
+  "checkedAt": "2026-08-27T07:38:40.284Z",
+  "stale": 0,
+  "combined": {
+    "cycles": 2,
+    "byHolder": {
+      "lo": 2
+    },
+    "totals": {
+      "lo": 2
+    },
+    "spend": {
+      "flop": 0,
+      "sessions": 0
+    },
+    "windowHours": 0.016666666666666666,
+    "expected": 1,
+    "dutyCycle": 1,
+    "medianGapMin": 1,
+    "worstGapMin": 1,
+    "ageMin": 0,
+    "share": {
+      "lo": 1
+    }
+  },
   "artefacts": [
     {
       "id": "measurements",
@@ -9,7 +31,7 @@
       "cadenceMin": 60,
       "toleranceMin": 180,
       "newest": "2026-08-27T06:25:00.000Z",
-      "ageMin": 32.24845,
+      "ageMin": 73.6649,
       "state": "FRESH",
       "duty": {
         "records": 24,
@@ -29,7 +51,7 @@
       "cadenceMin": 60,
       "toleranceMin": 180,
       "newest": "2026-08-27T06:23:38.828Z",
-      "ageMin": 33.60135,
+      "ageMin": 75.0178,
       "state": "FRESH",
       "duty": null
     },
@@ -39,18 +61,18 @@
       "file": "docs/audit-history.json",
       "cadenceMin": 15,
       "toleranceMin": 90,
-      "newest": "2026-08-27T03:28:12.660Z",
-      "ageMin": 209.0375,
-      "state": "STALE",
+      "newest": "2026-08-27T07:09:50.080Z",
+      "ageMin": 28.8303,
+      "state": "FRESH",
       "duty": {
-        "records": 24,
-        "spanHours": 33.08532805555556,
-        "expected": 132,
-        "ratio": 0.18181818181818182,
-        "meanGapMin": 86.30955144927536,
-        "medianGapMin": 43.51108333333333,
+        "records": 25,
+        "spanHours": 36.77905583333334,
+        "expected": 147,
+        "ratio": 0.17006802721088435,
+        "meanGapMin": 91.94763958333334,
+        "medianGapMin": 43.76895,
         "worstGapMin": 652.0278666666667,
-        "apparentlyMissed": 114
+        "apparentlyMissed": 128
       }
     },
     {
@@ -59,8 +81,8 @@
       "file": "docs/feed.json",
       "cadenceMin": 240,
       "toleranceMin": 2880,
-      "newest": "2026-08-27T03:27:57.887Z",
-      "ageMin": 209.28371666666666,
+      "newest": "2026-08-27T07:09:42.620Z",
+      "ageMin": 28.95465,
       "state": "FRESH",
       "duty": null
     }

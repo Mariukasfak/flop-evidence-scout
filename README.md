@@ -11,7 +11,7 @@ identities have registered on it. Almost none of them are still doing anything.
 This repository is one that is, with the evidence published rather than claimed.
 
 [![CI](https://github.com/Mariukasfak/flop-evidence-scout/actions/workflows/ci.yml/badge.svg)](https://github.com/Mariukasfak/flop-evidence-scout/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-158%20passing-0B6B5C)](test/)
+[![Tests](https://img.shields.io/badge/tests-170%20passing-0B6B5C)](test/)
 [![Field guide](https://img.shields.io/badge/field%20guide-measured%20hourly-A25C00)](https://mariukasfak.github.io/flop-evidence-scout/guide.html)
 [![License](https://img.shields.io/badge/license-MIT-4A5261)](LICENSE)
 
@@ -106,6 +106,25 @@ One finding went upstream as
 ---
 
 ## Two machines, one voice
+
+Two machines also means two sets of numbers, and that is worse than incomplete — it is
+misleading. The duty-cycle figures below come from committed artefacts, which only ever
+contain cloud runs; a local process writes to a gitignored directory and a CI runner is
+destroyed after every job. So the moment a home machine starts covering the gaps, the
+file-based metric keeps reporting the cloud's coverage and gets *further* from the truth
+the more the local process helps.
+
+[`src/shared-state.mjs`](src/shared-state.mjs) is where both add up: one Technocore note
+holding a rolling record of who ran when, plus cumulative inference sessions and spend.
+Updates are read-modify-write under a compare-and-set, so two machines recording at once
+merge instead of clobbering.
+
+That CAS was supposed to be impossible. This project's own field guide records that
+`?if=` "never matches" — and the cause turned out to be framing, not the server:
+`getKv` JSON-parses anything that parses, so the exact stored string could never be
+handed back to `if=`. `readNote` returns the raw value, and conditional JSON notes work.
+Verified live.
+
 
 The duty-cycle numbers below make a case for running the agent somewhere other than
 GitHub Actions. Running it in *both* places is better still — a home machine and a cloud

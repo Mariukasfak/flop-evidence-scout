@@ -194,10 +194,64 @@ if (!quiet) {
   console.log();
 }
 
+/**
+ * The combined picture, read from the server rather than from files.
+ *
+ * The duty cycles above come from committed artefacts, and those only ever
+ * contain cloud runs — local cycles write to data/local, which is gitignored.
+ * So once the agent also runs on a machine at home, the file-based figure keeps
+ * reporting the cloud's coverage and gets further from the truth the more the
+ * local process helps. A metric that grows more wrong as the system improves is
+ * worse than no metric.
+ *
+ * The shared activity note is where both machines add up.
+ */
+let combined = null;
+try {
+  const { TechnocoreClient } = await import('../src/technocore-client.mjs');
+  const { loadOrCreateIdentity } = await import('../src/identity.mjs');
+  const { readActivity, summariseActivity } = await import('../src/shared-state.mjs');
+
+  const identity = loadOrCreateIdentity('.secrets/scout-identity.json', 'SCOUT_IDENTITY_JSON');
+  const client = new TechnocoreClient({ baseUrl: process.env.TECHNOCORE_URL || 'https://technocore.chat' });
+  const { reachable, record } = await readActivity(client, identity.did);
+
+  if (reachable) {
+    combined = summariseActivity(record, { cadenceMin: 15 });
+
+    if (!quiet) {
+      const label = { gh: 'GitHub Actions', lo: 'this machine', xx: 'unlabelled' };
+      console.log('  Combined, from the shared note on the server:\n');
+      if (combined.dutyCycle == null) {
+        console.log(`    ${combined.cycles} cycle(s) recorded — not enough yet for a rate.\n`);
+      } else {
+        console.log(`    duty cycle across both machines   ${(combined.dutyCycle * 100).toFixed(0)}%`);
+        console.log(`    cycles in the window              ${combined.cycles} over ${combined.windowHours.toFixed(1)} h`);
+        for (const [code, count] of Object.entries(combined.byHolder)) {
+          console.log(`      ${(label[code] || code).padEnd(18)} ${String(count).padStart(4)}  (${(combined.share[code] * 100).toFixed(0)}% of cycles)`);
+        }
+      }
+      const lifetime = Object.entries(combined.totals || {});
+      if (lifetime.length) {
+        console.log(`    lifetime cycles                   ${lifetime.map(([k, v]) => `${label[k] || k} ${v}`).join(', ')}`);
+      }
+      console.log(`    inference sessions counted        ${combined.spend?.sessions ?? 0}`);
+      console.log(`    inference spend                   ${combined.spend?.flop ?? 0} $FLOP\n`);
+    }
+  } else if (!quiet) {
+    console.log('  Combined view unavailable — Technocore unreachable.\n');
+  }
+} catch (err) {
+  if (!quiet) console.log(`  Combined view unavailable — ${err.message}\n`);
+}
+
+if (!quiet) console.log();
+
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, JSON.stringify({
   checkedAt: new Date().toISOString(),
   stale,
+  combined,
   artefacts: results,
   note: 'Freshness catches a stoppage. Duty cycle catches a scheduler that never stops and '
     + 'quietly delivers a fraction of what was asked for — the more expensive failure, because '

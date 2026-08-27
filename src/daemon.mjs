@@ -9,6 +9,7 @@ import { ScoutEngine } from './scout-engine.mjs';
 import { ScribeEngine } from './scribe-engine.mjs';
 import { MailboxService } from './mailbox-service.mjs';
 import { Lease, makeHolderId, DEFAULT_TTL_MS } from './lease.mjs';
+import { recordCycle } from './shared-state.mjs';
 import { TelemetryFeed } from './telemetry-feed.mjs';
 import { updateDashboardFile } from './dashboard.mjs';
 import { analyzeChatArchives, getLatestLearningReport } from './learning-engine.mjs';
@@ -219,12 +220,15 @@ export async function runScoutDaemon(options = {}) {
    *
    * Disable with --no-lease for a single-writer setup.
    */
+  // Named once so the lease and the shared activity record agree on who we are.
+  const holderId = makeHolderId(process.env.LEASE_HOLDER || (process.env.CI === 'true' ? 'github' : 'local'));
+
   const useLease = config.lease !== false;
   const lease = useLease
     ? new Lease({
       client,
       name: config.leaseName || 'scout-cycle',
-      holder: makeHolderId(process.env.LEASE_HOLDER || (process.env.CI === 'true' ? 'github' : 'local')),
+      holder: holderId,
       ttlMs: config.leaseTtlMs || DEFAULT_TTL_MS
     })
     : null;
@@ -336,6 +340,18 @@ export async function runScoutDaemon(options = {}) {
         } catch (err) {
           console.warn('[FAUCET RADAR] Could not write alert file:', err.message);
         }
+      }
+
+      // The shared record is the only place both machines' work adds up. Local
+      // runs write to data/local and cloud runs are destroyed after the job, so
+      // without this the combined picture exists nowhere.
+      //
+      // Best-effort: failing to record a cycle must never fail the cycle.
+      try {
+        const recorded = await recordCycle(client, scoutIdentity.did, { holder: holderId });
+        if (!recorded.recorded) console.log(`[Activity] Not recorded — ${recorded.reason}`);
+      } catch (err) {
+        console.log(`[Activity] Not recorded — ${err.message}`);
       }
 
       await writeHeartbeat('active', scoutResult);
