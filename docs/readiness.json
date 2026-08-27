@@ -1,0 +1,95 @@
+{
+  "checkedAt": "2026-08-27T06:40:32.438Z",
+  "summary": {
+    "ready": 7,
+    "action": 3,
+    "blocked": 2
+  },
+  "checks": [
+    {
+      "id": "did-scout",
+      "label": "Scout identity published",
+      "state": "READY",
+      "detail": "/kv/did-85/2d0b660964458e resolves",
+      "fix": "Run the daemon once so it republishes its DID note."
+    },
+    {
+      "id": "did-scribe",
+      "label": "Scribe identity published",
+      "state": "READY",
+      "detail": "/kv/did-e0/dd0e551624140a resolves",
+      "fix": "Run the daemon once so it republishes its DID note."
+    },
+    {
+      "id": "state-persistence",
+      "label": "State survives restarts",
+      "state": "READY",
+      "detail": "49 turns recorded on the server",
+      "fix": "The daemon must complete at least two turns and write state to /kv/."
+    },
+    {
+      "id": "room-d-flop-facts",
+      "label": "Room /r/d-flop-facts",
+      "state": "READY",
+      "detail": "claimed, exists",
+      "fix": "Room creation is refused while the service-wide room cap is full; the daemon retries."
+    },
+    {
+      "id": "room-d-scout-telemetry",
+      "label": "Room /r/d-scout-telemetry",
+      "state": "READY",
+      "detail": "claimed, exists",
+      "fix": "Room creation is refused while the service-wide room cap is full; the daemon retries."
+    },
+    {
+      "id": "inference-backend",
+      "label": "A real model is reachable",
+      "state": "ACTION",
+      "detail": "backend: simulated",
+      "fix": "Install Ollama and pull one model (e.g. qwen2.5:3b). This earns no $FLOP — it is a rehearsal backend that produces real latency, real token counts and real failure modes."
+    },
+    {
+      "id": "ledger",
+      "label": "Spend ledger is intact",
+      "state": "READY",
+      "detail": "12 receipts, 0 counted, 12 simulated, 0 rejected, 0 malformed",
+      "fix": "Investigate rejected or malformed receipts before trusting the total."
+    },
+    {
+      "id": "source-watch",
+      "label": "Source watcher baseline is readable",
+      "state": "READY",
+      "detail": "9 sources baselined",
+      "fix": "A corrupt baseline makes every run report \"first run\" and detect nothing. Delete it and re-run."
+    },
+    {
+      "id": "faucet-route",
+      "label": "Faucet / session route published",
+      "state": "BLOCKED",
+      "detail": "none among 26 documented paths",
+      "fix": "Waiting on Flop Labs. auth.md asks that nobody probe for unpublished paths, so this watches openapi.json rather than guessing. A route cannot ship without appearing there."
+    },
+    {
+      "id": "wallet",
+      "label": "Wallet format published",
+      "state": "BLOCKED",
+      "detail": "No address format, key scheme or transaction signing published",
+      "fix": "Waiting on Flop Labs. The Teaser says genesis is Q1 2027; nothing describes how a recipient holds $FLOP. Nothing can be built against this yet."
+    },
+    {
+      "id": "identity-backup",
+      "label": "Identity vault backed up",
+      "state": "ACTION",
+      "detail": "no vault found",
+      "fix": "Run tools/backup-identity.mjs. Losing these keys loses every DID, every claimed room, and every signed receipt — there is no recovery."
+    },
+    {
+      "id": "continuous-operation",
+      "label": "Runs continuously, not in bursts",
+      "state": "ACTION",
+      "detail": "15-minute cron: ~96 bursts/day with gaps",
+      "fix": "A always-on host removes the gaps. Note a rented validator box would run this too, so the two decisions collapse into one purchase."
+    }
+  ],
+  "note": "Every READY is verified against the live service or a file read at check time. BLOCKED means waiting on Flop Labs, not deferred by us."
+}

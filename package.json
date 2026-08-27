@@ -18,7 +18,8 @@
     "test": "node --test",
     "airdrop-model": "node tools/airdrop-model.mjs",
     "inference-bench": "node tools/inference-bench.mjs",
-    "watch-sources": "node tools/watch-sources.mjs"
+    "watch-sources": "node tools/watch-sources.mjs",
+    "readiness": "node tools/readiness.mjs"
   },
   "keywords": [
     "flop-network",

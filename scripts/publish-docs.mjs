@@ -22,6 +22,7 @@ const MAX_ATTEMPTS = 3;
 /** Regenerating is cheap and deterministic; merging two renders is neither. */
 const REBUILD = [
   ['node', ['tools/build-facts.mjs']],
+  ['node', ['tools/readiness.mjs']],
   ['node', ['tools/render-charts.mjs']],
   ['node', ['tools/build-guide.mjs']],
   ['node', ['tools/build-index.mjs']]

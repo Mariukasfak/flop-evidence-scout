@@ -1,0 +1,240 @@
+/**
+ * Faucet-day preflight: what works, what we must fix, and what is not ours to fix.
+ *
+ * The testnet is ninety days and the airdrop is scored on cumulative spend, so
+ * the expensive failure is not being slow — it is discovering on day one that a
+ * link in the chain was never tested. This walks every link and reports one of
+ * three states, and the split between the last two is the whole point:
+ *
+ *   READY    verified against something real, right now
+ *   ACTION   ours to fix, with the fix named
+ *   BLOCKED  waiting on Flop Labs; no amount of work here changes it
+ *
+ * A check that cannot verify something reports ACTION or BLOCKED. It never
+ * reports READY on the strength of a local file that says so — this project has
+ * been caught by that twice, once when the daemon's state was silently never
+ * persisting and once when the source watcher was blind for days while exiting 0.
+ *
+ * Run: node tools/readiness.mjs
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+
+import { loadOrCreateIdentity, getDidShardedPath, getStateKey } from '../src/identity.mjs';
+import { selectBackend } from '../src/inference-backends.mjs';
+import { ledgerTotals, DEFAULT_LEDGER_PATH } from '../src/inference-ledger.mjs';
+import { FACTS_ROOM } from '../src/flop-facts.mjs';
+import { FEED_ROOM } from '../src/telemetry-feed.mjs';
+
+const BASE = process.env.TECHNOCORE_URL || 'https://technocore.chat';
+const OUT = path.resolve('docs/readiness.json');
+
+const READY = 'READY';
+const ACTION = 'ACTION';
+const BLOCKED = 'BLOCKED';
+
+async function get(pathname) {
+  try {
+    const res = await fetch(`${BASE}${pathname}`, {
+      headers: { 'user-agent': 'FLOP-Scout-Readiness/1.0 (+github.com/Mariukasfak/flop-evidence-scout)' },
+      signal: AbortSignal.timeout(15_000)
+    });
+    const text = await res.text();
+    // Strip the untrusted-content banner; it is framing, not content.
+    return { ok: res.ok, status: res.status, text: text.replace(/^!!.*$/m, '').trim() };
+  } catch (err) {
+    return { ok: false, status: 0, text: err.message };
+  }
+}
+
+const checks = [];
+const record = (id, label, state, detail, fix = null) => {
+  checks.push({ id, label, state, detail, fix });
+};
+
+async function main() {
+  const scout = loadOrCreateIdentity('.secrets/scout-identity.json', 'SCOUT_IDENTITY_JSON');
+  const scribe = loadOrCreateIdentity('.secrets/scribe-identity.json', 'SCRIBE_IDENTITY_JSON');
+
+  // ---------------------------------------------------------------- identity
+  for (const [name, identity] of [['Scout', scout], ['Scribe', scribe]]) {
+    const { fullPath } = getDidShardedPath(identity.did);
+    const profile = await get(fullPath);
+    record(
+      `did-${name.toLowerCase()}`,
+      `${name} identity published`,
+      profile.ok && profile.text.includes('did:') ? READY : ACTION,
+      profile.ok ? `${fullPath} resolves` : `${fullPath} → ${profile.status || profile.text}`,
+      'Run the daemon once so it republishes its DID note.'
+    );
+  }
+
+  /**
+   * State surviving a restart is the one thing that must not be assumed.
+   *
+   * The CI runner is destroyed every fifteen minutes. For weeks the turn counter
+   * silently restarted at one, because state was written to a key the server
+   * rejected with a 400 nobody read. A turn count above one, read back off the
+   * live server, is the only honest proof this works.
+   */
+  const stateKey = getStateKey(scout.did, 'scout');
+  const state = await get(`/kv/scout/${stateKey}`);
+  let turns = null;
+  try { turns = JSON.parse(state.text).totalTurns; } catch { /* not JSON yet */ }
+  record(
+    'state-persistence',
+    'State survives restarts',
+    Number(turns) > 1 ? READY : ACTION,
+    turns == null ? 'no readable state note yet' : `${turns} turns recorded on the server`,
+    'The daemon must complete at least two turns and write state to /kv/.'
+  );
+
+  // ------------------------------------------------------------------- rooms
+  for (const room of [FACTS_ROOM, FEED_ROOM]) {
+    const owner = await get(`/kv/room-owners/${room}`);
+    const live = await get(`/r/${room}?limit=1`);
+    const claimed = owner.ok && owner.text.includes('did:');
+    const exists = live.ok && live.text.includes('# room');
+    record(
+      `room-${room}`,
+      `Room /r/${room}`,
+      exists && claimed ? READY : ACTION,
+      `${claimed ? 'claimed' : 'not claimed'}, ${exists ? 'exists' : 'does not exist yet'}`,
+      'Room creation is refused while the service-wide room cap is full; the daemon retries.'
+    );
+  }
+
+  // --------------------------------------------------------------- inference
+  const { backend, real } = await selectBackend({});
+  record(
+    'inference-backend',
+    'A real model is reachable',
+    real ? READY : ACTION,
+    `backend: ${backend.id}${backend.model ? ` (${backend.model})` : ''}`,
+    'Install Ollama and pull one model (e.g. qwen2.5:3b). This earns no $FLOP — it is a '
+    + 'rehearsal backend that produces real latency, real token counts and real failure modes.'
+  );
+
+  const ledger = ledgerTotals();
+  const ledgerHealthy = ledger.malformedLines === 0 && ledger.signatureRejected === 0;
+  record(
+    'ledger',
+    'Spend ledger is intact',
+    ledger.receiptsOnDisk === 0 ? ACTION : (ledgerHealthy ? READY : ACTION),
+    `${ledger.receiptsOnDisk} receipts, ${ledger.counted} counted, ${ledger.simulated} simulated, `
+    + `${ledger.signatureRejected} rejected, ${ledger.malformedLines} malformed`,
+    ledger.receiptsOnDisk === 0
+      ? 'Run tools/inference-bench.mjs to start the ledger.'
+      : 'Investigate rejected or malformed receipts before trusting the total.'
+  );
+
+  // ----------------------------------------------------------------- watcher
+  const statePath = path.resolve('docs/watch/state.json');
+  let watchState = null;
+  let watchError = null;
+  try {
+    watchState = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  } catch (err) {
+    watchError = err.message;
+  }
+  const watchedIds = watchState ? Object.keys(watchState.sources || {}) : [];
+  const watchOk = watchState && watchedIds.includes('flop-teaser') && watchedIds.includes('openapi');
+  record(
+    'source-watch',
+    'Source watcher baseline is readable',
+    watchOk ? READY : ACTION,
+    watchError ? `UNREADABLE: ${watchError}` : `${watchedIds.length} sources baselined`,
+    'A corrupt baseline makes every run report "first run" and detect nothing. Delete it and re-run.'
+  );
+
+  // ------------------------------------------------------- not ours to fix
+  const openapi = await get('/openapi.json');
+  let paths = [];
+  try { paths = Object.keys(JSON.parse(openapi.text).paths || {}); } catch { /* leave empty */ }
+  const sessionRoute = paths.find((p) => /faucet|session|inference|mint|claim/i.test(p));
+  record(
+    'faucet-route',
+    'Faucet / session route published',
+    sessionRoute ? READY : BLOCKED,
+    sessionRoute
+      ? `found ${sessionRoute}`
+      : `none among ${paths.length} documented paths`,
+    'Waiting on Flop Labs. auth.md asks that nobody probe for unpublished paths, so this '
+    + 'watches openapi.json rather than guessing. A route cannot ship without appearing there.'
+  );
+
+  record(
+    'wallet',
+    'Wallet format published',
+    BLOCKED,
+    'No address format, key scheme or transaction signing published',
+    'Waiting on Flop Labs. The Teaser says genesis is Q1 2027; nothing describes how a '
+    + 'recipient holds $FLOP. Nothing can be built against this yet.'
+  );
+
+  // ------------------------------------------------------ operator homework
+  const vaultPath = path.join(process.env.USERPROFILE || process.env.HOME || '.', 'flop-scout-identity-vault.json');
+  record(
+    'identity-backup',
+    'Identity vault backed up',
+    fs.existsSync(vaultPath) ? READY : ACTION,
+    fs.existsSync(vaultPath) ? vaultPath : 'no vault found',
+    'Run tools/backup-identity.mjs. Losing these keys loses every DID, every claimed room, '
+    + 'and every signed receipt — there is no recovery.'
+  );
+
+  /**
+   * The structural gap, stated as a number rather than a worry.
+   *
+   * Under a refilling faucet, spend is throughput times time online. A workflow
+   * on a fifteen-minute cron is not continuous operation: it is 96 short bursts a
+   * day with gaps between them, and scheduled runs are dropped under load. This
+   * is the single largest multiplier still on the table and it is ours to fix.
+   */
+  const daemonCron = fs.existsSync('.github/workflows/flop-scout-daemon.yml')
+    && /cron:\s*'\*\/15/.test(fs.readFileSync('.github/workflows/flop-scout-daemon.yml', 'utf8'));
+  record(
+    'continuous-operation',
+    'Runs continuously, not in bursts',
+    daemonCron ? ACTION : READY,
+    daemonCron ? '15-minute cron: ~96 bursts/day with gaps' : 'not on a burst schedule',
+    'An always-on host removes the gaps. Note a rented validator box would run this too, '
+    + 'so the two decisions collapse into one purchase.'
+  );
+
+  // ------------------------------------------------------------------ report
+  const byState = (s) => checks.filter((c) => c.state === s);
+  const width = Math.max(...checks.map((c) => c.label.length));
+
+  console.log('\n=== FAUCET-DAY READINESS ===\n');
+  for (const c of checks) {
+    const mark = c.state === READY ? ' OK ' : c.state === ACTION ? 'TODO' : 'WAIT';
+    console.log(`  [${mark}] ${c.label.padEnd(width)}  ${c.detail}`);
+  }
+
+  console.log(`\n  ${byState(READY).length} ready · ${byState(ACTION).length} ours to fix · ${byState(BLOCKED).length} waiting on Flop Labs\n`);
+
+  if (byState(ACTION).length) {
+    console.log('OURS TO FIX\n');
+    for (const c of byState(ACTION)) console.log(`  ${c.label}\n    → ${c.fix}\n`);
+  }
+  if (byState(BLOCKED).length) {
+    console.log('NOT OURS TO FIX\n');
+    for (const c of byState(BLOCKED)) console.log(`  ${c.label}\n    → ${c.fix}\n`);
+  }
+
+  fs.mkdirSync(path.dirname(OUT), { recursive: true });
+  fs.writeFileSync(OUT, JSON.stringify({
+    checkedAt: new Date().toISOString(),
+    summary: { ready: byState(READY).length, action: byState(ACTION).length, blocked: byState(BLOCKED).length },
+    checks,
+    note: 'Every READY is verified against the live service or a file read at check time. '
+      + 'BLOCKED means waiting on Flop Labs, not deferred by us.'
+  }, null, 2), 'utf8');
+  console.log(`Wrote ${OUT}\n`);
+}
+
+main().catch((err) => {
+  console.error('readiness check failed:', err.message);
+  process.exit(1);
+});
