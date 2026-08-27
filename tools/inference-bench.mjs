@@ -19,6 +19,7 @@ import { loadOrCreateIdentity } from '../src/identity.mjs';
 import { runSession, verifyReceipt, isEvidenceOfWork, summariseReceipts, estimateFlops } from '../src/inference.mjs';
 import { selectBackend, ollamaBackend } from '../src/inference-backends.mjs';
 import { buildTask } from '../src/workload.mjs';
+import { appendReceipt, ledgerSummary } from '../src/inference-ledger.mjs';
 
 const OUT = path.resolve('docs/measurements/inference.json');
 
@@ -84,6 +85,10 @@ async function main() {
       const session = buildTask(taskId, input, model ? { model } : {});
       const { receipt, completion } = await runSession(session, { backend, identity });
       receipts.push(receipt);
+      // Ledgered regardless of backend. Simulated receipts are kept as history
+      // and excluded from every total by the ledger itself, so a bench run on a
+      // bare machine leaves a truthful trail rather than an inflated one.
+      appendReceipt(receipt);
 
       if (receipt.result.ok) {
         timings.push(receipt.result.latencyMs);
@@ -163,6 +168,15 @@ async function main() {
         + 'not a hardware counter.'
       : 'NOT A MEASUREMENT OF INFERENCE. No model was reachable; a deterministic stand-in ran instead.'
   };
+
+  const ledger = ledgerSummary();
+  console.log('\n  --- cumulative ledger (survives restarts) ---');
+  console.log(`  Counted sessions      ${ledger.countedSessions}`);
+  console.log(`  Spend                 ${ledger.spendFlop} $FLOP`);
+  console.log(`  Excluded as simulated ${ledger.excluded.simulated}`);
+  if (ledger.sessionsPerDay) console.log(`  Observed sessions/day ${Math.round(ledger.sessionsPerDay).toLocaleString()}`);
+
+  report.ledger = ledger;
 
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
   fs.writeFileSync(OUT, JSON.stringify(report, null, 2), 'utf8');

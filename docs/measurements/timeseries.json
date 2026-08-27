@@ -205,6 +205,24 @@
       "rooms_used": 15969,
       "lobby_msgs_per_min": 1642,
       "note": "Appended automatically by tools/measure-network.mjs."
+    },
+    {
+      "at": "2026-08-27T06:22Z",
+      "sharded_did_estimate": 198605,
+      "legacy_did_count": 50960,
+      "notes_used": 432206,
+      "rooms_used": 17764,
+      "lobby_msgs_per_min": 2650,
+      "note": "Appended automatically by tools/measure-network.mjs."
+    },
+    {
+      "at": "2026-08-27T06:25Z",
+      "sharded_did_estimate": 198912,
+      "legacy_did_count": 50960,
+      "notes_used": 432764,
+      "rooms_used": 17764,
+      "lobby_msgs_per_min": 2756,
+      "note": "Appended automatically by tools/measure-network.mjs."
     }
   ],
   "caps": {

@@ -232,6 +232,20 @@ export const FACTS = Object.freeze([
     asOf: '2026-08-26'
   },
   {
+    id: 'fake-faucet-room',
+    status: STATUS.REFUTED,
+    claim: 'That /r/faucet on technocore.chat is a faucet. It is a room a stranger created on 2026-08-27, in which ~86 bots post "Agent #N requesting testnet tokens" at each other. Nothing distributes anything',
+    source: 'Read directly: technocore.chat/r/faucet. A room name is a string someone typed — creating one costs nothing and grants nothing. auth.md: "no registration, provisioning, claim or token endpoint at any path"',
+    asOf: '2026-08-27'
+  },
+  {
+    id: 'service-limits',
+    status: STATUS.CONFIRMED,
+    claim: 'Technocore publishes its own enforced limits at GET /config (since 0.9.7): 600 reads and 300 writes per minute per IP, 20 new rooms per day per IP, 20,480 rooms service-wide, 50,960 notes per namespace, and at most 4 concurrent long-polls per IP',
+    source: 'GET technocore.chat/config, read 2026-08-27. The document states the values are read from the same bindings the handlers read, so they cannot disagree with behaviour',
+    asOf: '2026-08-27'
+  },
+  {
     id: 'faucet-endpoint',
     status: STATUS.UNKNOWN,
     claim: 'Where the faucet will be and what a session request looks like on the wire. No inference or faucet route appears in technocore.chat/openapi.json',

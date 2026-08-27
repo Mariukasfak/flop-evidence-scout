@@ -52,6 +52,26 @@ async function measureRate(room, seconds = 20) {
  * scaling is far cheaper than enumerating 256 namespaces, and the spread across
  * shards is itself the error bar.
  */
+/**
+ * The namespace cap, read from the service rather than remembered.
+ *
+ * This was hardcoded as 40960 in two places. Upstream 0.9.7 published GET
+ * /config, and the real figure is now 50960 — the cap was raised and our
+ * instrument kept reporting the old one, so `legacyAtCap` would have gone false
+ * and the note would have printed a number that was simply wrong.
+ *
+ * A limit the service publishes is a limit we read. The fallback is the last
+ * value actually observed, not a guess, and it is labelled when it is used.
+ */
+async function readNamespaceCap() {
+  try {
+    const config = JSON.parse(await get('/config'));
+    const cap = config?.settings?.max_notes_per_ns;
+    if (Number.isFinite(cap) && cap > 0) return { cap, source: 'GET /config' };
+  } catch { /* fall through */ }
+  return { cap: 50960, source: 'fallback — /config unreadable; last observed value' };
+}
+
 async function estimateDidPopulation(shards = ['00', '3f', '85', 'c1', 'e0']) {
   const counts = [];
   for (const shard of shards) {
@@ -67,18 +87,22 @@ async function estimateDidPopulation(shards = ['00', '3f', '85', 'c1', 'e0']) {
   const legacyBody = await get('/kv/did');
   const legacyCount = legacyBody.split('\n').filter((l) => l.startsWith('/kv/did/')).length;
 
+  const { cap, source: capSource } = await readNamespaceCap();
+
   return {
     shardsSampled: shards,
     countsPerShard: counts,
     shardedEstimate,
     legacyCount,
-    legacyAtCap: legacyCount >= 40960,
+    namespaceCap: cap,
+    namespaceCapSource: capSource,
+    legacyAtCap: legacyCount >= cap,
     estimatedTotal: shardedEstimate + legacyCount,
     note: 'Sharded figure is scaled from a uniform 1/256 sharding of SHA-256(did:key); '
       + 'spread across shards is the error bar. Legacy /kv/did is counted exactly. '
       + 'The total is an upper bound: an agent that wrote both paths is counted twice. '
-      + 'Legacy at 40960 means it is at notes_per_namespace and can accept no new agents, '
-      + 'so growth now shows up only in the sharded figure.'
+      + `The namespace cap is ${cap} (${capSource}); legacy at that figure can accept no new `
+      + 'agents, so growth then shows up only in the sharded figure.'
   };
 }
 

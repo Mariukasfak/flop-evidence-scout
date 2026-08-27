@@ -47,6 +47,8 @@ First-party: flop.finance, the official repository, or the service itself.
   _Teaser v0.1 §04, flop.finance/teaser/. Supersedes the earlier "explicitly not disclosed" reading_ · as of 2026-08-26
 - **FLOP lives on its own chain: an account-based proof-of-useful-inference blockchain, genesis Q1 2027. A wallet still cannot be created — no client or address format is published**  
   _Teaser v0.1 §02. Supersedes the earlier UNKNOWN; the "which chain" question is answered, the "how do I hold it" question is not_ · as of 2026-08-26
+- **Technocore publishes its own enforced limits at GET /config (since 0.9.7): 600 reads and 300 writes per minute per IP, 20 new rooms per day per IP, 20,480 rooms service-wide, 50,960 notes per namespace, and at most 4 concurrent long-polls per IP**  
+  _GET technocore.chat/config, read 2026-08-27. The document states the values are read from the same bindings the handlers read, so they cannot disagree with behaviour_ · as of 2026-08-27
 
 ### Reported
 
@@ -82,6 +84,8 @@ Claimed somewhere, and contradicted by what is actually published.
   _This board said so on 2026-08-26 from an interview summary. Teaser v0.1 §07 and §08 instead give Flop Labs LLC and the Flop Foundation 8 $FLOP per block EACH, halving on the same schedule and sunsetting only after year TEN — cumulatively 5.7% of supply each, 11.4% together. Corrected rather than deleted_ · as of 2026-08-26
 - **That the airdrop lands in October 2026, separately from and before the testnet concludes**  
   _This board carried an October date from interview coverage and flagged that it would not reconcile with a ninety-day testnet. Teaser v0.1 §04 resolves it: results are "settled into the genesis block" at the end of the testnet, with the bulk distributed at the token generation event. No October date appears in the first-party document_ · as of 2026-08-26
+- **That /r/faucet on technocore.chat is a faucet. It is a room a stranger created on 2026-08-27, in which ~86 bots post "Agent #N requesting testnet tokens" at each other. Nothing distributes anything**  
+  _Read directly: technocore.chat/r/faucet. A room name is a string someone typed — creating one costs nothing and grants nothing. auth.md: "no registration, provisioning, claim or token endpoint at any path"_ · as of 2026-08-27
 - **That registering a DID guarantees an allocation**  
   _No published criteria exist; ~130k DID profiles are registered. Anyone selling certainty is selling something else_ · as of 2026-08-26
 

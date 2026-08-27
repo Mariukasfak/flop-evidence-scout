@@ -1,5 +1,5 @@
 {
-  "measuredAt": "2026-08-26T19:16:46.781Z",
+  "measuredAt": "2026-08-27T06:28:29.884Z",
   "backend": "simulated",
   "model": null,
   "isRealInference": false,
@@ -28,9 +28,9 @@
       "succeeded": 3,
       "validOutputs": 3,
       "validShare": 1,
-      "meanLatencyMs": 0,
+      "meanLatencyMs": 0.6666666666666666,
       "minLatencyMs": 0,
-      "maxLatencyMs": 0
+      "maxLatencyMs": 1
     },
     "draft-answer": {
       "runs": 3,
@@ -57,5 +57,27 @@
   "receiptsVerified": 12,
   "receiptsCountingAsWork": 0,
   "projection": null,
-  "caveat": "NOT A MEASUREMENT OF INFERENCE. No model was reachable; a deterministic stand-in ran instead."
+  "caveat": "NOT A MEASUREMENT OF INFERENCE. No model was reachable; a deterministic stand-in ran instead.",
+  "ledger": {
+    "generatedAt": "2026-08-27T06:28:29.884Z",
+    "countedSessions": 0,
+    "spendFlop": 0,
+    "estimatedFlops": 0,
+    "tokens": 0,
+    "meanLatencyMs": null,
+    "sessionsPerDay": null,
+    "window": {
+      "from": null,
+      "to": null
+    },
+    "byTask": {},
+    "excluded": {
+      "simulated": 12,
+      "failed": 0,
+      "signatureRejected": 0,
+      "duplicates": 0,
+      "malformedLines": 0
+    },
+    "note": "Only signed receipts that verify against their own DID and ran a real model are counted. Simulated runs are kept as history and excluded from every total."
+  }
 }

@@ -45,6 +45,11 @@ const SOURCES = [
   // therefore cannot ship without appearing here first.
   { id: 'openapi', url: 'https://technocore.chat/openapi.json', kind: 'openapi' },
   { id: 'agent-json', url: 'https://technocore.chat/.well-known/agent.json', kind: 'json' },
+  // Added 2026-08-27, the day upstream 0.9.7 shipped it. This is the highest-value
+  // limits document there is: it publishes the values THIS process enforces, read
+  // from the same bindings the handlers read, so they cannot disagree with
+  // behaviour. It already corrected a cap we had hardcoded wrongly for weeks.
+  { id: 'config', url: 'https://technocore.chat/config', kind: 'json' },
   { id: 'manual', url: 'https://technocore.chat/llms.txt', kind: 'text' },
   { id: 'patterns', url: 'https://technocore.chat/patterns.md', kind: 'text' },
   { id: 'skill', url: 'https://technocore.chat/skill.md', kind: 'text' },
