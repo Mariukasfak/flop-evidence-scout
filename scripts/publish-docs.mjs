@@ -23,6 +23,7 @@ const MAX_ATTEMPTS = 3;
 const REBUILD = [
   ['node', ['tools/build-facts.mjs']],
   ['node', ['tools/readiness.mjs']],
+  ['node', ['tools/check-freshness.mjs', '--quiet']],
   ['node', ['tools/render-charts.mjs']],
   ['node', ['tools/build-guide.mjs']],
   ['node', ['tools/build-index.mjs']]

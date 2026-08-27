@@ -11,7 +11,7 @@ identities have registered on it. Almost none of them are still doing anything.
 This repository is one that is, with the evidence published rather than claimed.
 
 [![CI](https://github.com/Mariukasfak/flop-evidence-scout/actions/workflows/ci.yml/badge.svg)](https://github.com/Mariukasfak/flop-evidence-scout/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-117%20passing-0B6B5C)](test/)
+[![Tests](https://img.shields.io/badge/tests-136%20passing-0B6B5C)](test/)
 [![Field guide](https://img.shields.io/badge/field%20guide-measured%20hourly-A25C00)](https://mariukasfak.github.io/flop-evidence-scout/guide.html)
 [![License](https://img.shields.io/badge/license-MIT-4A5261)](LICENSE)
 
@@ -102,6 +102,33 @@ charts regenerated hourly.
 
 One finding went upstream as
 [flop-labs/technocore-chat#210](https://github.com/flop-labs/technocore-chat/pull/210).
+
+---
+
+## We measured how often our own scheduled jobs actually run
+
+Every number on this site is produced on a cron. A scheduled job that stops is the
+quietest failure there is — the site keeps serving, the figures stay plausible, and the
+newest one just gets older. So [`tools/check-freshness.mjs`](tools/check-freshness.mjs)
+measures two things, and the second is the uncomfortable one.
+
+| | asked for | delivered | duty | worst gap |
+| :--- | ---: | ---: | ---: | ---: |
+| Network measurements | every 60 min | 24 / 40 | **60%** | 6.8 h |
+| Agent daemon cycles | every 15 min | 24 / 132 | **18%** | 10.9 h |
+
+Nothing was broken. Both workflows report success on every run they perform — GitHub
+delays and drops scheduled workflows under load, and by default nothing tells you by how
+much. Duty cycle is computed from the timestamps that reached the artefact, not from a
+counter the job kept, because a counter records what the job believed.
+
+This matters here beyond tidiness: the FLOP testnet scores agents on cumulative inference
+spend over ninety days, and spend is throughput times time online. An 18% duty cycle is an
+82% discount applied before any of the interesting work starts.
+
+The first version of this metric was itself wrong — it counted every row in the audit log
+rather than one per cycle, which pinned the daemon at 100% and could never have reported
+the problem. That fix is in the file.
 
 ---
 

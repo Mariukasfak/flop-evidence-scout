@@ -49,3 +49,10 @@ jobs:
           git config --global user.name "FLOP-Scout-Bot"
           git config --global user.email "bot@technocore.chat"
           node scripts/publish-docs.mjs "chore(watch): source baseline, fresh measurements, rebuilt guide [skip ci]"
+
+      - name: Is the scheduled work actually running?
+        # Runs LAST and is allowed to fail the job. A scheduler that quietly
+        # stops is the failure this repository has hit twice, and a red run is
+        # the only thing that makes it visible. The commit above has already
+        # landed, so a red job here never costs data.
+        run: node tools/check-freshness.mjs

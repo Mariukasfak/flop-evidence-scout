@@ -1,0 +1,69 @@
+{
+  "checkedAt": "2026-08-27T06:57:14.913Z",
+  "stale": 1,
+  "artefacts": [
+    {
+      "id": "measurements",
+      "label": "Network measurements",
+      "file": "docs/measurements/timeseries.json",
+      "cadenceMin": 60,
+      "toleranceMin": 180,
+      "newest": "2026-08-27T06:25:00.000Z",
+      "ageMin": 32.24845,
+      "state": "FRESH",
+      "duty": {
+        "records": 24,
+        "spanHours": 40.416666666666664,
+        "expected": 40,
+        "ratio": 0.6,
+        "meanGapMin": 105.43478260869566,
+        "medianGapMin": 79,
+        "worstGapMin": 409,
+        "apparentlyMissed": 21
+      }
+    },
+    {
+      "id": "source-watch",
+      "label": "Source watcher",
+      "file": "docs/watch/state.json",
+      "cadenceMin": 60,
+      "toleranceMin": 180,
+      "newest": "2026-08-27T06:23:38.828Z",
+      "ageMin": 33.60135,
+      "state": "FRESH",
+      "duty": null
+    },
+    {
+      "id": "daemon",
+      "label": "Agent daemon cycles",
+      "file": "docs/audit-history.json",
+      "cadenceMin": 15,
+      "toleranceMin": 90,
+      "newest": "2026-08-27T03:28:12.660Z",
+      "ageMin": 209.0375,
+      "state": "STALE",
+      "duty": {
+        "records": 24,
+        "spanHours": 33.08532805555556,
+        "expected": 132,
+        "ratio": 0.18181818181818182,
+        "meanGapMin": 86.30955144927536,
+        "medianGapMin": 43.51108333333333,
+        "worstGapMin": 652.0278666666667,
+        "apparentlyMissed": 114
+      }
+    },
+    {
+      "id": "feed",
+      "label": "Telemetry feed",
+      "file": "docs/feed.json",
+      "cadenceMin": 240,
+      "toleranceMin": 2880,
+      "newest": "2026-08-27T03:27:57.887Z",
+      "ageMin": 209.28371666666666,
+      "state": "FRESH",
+      "duty": null
+    }
+  ],
+  "note": "Freshness catches a stoppage. Duty cycle catches a scheduler that never stops and quietly delivers a fraction of what was asked for — the more expensive failure, because nothing about it looks broken."
+}

@@ -60,6 +60,18 @@ export function ollamaBackend({ model = process.env.OLLAMA_MODEL || 'qwen2.5:3b'
     model,
     host,
 
+    /**
+     * One card, one loaded model, one session at a time.
+     *
+     * Ollama accepts concurrent requests and queues them behind a single loaded
+     * model, so raising this does not raise throughput on one GPU — it moves the
+     * queue out of our process and into the model server, where the run's
+     * deadline cannot see it and jobs look "in flight" while doing nothing.
+     * Concurrency only buys something against a backend served by many machines,
+     * which is exactly what the Flop network is meant to be.
+     */
+    maxConcurrency: 1,
+
     async available() {
       try {
         const res = await fetch(`${host}/api/tags`, { signal: AbortSignal.timeout(3000) });

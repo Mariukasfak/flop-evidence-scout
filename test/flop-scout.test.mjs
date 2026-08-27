@@ -360,7 +360,33 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
 
     // Regression: did.slice(-8) and `scout_state_${did.slice(-8)}` contain
     // uppercase and are rejected by the server with `400 bad name`.
-    assert.equal(isValidTechnocoreName(identity.did.slice(-8)), false);
+    //
+    // Asserted against a FIXED did:key, not a freshly generated one. A DID tail
+    // is eight base58 characters, and base58 includes lowercase and digits — so
+    // roughly 1.4% of random identities end in eight characters that happen to
+    // be a legal Technocore name, and this assertion failed about one run in
+    // seventy. Two unexplained intermittent failures were exactly this.
+    //
+    // The claim being made is "a raw tail is not SAFE", which is about the
+    // possibility of uppercase, not about every instance containing it. A fixed
+    // vector states that deterministically; the real Scout DID does contain an
+    // uppercase 'A' in its tail.
+    const KNOWN_UNSAFE_TAIL = '3Aks3zgn';
+    assert.equal(isValidTechnocoreName(KNOWN_UNSAFE_TAIL), false);
+    assert.equal(isValidTechnocoreName(`scout_state_${KNOWN_UNSAFE_TAIL}`), false);
+
+    // The invariant that must hold for EVERY identity, which is the thing the
+    // product actually depends on. Looping makes this stronger than one sample,
+    // and unlike the assertion above it is true by construction rather than by
+    // luck.
+    for (let i = 0; i < 200; i++) {
+      const random = generateIdentity();
+      assert.equal(isValidTechnocoreName(getStateKey(random.did, 'scout')), true,
+        `getStateKey produced an invalid name for ${random.did}`);
+      assert.equal(isValidTechnocoreName(`hb-${getShortId(random.did)}`), true,
+        `getShortId produced an invalid name for ${random.did}`);
+    }
+
     assert.equal(isValidTechnocoreName(getStateKey(identity.did, 'scout')), true);
     assert.equal(isValidTechnocoreName(`hb-${getShortId(identity.did)}`), true);
 
