@@ -81,6 +81,27 @@ async function main() {
   const state = await get(`/kv/scout/${stateKey}`);
   let turns = null;
   try { turns = JSON.parse(state.text).totalTurns; } catch { /* not JSON yet */ }
+  /**
+   * A state note that has outgrown the note limit stops persisting silently.
+   *
+   * It happened: answeredAuthors grew unbounded to 199 entries and 8,159 of
+   * 8,192 characters, every write started failing with 400, and the only sign
+   * was a line in a log nobody was reading. A turn count alone cannot catch it,
+   * because the count keeps looking plausible while going backwards.
+   */
+  const NOTE_CAP = 8192;
+  const stateNote = await new (await import('../src/technocore-client.mjs')).TechnocoreClient({ baseUrl: BASE })
+    .readNote('scout', stateKey);
+  const stateBytes = stateNote.reachable && stateNote.found ? String(stateNote.value).length : 0;
+  record(
+    'state-size',
+    'State note fits the server limit',
+    stateBytes > 0 && stateBytes < NOTE_CAP * 0.9 ? READY : ACTION,
+    stateBytes === 0 ? 'no state note readable' : `${stateBytes} of ${NOTE_CAP} characters`,
+    'answeredAuthors is pruned by cooldown age on every save. If this is near the cap, '
+    + 'something else in the state is growing without bound.'
+  );
+
   record(
     'state-persistence',
     'State survives restarts',

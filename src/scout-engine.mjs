@@ -107,9 +107,51 @@ export class ScoutEngine {
     return this.localState;
   }
 
+  /**
+   * Keep the state note under the 8192-character limit.
+   *
+   * answeredAuthors grew without bound — one full did:key plus a timestamp per
+   * author answered, forever. It reached 199 entries and 7,762 of the note's
+   * 8,159 characters, and then every write failed with
+   * `400 text too long: 8198 characters`. State stopped persisting entirely, and
+   * the turn counter began going backwards in the log: 317, 318, 317, 320, 320.
+   *
+   * The entries were dead weight long before that. They exist only to enforce a
+   * six-hour per-author cooldown, so anything older than the cooldown can never
+   * be consulted again. At two replies an hour the live set cannot exceed about
+   * a dozen; the other 187 were pure ballast.
+   *
+   * Pruning by age is the real fix. The count cap and the byte check below are
+   * backstops, because a state write that fails is invisible until someone reads
+   * the log carefully — which is exactly how this survived.
+   */
+  pruneState({ maxAuthors = 120, maxBytes = 7800 } = {}) {
+    const authors = this.localState.answeredAuthors || {};
+    const cutoff = Date.now() - SAME_AUTHOR_COOLDOWN_MS;
+
+    let entries = Object.entries(authors)
+      .filter(([, at]) => {
+        const t = new Date(at).getTime();
+        return Number.isFinite(t) && t >= cutoff;
+      })
+      .sort((a, b) => new Date(b[1]) - new Date(a[1]));
+
+    if (entries.length > maxAuthors) entries = entries.slice(0, maxAuthors);
+    this.localState.answeredAuthors = Object.fromEntries(entries);
+
+    // Measure rather than trust the arithmetic: drop the oldest until it fits.
+    while (entries.length > 0 && JSON.stringify(this.localState).length > maxBytes) {
+      entries = entries.slice(0, Math.max(0, entries.length - Math.ceil(entries.length / 4)));
+      this.localState.answeredAuthors = Object.fromEntries(entries);
+    }
+
+    return { kept: entries.length, dropped: Object.keys(authors).length - entries.length };
+  }
+
   async saveRemoteState() {
     try {
       this.localState.lastActive = new Date().toISOString();
+      this.pruneState();
       await this.client.setKv('scout', this.stateKey, this.localState);
       this.lastStateError = null;
       return true;
@@ -225,8 +267,13 @@ export class ScoutEngine {
       outgoingMessage = `[FLOP Scout -> ${candidate.author}]: ${answer}`;
       actionTaken = 'answered_inquiry';
       targetRoom = candidate.room;
-      this.localState.handledCount += 1;
-      this.localState.answeredAuthors[candidate.author] = new Date().toISOString();
+      // handledCount and answeredAuthors are recorded after the post succeeds,
+      // not here. Marking them at this point counted an intention as an action:
+      // a candidate is found on most cycles but only two replies an hour get
+      // past the guardrail, so authors were being suppressed for six hours over
+      // replies that were never sent — and the map grew by roughly one entry a
+      // minute instead of two an hour, which is what pushed the state note past
+      // the 8192-character limit and stopped state persisting altogether.
       detailPayload = {
         targetAgent: candidate.author,
         room: candidate.room,
@@ -267,9 +314,15 @@ export class ScoutEngine {
           await this.client.postMessage(targetRoom, outgoingMessage, this.identity);
           this.guardrails.recordSent(outgoingMessage);
 
-          // Recorded only on a reply that actually went out. Marking it earlier
-          // would let a message the hourly budget merely deferred block its whole
-          // template for good.
+          // Everything below records a reply that actually happened. Recording
+          // any of it earlier turns an intention into a fact.
+          if (actionTaken === 'answered_inquiry' && candidate?.author) {
+            this.localState.handledCount += 1;
+            this.localState.answeredAuthors[candidate.author] = new Date().toISOString();
+          }
+
+          // Marking a skeleton earlier would let a message the hourly budget
+          // merely deferred block its whole template for good.
           if (candidate?.text) {
             const skeleton = messageSkeleton(candidate.text);
             if (skeleton) {

@@ -705,3 +705,143 @@ describe('the reply gate is template-aware', () => {
     assert.ok(all.includes('112'), 'real issuance per block');
   });
 });
+
+describe('the state note cannot outgrow the server limit', () => {
+  test('expired cooldown entries are pruned, live ones kept', () => {
+    const identity = generateIdentity();
+    const scout = new ScoutEngine({ identity, client: new TechnocoreClient({ baseUrl: 'http://127.0.0.1:1' }) });
+
+    const now = Date.now();
+    const authors = {};
+    // 300 authors answered eight hours ago — past the six-hour cooldown, so
+    // every one of them is dead weight that can never be consulted again.
+    for (let i = 0; i < 300; i++) {
+      authors[`did:key:z6Mkstale${String(i).padStart(40, '0')}`] = new Date(now - 8 * 3600_000).toISOString();
+    }
+    // Three answered just now, which the cooldown still needs.
+    for (let i = 0; i < 3; i++) {
+      authors[`did:key:z6Mkfresh${String(i).padStart(40, '0')}`] = new Date(now - 60_000).toISOString();
+    }
+    scout.localState.answeredAuthors = authors;
+
+    const result = scout.pruneState();
+    assert.equal(result.kept, 3, 'only the entries still inside the cooldown survive');
+    assert.equal(result.dropped, 300);
+    for (let i = 0; i < 3; i++) {
+      assert.ok(scout.localState.answeredAuthors[`did:key:z6Mkfresh${String(i).padStart(40, '0')}`]);
+    }
+  });
+
+  test('the note stays under 8192 characters even when every entry is fresh', () => {
+    const identity = generateIdentity();
+    const scout = new ScoutEngine({ identity, client: new TechnocoreClient({ baseUrl: 'http://127.0.0.1:1' }) });
+
+    const now = Date.now();
+    const authors = {};
+    // 400 authors all answered within the cooldown: age pruning cannot help, so
+    // the byte guard has to. This is the case that produced `400 text too long`.
+    for (let i = 0; i < 400; i++) {
+      authors[`did:key:z6Mk${String(i).padStart(44, 'a')}`] = new Date(now - 1000).toISOString();
+    }
+    scout.localState.answeredAuthors = authors;
+
+    scout.pruneState();
+    const size = JSON.stringify(scout.localState).length;
+    assert.ok(size <= 8192, `state note is ${size} characters, over the 8192 limit`);
+    assert.ok(Object.keys(scout.localState.answeredAuthors).length > 0, 'it must not prune everything');
+  });
+
+  test('an empty author map prunes to nothing without throwing', () => {
+    const identity = generateIdentity();
+    const scout = new ScoutEngine({ identity, client: new TechnocoreClient({ baseUrl: 'http://127.0.0.1:1' }) });
+    assert.deepEqual(scout.pruneState(), { kept: 0, dropped: 0 });
+  });
+
+  test('a malformed timestamp is dropped rather than kept forever', () => {
+    const identity = generateIdentity();
+    const scout = new ScoutEngine({ identity, client: new TechnocoreClient({ baseUrl: 'http://127.0.0.1:1' }) });
+    scout.localState.answeredAuthors = { 'did:key:z6MkBroken': 'not-a-date' };
+    assert.equal(scout.pruneState().kept, 0);
+  });
+});
+
+describe('an intention is not recorded as an action', () => {
+  let server;
+  let url;
+
+  before(async () => {
+    // Its own mock: `serverUrl` above belongs to another describe's closure, and
+    // a test that reaches for it silently reads undefined.
+    server = http.createServer((req, res) => {
+      const path = new URL(req.url, 'http://127.0.0.1').pathname;
+
+      if (/^\/r\/[^/]+\/say-signed\//.test(path)) {
+        res.writeHead(200, { 'content-type': 'text/plain' });
+        res.end('[1] OK');
+        return;
+      }
+      if (/^\/kv\//.test(path)) {
+        res.writeHead(200, { 'content-type': 'text/plain' });
+        res.end('OK');
+        return;
+      }
+      if (/^\/r\/[^/]+$/.test(path)) {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({
+          messages: [{
+            id: 1,
+            seq: 1,
+            from: 'did:key:z6MkSomeStranger',
+            content: 'How does a did:key identity work for /kv/ state on Technocore?'
+          }]
+        }));
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.end('OK');
+    });
+
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    url = `http://127.0.0.1:${server.address().port}`;
+  });
+
+  after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+  });
+
+  test('a reply blocked by the hourly limit does not suppress the author', async () => {
+    // A guardrail with no budget: the candidate is found, the reply is refused.
+    // Before the fix this still wrote answeredAuthors, locking the author out
+    // for six hours over a reply that never went out — and growing the state
+    // note by an entry a minute until it broke the 8192-character limit and
+    // state stopped persisting entirely.
+    const scout = new ScoutEngine({
+      identity: generateIdentity(),
+      client: new TechnocoreClient({ baseUrl: url }),
+      guardrails: new Guardrails({ maxPerHour: 0, minCooldownMs: 0 }),
+      watchRooms: ['lobby']
+    });
+
+    const result = await scout.runTurn({ room: 'lobby' });
+
+    assert.match(result.action, /monitoring_pacing/, 'the reply must have been refused');
+    assert.equal(Object.keys(scout.localState.answeredAuthors).length, 0,
+      'a refused reply must not mark the author as answered');
+    assert.equal(scout.localState.handledCount, 0,
+      'a refused reply must not count as handled');
+  });
+
+  test('a reply that goes out does record the author exactly once', async () => {
+    const scout = new ScoutEngine({
+      identity: generateIdentity(),
+      client: new TechnocoreClient({ baseUrl: url }),
+      guardrails: new Guardrails({ maxPerHour: 5, minCooldownMs: 0 }),
+      watchRooms: ['lobby']
+    });
+
+    const result = await scout.runTurn({ room: 'lobby' });
+    assert.equal(result.action, 'answered_inquiry');
+    assert.equal(Object.keys(scout.localState.answeredAuthors).length, 1);
+    assert.equal(scout.localState.handledCount, 1);
+  });
+});
