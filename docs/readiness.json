@@ -1,8 +1,8 @@
 {
-  "checkedAt": "2026-08-27T07:47:09.523Z",
+  "checkedAt": "2026-08-27T08:43:14.062Z",
   "summary": {
-    "ready": 8,
-    "action": 2,
+    "ready": 9,
+    "action": 1,
     "blocked": 2
   },
   "checks": [
@@ -24,7 +24,7 @@
       "id": "state-persistence",
       "label": "State survives restarts",
       "state": "READY",
-      "detail": "57 turns recorded on the server",
+      "detail": "101 turns recorded on the server",
       "fix": "The daemon must complete at least two turns and write state to /kv/."
     },
     {
@@ -52,7 +52,7 @@
       "id": "ledger",
       "label": "Spend ledger is intact",
       "state": "READY",
-      "detail": "12 receipts, 0 counted, 12 simulated, 0 rejected, 0 malformed",
+      "detail": "612 receipts across 3 ledger(s), 0 counted, 612 simulated, 0 rejected, 0 malformed",
       "fix": "Investigate rejected or malformed receipts before trusting the total."
     },
     {
@@ -86,9 +86,9 @@
     {
       "id": "continuous-operation",
       "label": "Runs continuously, not in bursts",
-      "state": "ACTION",
-      "detail": "15-minute cron: ~96 bursts/day with gaps",
-      "fix": "An always-on host removes the gaps. Note a rented validator box would run this too, so the two decisions collapse into one purchase."
+      "state": "READY",
+      "detail": "100% duty over 1.1 h, 46 cycles, last 1 min ago",
+      "fix": "GitHub drops most scheduled runs. Keep the local agent running, or use an always-on host — a rented validator box would run this too, collapsing two decisions into one."
     }
   ],
   "note": "Every READY is verified against the live service or a file read at check time. BLOCKED means waiting on Flop Labs, not deferred by us."

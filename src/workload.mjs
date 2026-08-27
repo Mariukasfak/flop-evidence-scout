@@ -25,7 +25,43 @@
  * govern posting — a model's opinion is not a licence to speak.
  */
 
+import crypto from 'node:crypto';
+
 import { createSessionRequest, wrapUntrusted } from './inference.mjs';
+import { messageSkeleton } from './learning-engine.mjs';
+
+/**
+ * A stable key for "this exact piece of work".
+ *
+ * Without one the planner hands back the same twenty messages every cycle,
+ * because it plans from the last room read and a room read returns mostly what
+ * it returned a minute ago. At a one-minute interval that is twenty sessions a
+ * minute re-deciding questions already answered — wasted disk today and, the
+ * moment a session costs $FLOP, wasted budget from the exact pool the airdrop
+ * is scored on.
+ */
+export function jobKey(taskId, input) {
+  /**
+   * Classification keys on the message's TEMPLATE, not its text.
+   *
+   * Keying on exact text looked like deduplication and achieved almost nothing:
+   * /r/lobby runs at over a thousand messages a minute, so every read returns
+   * twenty genuinely new strings — and they are the same message. Our own
+   * template analysis found one opening phrase repeated 55-64 times across four
+   * rooms, and rooms 69-78% templated.
+   *
+   * So the honest unit of work is "a kind of message we have not seen", not "a
+   * string we have not seen". One classification per template answers the
+   * question; the next five hundred instances answer it again. With a free local
+   * model that is wasted disk. With sessions priced in $FLOP it is the airdrop
+   * budget spent re-reading spam.
+   */
+  const subject = taskId === 'classify-message'
+    ? messageSkeleton(input?.text ?? '') || String(input?.text ?? '')
+    : input?.text ?? input?.question ?? input?.sourceId ?? JSON.stringify(input ?? {});
+
+  return crypto.createHash('sha256').update(`${taskId}|${subject}`, 'utf8').digest('hex').slice(0, 24);
+}
 
 /** Shared preamble. Short, because a long one crowds out a small model's context. */
 const SYSTEM = 'You are a precise analyst. Answer only from the material given. '
@@ -156,25 +192,36 @@ export function buildTask(taskId, input, { model = 'qwen2.5:3b', feeFlop = 0 } =
  * capacity is forfeited allocation, and classification is genuinely useful work
  * that the learning engine currently approximates with regexes.
  */
-export function planWorkload({ sourceChange = null, measurements = [], pendingQuestions = [], unclassified = [] } = {}) {
+export function planWorkload({ sourceChange = null, measurements = [], pendingQuestions = [], unclassified = [], seen = null } = {}) {
   const plan = [];
+  // `seen` holds keys of work already done. Omitting it keeps the old behaviour,
+  // which is right for a one-shot run and wrong for a loop.
+  const isNew = (taskId, input) => !seen || !seen.has(jobKey(taskId, input));
 
   if (sourceChange?.changes?.length) {
     for (const change of sourceChange.changes.slice(0, 3)) {
-      plan.push({ taskId: 'summarise-source-change', input: { sourceId: change.id, was: change.was, now: change.now, addedLines: change.addedLines, addedPaths: change.addedPaths, addedLinks: change.addedLinks } });
+      const input = { sourceId: change.id, was: change.was, now: change.now, addedLines: change.addedLines, addedPaths: change.addedPaths, addedLinks: change.addedLinks };
+      if (isNew('summarise-source-change', input)) plan.push({ taskId: 'summarise-source-change', input });
     }
   }
 
   for (const q of pendingQuestions.slice(0, 2)) {
-    plan.push({ taskId: 'draft-answer', input: { question: q.text, facts: q.facts } });
+    const input = { question: q.text, facts: q.facts };
+    if (isNew('draft-answer', input)) plan.push({ taskId: 'draft-answer', input });
   }
 
   if (measurements.length >= 4) {
     plan.push({ taskId: 'explain-measurement', input: { series: measurements, metric: 'sharded_did_estimate' } });
   }
 
-  for (const m of unclassified.slice(0, 20)) {
-    plan.push({ taskId: 'classify-message', input: { text: m.text, room: m.room } });
+  // Filtered BEFORE the cap: twenty already-classified messages would otherwise
+  // crowd out the new ones, and the plan would stay permanently busy doing nothing.
+  let classified = 0;
+  for (const m of unclassified) {
+    const input = { text: m.text, room: m.room };
+    if (!isNew('classify-message', input)) continue;
+    plan.push({ taskId: 'classify-message', input });
+    if (++classified >= 20) break;
   }
 
   return plan;

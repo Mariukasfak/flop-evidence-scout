@@ -115,16 +115,46 @@ async function main() {
     + 'rehearsal backend that produces real latency, real token counts and real failure modes.'
   );
 
-  const ledger = ledgerTotals();
+  /**
+   * Every ledger under data/, not just the default path.
+   *
+   * The daemon writes its receipts under whatever --data-dir it was given, and
+   * the local launcher uses data/local so it never dirties the repository. This
+   * check was reading only data/inference-receipts.jsonl, so it reported twelve
+   * receipts from an old bench run while the agent was busy writing hundreds
+   * beside it. A readiness check looking in the wrong place is worse than none.
+   */
+  const ledgerPaths = [];
+  const findLedgers = (dir, depth = 0) => {
+    if (depth > 3 || !fs.existsSync(dir)) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) findLedgers(full, depth + 1);
+      else if (entry.name === 'inference-receipts.jsonl') ledgerPaths.push(full);
+    }
+  };
+  findLedgers(path.resolve('data'));
+
+  const ledger = ledgerPaths.reduce((sum, p) => {
+    const t = ledgerTotals(p);
+    return {
+      receiptsOnDisk: sum.receiptsOnDisk + t.receiptsOnDisk,
+      counted: sum.counted + t.counted,
+      simulated: sum.simulated + t.simulated,
+      signatureRejected: sum.signatureRejected + t.signatureRejected,
+      malformedLines: sum.malformedLines + t.malformedLines
+    };
+  }, { receiptsOnDisk: 0, counted: 0, simulated: 0, signatureRejected: 0, malformedLines: 0 });
+
   const ledgerHealthy = ledger.malformedLines === 0 && ledger.signatureRejected === 0;
   record(
     'ledger',
     'Spend ledger is intact',
     ledger.receiptsOnDisk === 0 ? ACTION : (ledgerHealthy ? READY : ACTION),
-    `${ledger.receiptsOnDisk} receipts, ${ledger.counted} counted, ${ledger.simulated} simulated, `
-    + `${ledger.signatureRejected} rejected, ${ledger.malformedLines} malformed`,
+    `${ledger.receiptsOnDisk} receipts across ${ledgerPaths.length} ledger(s), ${ledger.counted} counted, `
+    + `${ledger.simulated} simulated, ${ledger.signatureRejected} rejected, ${ledger.malformedLines} malformed`,
     ledger.receiptsOnDisk === 0
-      ? 'Run tools/inference-bench.mjs to start the ledger.'
+      ? 'Run the agent, or tools/inference-bench.mjs, to start the ledger.'
       : 'Investigate rejected or malformed receipts before trusting the total.'
   );
 
@@ -191,15 +221,42 @@ async function main() {
    * day with gaps between them, and scheduled runs are dropped under load. This
    * is the single largest multiplier still on the table and it is ours to fix.
    */
-  const daemonCron = fs.existsSync('.github/workflows/flop-scout-daemon.yml')
-    && /cron:\s*'\*\/15/.test(fs.readFileSync('.github/workflows/flop-scout-daemon.yml', 'utf8'));
+  /**
+   * Measured, not inferred from a cron expression.
+   *
+   * The first version read the workflow file and reported ACTION whenever a
+   * 15-minute cron was present — so it kept saying "runs in bursts" while a local
+   * process was in fact running continuously beside it. A readiness check that
+   * cannot see the work being done is worse than none.
+   *
+   * The shared activity note is the only place both machines' cycles add up, so
+   * that is what this reads.
+   */
+  const { readActivity, summariseActivity } = await import('../src/shared-state.mjs');
+  const { TechnocoreClient } = await import('../src/technocore-client.mjs');
+  const activity = await readActivity(new TechnocoreClient({ baseUrl: BASE }), scout.did);
+  const combined = activity.reachable ? summariseActivity(activity.record, { cadenceMin: 15 }) : null;
+
+  let continuousState = ACTION;
+  let continuousDetail = 'no cycles recorded yet';
+  if (combined?.dutyCycle != null) {
+    const pct = Math.round(combined.dutyCycle * 100);
+    const fresh = combined.ageMin != null && combined.ageMin < 30;
+    // A high duty cycle over a stale window is history, not current coverage.
+    continuousState = pct >= 80 && fresh ? READY : ACTION;
+    continuousDetail = `${pct}% duty over ${combined.windowHours.toFixed(1)} h, `
+      + `${combined.cycles} cycles, last ${combined.ageMin} min ago`;
+  } else if (combined) {
+    continuousDetail = `${combined.cycles} cycle(s) recorded — not enough for a rate yet`;
+  }
+
   record(
     'continuous-operation',
     'Runs continuously, not in bursts',
-    daemonCron ? ACTION : READY,
-    daemonCron ? '15-minute cron: ~96 bursts/day with gaps' : 'not on a burst schedule',
-    'An always-on host removes the gaps. Note a rented validator box would run this too, '
-    + 'so the two decisions collapse into one purchase.'
+    continuousState,
+    continuousDetail,
+    'GitHub drops most scheduled runs. Keep the local agent running, or use an always-on '
+    + 'host — a rented validator box would run this too, collapsing two decisions into one.'
   );
 
   // ------------------------------------------------------------------ report

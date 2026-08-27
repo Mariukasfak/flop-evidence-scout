@@ -302,3 +302,53 @@ test('an empty burst still reports the counters the shared record reads', async 
   assert.ok(Number.isFinite(outcome.genuineSessions));
   assert.ok(Number.isFinite(outcome.genuineSpend));
 });
+
+test('classification keys on the template, so one spam campaign costs one session', async () => {
+  const { jobKey } = await import('../src/workload.mjs');
+
+  // The real pattern our template analysis found: one opening phrase repeated
+  // 55-64 times across four rooms, differing only in identifiers.
+  const campaign = Array.from({ length: 50 }, (_, i) => ({
+    room: 'lobby',
+    text: `FLOP fleet presence did:key:z6Mk${i}aaaa | note /kv/did-c${i}/1111${i}`
+  }));
+  const keys = new Set(campaign.map((m) => jobKey('classify-message', m)));
+  assert.equal(keys.size, 1, 'fifty instances of one template must cost one classification');
+
+  // A genuine question must not collapse into the campaign.
+  const question = { room: 'lobby', text: 'Has anyone actually seen the faucet go live?' };
+  assert.notEqual(jobKey('classify-message', question), [...keys][0]);
+});
+
+test('a seen-set stops the planner re-doing work across cycles', async () => {
+  const { planWorkload } = await import('../src/workload.mjs');
+  const messages = Array.from({ length: 5 }, (_, i) => ({
+    room: 'lobby',
+    text: `a genuinely distinct message number ${i} about validators and staking`
+  }));
+
+  const seen = new Set();
+  const first = planWorkload({ unclassified: messages, seen });
+  assert.equal(first.length, 5);
+
+  // Simulate the burst marking them done.
+  const { jobKey } = await import('../src/workload.mjs');
+  for (const job of first) seen.add(jobKey(job.taskId, job.input));
+
+  const second = planWorkload({ unclassified: messages, seen });
+  assert.equal(second.length, 0, 'the same messages must not be planned twice');
+
+  // A new message still gets through.
+  const third = planWorkload({
+    unclassified: [...messages, { room: 'lobby', text: 'a brand new observation about halving schedules' }],
+    seen
+  });
+  assert.equal(third.length, 1);
+});
+
+test('without a seen-set the planner behaves as it always did', async () => {
+  const { planWorkload } = await import('../src/workload.mjs');
+  const messages = Array.from({ length: 3 }, (_, i) => ({ room: 'lobby', text: `distinct message ${i} validators` }));
+  assert.equal(planWorkload({ unclassified: messages }).length, 3);
+  assert.equal(planWorkload({ unclassified: messages }).length, 3);
+});

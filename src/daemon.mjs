@@ -245,6 +245,31 @@ export async function runScoutDaemon(options = {}) {
    */
   const leaseTtl = Math.min(10 * 60_000, Math.max(2 * 60_000, config.intervalMs * 3));
 
+  /**
+   * Work already done, so a cycle does not redo the previous one's.
+   *
+   * A room read returns mostly what it returned a minute ago, so without this the
+   * planner produced the same twenty classifications every cycle — visible in the
+   * log as an unvarying "20/20 sessions", forever. Harmless while a session is
+   * free; the moment one costs $FLOP it is spending the airdrop budget to
+   * re-answer questions already answered.
+   *
+   * Bounded, because an unbounded set in a process meant to run for months is a
+   * leak. The oldest keys fall out first and the worst case is that a very old
+   * message gets classified a second time.
+   */
+  const seenWork = new Set();
+  const SEEN_CAP = 5000;
+  const trimSeen = () => {
+    if (seenWork.size <= SEEN_CAP) return;
+    const drop = seenWork.size - Math.floor(SEEN_CAP * 0.8);
+    let i = 0;
+    for (const key of seenWork) {
+      if (i++ >= drop) break;
+      seenWork.delete(key);
+    }
+  };
+
   const useLease = config.lease !== false;
   const lease = useLease
     ? new Lease({
@@ -383,11 +408,13 @@ export async function runScoutDaemon(options = {}) {
         const { backend } = await selectBackend({});
         work = await runBurst({
           state: { unclassified: recentMessages, sourceChange: readSourceChange(config.dataDir) },
+          seen: seenWork,
           backend,
           identity: scoutIdentity,
           deadlineMs: Math.max(20_000, Math.floor(config.intervalMs * 0.4)),
           ledgerPath: path.join(config.dataDir, 'inference-receipts.jsonl')
         });
+        trimSeen();
         if (work.scheduled > 0) {
           console.log(`[Work] ${work.completed}/${work.scheduled} sessions | genuine: ${work.genuineSessions} | ${work.stoppedBecause}`);
         }

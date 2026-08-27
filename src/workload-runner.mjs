@@ -23,7 +23,7 @@
  */
 
 import { runSession, isEvidenceOfWork } from './inference.mjs';
-import { buildTask, planWorkload, TASKS } from './workload.mjs';
+import { buildTask, planWorkload, jobKey, TASKS } from './workload.mjs';
 import { appendReceipt } from './inference-ledger.mjs';
 
 /**
@@ -211,12 +211,19 @@ export async function runWorkload({
  * point whose behaviour does not change when the faucet appears — only the
  * budget and the backend do.
  */
-export async function runBurst({ state = {}, backend, identity, budget = Infinity, costPerSession = DEFAULT_SESSION_COST, deadlineMs = 10 * 60 * 1000, model, ledgerPath, now } = {}) {
-  const plan = planWorkload(state);
+export async function runBurst({ state = {}, backend, identity, budget = Infinity, costPerSession = DEFAULT_SESSION_COST, deadlineMs = 10 * 60 * 1000, model, ledgerPath, seen = null, now } = {}) {
+  const plan = planWorkload({ ...state, seen });
   if (plan.length === 0) {
     return { planned: 0, scheduled: 0, completed: 0, failed: 0, invalidOutput: 0, spend: 0, receipts: [], stoppedBecause: 'nothing to do', elapsedMs: 0, genuineSessions: 0, genuineSpend: 0 };
   }
-  return runWorkload({ plan, backend, identity, budget, costPerSession, deadlineMs, model, ledgerPath, now });
+  const outcome = await runWorkload({ plan, backend, identity, budget, costPerSession, deadlineMs, model, ledgerPath, now });
+
+  // Mark what was actually scheduled, not what was planned: a job trimmed by the
+  // budget has not been done and must stay eligible for the next burst.
+  if (seen) {
+    for (const job of prioritise(plan).slice(0, outcome.scheduled)) seen.add(jobKey(job.taskId, job.input));
+  }
+  return outcome;
 }
 
 /** Every task the planner can emit, for callers that want to check coverage. */
