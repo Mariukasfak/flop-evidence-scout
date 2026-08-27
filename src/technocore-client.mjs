@@ -164,6 +164,41 @@ export class TechnocoreClient {
     return await this.postSignedMessage(room, content, identity);
   }
 
+  /**
+   * Read a note and say WHY there is nothing, when there is nothing.
+   *
+   * getKv() below returns null for a missing note and null for a 503, and that
+   * conflation is not harmless. The cross-machine lease read a transient
+   * "Service Unavailable" as "nobody holds this", tried to claim it, failed on
+   * the same outage, and reported "lost the race to claim it" — an outage
+   * described as contention, which is the kind of wrong diagnosis that costs an
+   * hour of looking in the wrong place.
+   *
+   * Anything that must distinguish absence from ignorance uses this instead.
+   */
+  async readNote(ns, key) {
+    const url = `${this.baseUrl}/kv/${encodeURIComponent(ns)}/${encodeURIComponent(key)}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    try {
+      const response = await this.fetch(url, { signal: controller.signal });
+      clearTimeout(timer);
+
+      if (response.status === 404) {
+        return { reachable: true, found: false, value: null, status: 404, error: null };
+      }
+      if (!response.ok) {
+        return { reachable: false, found: null, value: null, status: response.status, error: `HTTP ${response.status}` };
+      }
+      const text = await response.text();
+      return { reachable: true, found: true, value: stripUntrustedBanner(text), status: response.status, error: null };
+    } catch (err) {
+      clearTimeout(timer);
+      return { reachable: false, found: null, value: null, status: 0, error: err.message };
+    }
+  }
+
   async getKv(ns, key) {
     const url = key ? `${this.baseUrl}/kv/${encodeURIComponent(ns)}/${encodeURIComponent(key)}` : `${this.baseUrl}/kv/${encodeURIComponent(ns)}`;
     const controller = new AbortController();

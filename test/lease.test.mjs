@@ -13,7 +13,15 @@ import {
  * and prove nothing.
  */
 class FakeKv {
-  constructor() { this.store = new Map(); this.writes = 0; }
+  constructor() { this.store = new Map(); this.writes = 0; this.down = false; }
+
+  /** Mirrors the real client: absence and unreachability are different answers. */
+  async readNote(ns, key) {
+    if (this.down) return { reachable: false, found: null, value: null, status: 503, error: 'HTTP 503' };
+    const raw = this.store.get(`${ns}/${key}`);
+    if (raw === undefined) return { reachable: true, found: false, value: null, status: 404, error: null };
+    return { reachable: true, found: true, value: raw, status: 200, error: null };
+  }
 
   async getKv(ns, key) {
     const raw = this.store.get(`${ns}/${key}`);
@@ -23,6 +31,7 @@ class FakeKv {
   }
 
   async setKv(ns, key, value, { ifValue = null, ifAbsent = false } = {}) {
+    if (this.down) throw new Error('Technocore note write failed: HTTP 503 Service Unavailable');
     const k = `${ns}/${key}`;
     const current = this.store.get(k);
     if (ifAbsent && current !== undefined) throw new Error('HTTP 409 note exists');
@@ -240,4 +249,60 @@ test('the lease is released even when the work throws', async () => {
 test('the default TTL outlives a missed renewal', () => {
   // Renewal is every 2 minutes; a 10-minute TTL survives four missed ones.
   assert.ok(DEFAULT_TTL_MS >= 5 * 60 * 1000);
+});
+
+test('an outage is reported as an outage, not as a lost race', async () => {
+  // The bug this fixes: getKv returned null for a missing note AND for a 503, so
+  // a blip read as "the lease is free", the claim failed on the same blip, and
+  // the daemon printed "lost the race to claim it". Nobody was racing.
+  const client = new FakeKv();
+  client.down = true;
+
+  const lease = new Lease({ client, name: 'scout-cycle', holder: 'local-a1' });
+  const result = await lease.acquire();
+
+  assert.equal(result.acquired, false);
+  assert.equal(result.transient, true, 'an outage must be marked transient');
+  assert.match(result.reason, /unreachable/);
+  assert.doesNotMatch(result.reason, /race/, 'an outage must never be described as contention');
+});
+
+test('an unreachable server never causes a false claim', async () => {
+  const client = new FakeKv();
+  client.down = true;
+  const lease = new Lease({ client, name: 'scout-cycle', holder: 'local-a1' });
+
+  await lease.acquire();
+  assert.equal(lease.isHeld(), false);
+  assert.equal(lease.currentValue, null, 'we must not believe we hold a lease we never wrote');
+});
+
+test('the lease recovers by itself once the server returns', async () => {
+  const client = new FakeKv();
+  client.down = true;
+  const lease = new Lease({ client, name: 'scout-cycle', holder: 'local-a1' });
+
+  assert.equal((await lease.acquire()).acquired, false);
+  client.down = false;
+  const second = await lease.acquire();
+  assert.equal(second.acquired, true, 'a transient failure must not be sticky');
+  assert.equal(lease.isHeld(), true);
+});
+
+test('a 5xx on the write is transient, a 409 is a genuine race', async () => {
+  // Genuine race: another holder claimed it first, server answers 409.
+  const contended = new FakeKv();
+  await contended.setKv('lease', 'scout-cycle', encodeLease('other-x1', Date.now() + 60_000));
+  const loser = new Lease({ client: contended, name: 'scout-cycle', holder: 'local-a1' });
+  const denied = await loser.acquire();
+  assert.equal(denied.acquired, false);
+  assert.notEqual(denied.transient, true, 'a real conflict is not transient');
+
+  // Outage on the write path specifically.
+  const flaky = new FakeKv();
+  const lease = new Lease({ client: flaky, name: 'scout-cycle', holder: 'local-a1' });
+  flaky.setKv = async () => { throw new Error('Technocore note write failed: HTTP 503 Service Unavailable'); };
+  const failed = await lease.acquire();
+  assert.equal(failed.acquired, false);
+  assert.equal(failed.transient, true);
 });

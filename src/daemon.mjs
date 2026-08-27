@@ -235,10 +235,24 @@ export async function runScoutDaemon(options = {}) {
         // Acquire covers all three cases: unheld, expired, and already ours.
         const attempt = await lease.acquire();
         if (!attempt.acquired) {
-          console.log(`[Lease] Standing down — ${attempt.reason}.`);
-          appendAudit(config.auditLogPath, { event: 'lease_declined', reason: attempt.reason, heldBy: attempt.heldBy ?? null });
+          // A blip and a genuine handover are different events and deserve
+          // different words. Reporting an outage as "lost the race" sent the
+          // first reader of this looking for a competing process that did not
+          // exist. A blip also retries quickly rather than sitting out a whole
+          // interval for no reason.
+          if (attempt.transient) {
+            console.log(`[Lease] Technocore unreachable — ${attempt.reason}. Retrying shortly.`);
+          } else {
+            console.log(`[Lease] Standing down — ${attempt.reason}.`);
+          }
+          appendAudit(config.auditLogPath, {
+            event: attempt.transient ? 'lease_unreachable' : 'lease_declined',
+            reason: attempt.reason,
+            heldBy: attempt.heldBy ?? null
+          });
           if (config.dryRun || !running) break;
-          await new Promise((resolve) => setTimeout(resolve, config.intervalMs));
+          const wait = attempt.transient ? Math.min(15_000, config.intervalMs) : config.intervalMs;
+          await new Promise((resolve) => setTimeout(resolve, wait));
           continue;
         }
       }

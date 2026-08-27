@@ -30,6 +30,20 @@
 
 const HOLDER_PATTERN = /^[a-z0-9][a-z0-9-]{0,38}$/;
 
+/**
+ * Was that write refused, or did it never arrive?
+ *
+ * A conditional write losing to a competitor comes back 4xx — the precondition
+ * genuinely failed. A 5xx or a network error means the attempt never got a
+ * verdict, and calling that a lost race is the same conflation that made a
+ * transient outage read as contention.
+ */
+function isTransientWriteFailure(err) {
+  const status = Number(String(err?.message ?? '').match(/HTTP (\d{3})/)?.[1]);
+  if (!Number.isFinite(status)) return true;      // timeouts, DNS, aborts
+  return status >= 500;
+}
+
 export const DEFAULT_LEASE_NS = 'lease';
 export const DEFAULT_TTL_MS = 10 * 60 * 1000;      // survives a missed renewal
 export const DEFAULT_RENEW_MS = 2 * 60 * 1000;     // five renewals per lease
@@ -84,12 +98,30 @@ export class Lease {
     this.heldUntil = 0;
   }
 
-  /** Raw current value, as stored — not parsed, because `if=` needs it verbatim. */
+  /**
+   * Raw current value, as stored — not parsed, because `if=` needs it verbatim.
+   *
+   * Returns `reachable: false` rather than pretending the note is absent when
+   * the server cannot be reached. The first version of this used getKv(), which
+   * returns null for "no note" and null for "HTTP 503" alike; a transient outage
+   * was therefore read as "the lease is free", the claim failed on the same
+   * outage, and the daemon announced "lost the race to claim it". Nobody was
+   * racing. Describing an outage as contention sends the reader to the wrong
+   * place entirely.
+   */
   async read() {
+    if (typeof this.client.readNote === 'function') {
+      const note = await this.client.readNote(this.ns, this.name);
+      if (!note.reachable) return { reachable: false, value: null, error: note.error };
+      // A lease token never parses as JSON, so anything else here is somebody
+      // else's data and is handled by the caller, not overwritten.
+      return { reachable: true, value: note.found ? String(note.value ?? '').trim() : null };
+    }
+
+    // Fallback for a client without readNote. Cannot tell absence from failure,
+    // and says so rather than guessing.
     const value = await this.client.getKv(this.ns, this.name);
-    // getKv JSON-parses when it can. A lease token never parses as JSON, so a
-    // non-string here means somebody wrote something else to this key.
-    return typeof value === 'string' ? value.trim() : null;
+    return { reachable: true, value: typeof value === 'string' ? value.trim() : null };
   }
 
   /**
@@ -102,7 +134,15 @@ export class Lease {
   async acquire() {
     const now = this.now();
     const mine = encodeLease(this.holder, now + this.ttlMs);
-    const existing = await this.read();
+    const state = await this.read();
+
+    // Not knowing is its own answer. Trying to claim on an unreadable note would
+    // fail on the same outage and report contention that never happened.
+    if (!state.reachable) {
+      return { acquired: false, transient: true, reason: `server unreachable (${state.error || 'unknown'})` };
+    }
+
+    const existing = state.value;
 
     if (existing === null) {
       try {
@@ -110,8 +150,12 @@ export class Lease {
         this.currentValue = mine;
         this.heldUntil = now + this.ttlMs;
         return { acquired: true, reason: 'was unheld' };
-      } catch {
-        // Someone won the race between our read and our write. Correct outcome.
+      } catch (err) {
+        if (isTransientWriteFailure(err)) {
+          return { acquired: false, transient: true, reason: `claim did not reach the server (${err.message})` };
+        }
+        // A 4xx means the precondition genuinely failed: someone claimed it
+        // between our read and our write. That is the only real race.
         return { acquired: false, reason: 'lost the race to claim it' };
       }
     }
@@ -138,7 +182,10 @@ export class Lease {
       this.currentValue = mine;
       this.heldUntil = now + this.ttlMs;
       return { acquired: true, reason: isMine ? 'renewed our own' : `took over from ${current.holder}, expired` };
-    } catch {
+    } catch (err) {
+      if (isTransientWriteFailure(err)) {
+        return { acquired: false, transient: true, reason: `takeover did not reach the server (${err.message})` };
+      }
       return { acquired: false, reason: 'lost the race; the value changed under us' };
     }
   }
