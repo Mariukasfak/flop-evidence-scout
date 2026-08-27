@@ -10,6 +10,8 @@ import { ScribeEngine } from './scribe-engine.mjs';
 import { MailboxService } from './mailbox-service.mjs';
 import { Lease, makeHolderId, DEFAULT_TTL_MS } from './lease.mjs';
 import { recordCycle } from './shared-state.mjs';
+import { runBurst } from './workload-runner.mjs';
+import { selectBackend } from './inference-backends.mjs';
 import { TelemetryFeed } from './telemetry-feed.mjs';
 import { updateDashboardFile } from './dashboard.mjs';
 import { analyzeChatArchives, getLatestLearningReport } from './learning-engine.mjs';
@@ -68,6 +70,15 @@ function parseArgs(argv) {
   }
 
   return options;
+}
+
+/** The watcher's finding, if there is one waiting. */
+function readSourceChange(dataDir) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(dataDir, 'source-change.json'), 'utf8'));
+  } catch {
+    return null;
+  }
 }
 
 function appendAudit(logPath, record) {
@@ -223,13 +234,24 @@ export async function runScoutDaemon(options = {}) {
   // Named once so the lease and the shared activity record agree on who we are.
   const holderId = makeHolderId(process.env.LEASE_HOLDER || (process.env.CI === 'true' ? 'github' : 'local'));
 
+  /**
+   * The lease only has to outlive a missed renewal, not a coffee break.
+   *
+   * A flat ten minutes meant that closing one window and opening another left
+   * the new process standing down for up to ten minutes against a holder that no
+   * longer existed — a graceful shutdown releases the lease, but a killed window
+   * cannot. Three cycles is enough slack to survive a slow cycle or a blip, and
+   * it makes a dead holder clear in minutes instead of tens of them.
+   */
+  const leaseTtl = Math.min(10 * 60_000, Math.max(2 * 60_000, config.intervalMs * 3));
+
   const useLease = config.lease !== false;
   const lease = useLease
     ? new Lease({
       client,
       name: config.leaseName || 'scout-cycle',
       holder: holderId,
-      ttlMs: config.leaseTtlMs || DEFAULT_TTL_MS
+      ttlMs: config.leaseTtlMs || leaseTtl
     })
     : null;
 
@@ -298,10 +320,21 @@ export async function runScoutDaemon(options = {}) {
       // Only lobby and events were being archived, so the learning pass could
       // only ever study the firehose the agent deliberately ignores — and never
       // the topical rooms where it does its work.
+      const recentMessages = [];
       for (const archiveRoom of new Set([config.room, ...scoutEngine.watchRooms])) {
         try {
           const data = await client.readRoom(archiveRoom, { limit: 25 });
-          if (data.messages) archiveRoomMessages(archiveRoom, data.messages, config.chatArchiveDir);
+          if (data.messages) {
+            archiveRoomMessages(archiveRoom, data.messages, config.chatArchiveDir);
+            // Collected as they are archived rather than re-fetched. The
+            // inference workload wants exactly the messages this cycle just
+            // read, and reading them again would spend read budget to learn
+            // nothing new.
+            for (const m of data.messages) {
+              const text = m?.content || m?.text;
+              if (text) recentMessages.push({ room: archiveRoom, text });
+            }
+          }
         } catch { /* a room that cannot be read is not worth failing the cycle */ }
       }
 
@@ -342,13 +375,39 @@ export async function runScoutDaemon(options = {}) {
         }
       }
 
+      // Step D: the inference workload. This is the activity the airdrop is
+      // actually scored on, and until now the runner existed without ever being
+      // called. The deadline keeps a slow model from eating the whole cycle.
+      let work = { genuineSessions: 0, genuineSpend: 0, completed: 0 };
+      try {
+        const { backend } = await selectBackend({});
+        work = await runBurst({
+          state: { unclassified: recentMessages, sourceChange: readSourceChange(config.dataDir) },
+          backend,
+          identity: scoutIdentity,
+          deadlineMs: Math.max(20_000, Math.floor(config.intervalMs * 0.4)),
+          ledgerPath: path.join(config.dataDir, 'inference-receipts.jsonl')
+        });
+        if (work.scheduled > 0) {
+          console.log(`[Work] ${work.completed}/${work.scheduled} sessions | genuine: ${work.genuineSessions} | ${work.stoppedBecause}`);
+        }
+      } catch (err) {
+        console.log(`[Work] Skipped — ${err.message}`);
+      }
+
       // The shared record is the only place both machines' work adds up. Local
       // runs write to data/local and cloud runs are destroyed after the job, so
       // without this the combined picture exists nowhere.
       //
       // Best-effort: failing to record a cycle must never fail the cycle.
       try {
-        const recorded = await recordCycle(client, scoutIdentity.did, { holder: holderId });
+        const recorded = await recordCycle(client, scoutIdentity.did, {
+          holder: holderId,
+          // The delta for THIS cycle. Recording a running total would compound
+          // every cycle into the shared sum.
+          sessions: work.genuineSessions,
+          spendFlop: work.genuineSpend
+        });
         if (!recorded.recorded) console.log(`[Activity] Not recorded — ${recorded.reason}`);
       } catch (err) {
         console.log(`[Activity] Not recorded — ${err.message}`);

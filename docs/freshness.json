@@ -1,23 +1,23 @@
 {
-  "checkedAt": "2026-08-27T07:38:40.284Z",
+  "checkedAt": "2026-08-27T07:53:58.680Z",
   "stale": 0,
   "combined": {
-    "cycles": 2,
+    "cycles": 8,
     "byHolder": {
-      "lo": 2
+      "lo": 8
     },
     "totals": {
-      "lo": 2
+      "lo": 8
     },
     "spend": {
       "flop": 0,
       "sessions": 0
     },
-    "windowHours": 0.016666666666666666,
+    "windowHours": 0.26666666666666666,
     "expected": 1,
     "dutyCycle": 1,
     "medianGapMin": 1,
-    "worstGapMin": 1,
+    "worstGapMin": 10,
     "ageMin": 0,
     "share": {
       "lo": 1
@@ -31,7 +31,7 @@
       "cadenceMin": 60,
       "toleranceMin": 180,
       "newest": "2026-08-27T06:25:00.000Z",
-      "ageMin": 73.6649,
+      "ageMin": 88.9728,
       "state": "FRESH",
       "duty": {
         "records": 24,
@@ -51,7 +51,7 @@
       "cadenceMin": 60,
       "toleranceMin": 180,
       "newest": "2026-08-27T06:23:38.828Z",
-      "ageMin": 75.0178,
+      "ageMin": 90.3257,
       "state": "FRESH",
       "duty": null
     },
@@ -62,7 +62,7 @@
       "cadenceMin": 15,
       "toleranceMin": 90,
       "newest": "2026-08-27T07:09:50.080Z",
-      "ageMin": 28.8303,
+      "ageMin": 44.13818333333333,
       "state": "FRESH",
       "duty": {
         "records": 25,
@@ -82,7 +82,7 @@
       "cadenceMin": 240,
       "toleranceMin": 2880,
       "newest": "2026-08-27T07:09:42.620Z",
-      "ageMin": 28.95465,
+      "ageMin": 44.26251666666667,
       "state": "FRESH",
       "duty": null
     }

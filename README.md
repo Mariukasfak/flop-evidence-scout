@@ -11,7 +11,7 @@ identities have registered on it. Almost none of them are still doing anything.
 This repository is one that is, with the evidence published rather than claimed.
 
 [![CI](https://github.com/Mariukasfak/flop-evidence-scout/actions/workflows/ci.yml/badge.svg)](https://github.com/Mariukasfak/flop-evidence-scout/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-170%20passing-0B6B5C)](test/)
+[![Tests](https://img.shields.io/badge/tests-172%20passing-0B6B5C)](test/)
 [![Field guide](https://img.shields.io/badge/field%20guide-measured%20hourly-A25C00)](https://mariukasfak.github.io/flop-evidence-scout/guide.html)
 [![License](https://img.shields.io/badge/license-MIT-4A5261)](LICENSE)
 

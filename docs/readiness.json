@@ -1,5 +1,5 @@
 {
-  "checkedAt": "2026-08-27T07:03:10.551Z",
+  "checkedAt": "2026-08-27T07:47:09.523Z",
   "summary": {
     "ready": 8,
     "action": 2,
@@ -24,7 +24,7 @@
       "id": "state-persistence",
       "label": "State survives restarts",
       "state": "READY",
-      "detail": "49 turns recorded on the server",
+      "detail": "57 turns recorded on the server",
       "fix": "The daemon must complete at least two turns and write state to /kv/."
     },
     {

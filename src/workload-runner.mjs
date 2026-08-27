@@ -22,7 +22,7 @@
  * given. Everything else here is an optimisation; that one is a promise.
  */
 
-import { runSession } from './inference.mjs';
+import { runSession, isEvidenceOfWork } from './inference.mjs';
 import { buildTask, planWorkload, TASKS } from './workload.mjs';
 import { appendReceipt } from './inference-ledger.mjs';
 
@@ -184,6 +184,20 @@ export async function runWorkload({
 
   if (deadlineHit) outcome.stoppedBecause = 'deadline';
   outcome.elapsedMs = now() - startedAt;
+
+  /**
+   * What may be reported as work, as opposed to what merely ran.
+   *
+   * `completed` counts every session that returned, simulated ones included —
+   * useful for knowing the loop is alive, and wrong to report as spend. The
+   * airdrop is scored on inference actually performed, so the figure that leaves
+   * this function for the shared record is filtered through the same
+   * isEvidenceOfWork() gate the ledger uses. On a machine with no model, this is
+   * correctly zero while `completed` is not.
+   */
+  const genuine = outcome.receipts.filter(isEvidenceOfWork);
+  outcome.genuineSessions = genuine.length;
+  outcome.genuineSpend = genuine.reduce((sum, r) => sum + (r.request?.feeFlop || 0), 0);
   outcome.spendAssumption = 'Failed sessions are not counted as spend. The teaser does not say '
     + 'whether a failed session is still charged.';
 
@@ -200,7 +214,7 @@ export async function runWorkload({
 export async function runBurst({ state = {}, backend, identity, budget = Infinity, costPerSession = DEFAULT_SESSION_COST, deadlineMs = 10 * 60 * 1000, model, ledgerPath, now } = {}) {
   const plan = planWorkload(state);
   if (plan.length === 0) {
-    return { planned: 0, scheduled: 0, completed: 0, failed: 0, invalidOutput: 0, spend: 0, receipts: [], stoppedBecause: 'nothing to do', elapsedMs: 0 };
+    return { planned: 0, scheduled: 0, completed: 0, failed: 0, invalidOutput: 0, spend: 0, receipts: [], stoppedBecause: 'nothing to do', elapsedMs: 0, genuineSessions: 0, genuineSpend: 0 };
   }
   return runWorkload({ plan, backend, identity, budget, costPerSession, deadlineMs, model, ledgerPath, now });
 }

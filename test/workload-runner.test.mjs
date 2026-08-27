@@ -275,3 +275,30 @@ test('the default concurrency is conservative', () => {
   // Bursts share one machine and, for now, one local model server.
   assert.ok(DEFAULT_CONCURRENCY >= 1 && DEFAULT_CONCURRENCY <= 4);
 });
+
+test('genuine counters exclude simulated work, which is what reaches the shared total', async () => {
+  // The daemon feeds genuineSessions/genuineSpend into the cross-machine record.
+  // If simulated runs leaked into that figure, a machine with no model installed
+  // would silently inflate the number the airdrop is scored on.
+  const outcome = await runWorkload({
+    plan: classifyJobs(5),
+    backend: simulatedBackend,
+    identity,
+    costPerSession: 3,
+    budget: 100,
+    ledgerPath: tempLedger()
+  });
+
+  assert.equal(outcome.completed, 5, 'the loop did run');
+  assert.equal(outcome.genuineSessions, 0, 'but none of it counts as work');
+  assert.equal(outcome.genuineSpend, 0);
+});
+
+test('an empty burst still reports the counters the shared record reads', async () => {
+  // Missing fields would record NaN into a cumulative total on the server.
+  const outcome = await runBurst({ state: {}, backend: simulatedBackend, identity, ledgerPath: tempLedger() });
+  assert.equal(outcome.genuineSessions, 0);
+  assert.equal(outcome.genuineSpend, 0);
+  assert.ok(Number.isFinite(outcome.genuineSessions));
+  assert.ok(Number.isFinite(outcome.genuineSpend));
+});
