@@ -28,7 +28,7 @@ jobs:
       - name: Check every watched source
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node tools/watch-sources.mjs
+        run: node tools/watch-sources.mjs --commit-baseline
 
       - name: Report anything that moved
         env:

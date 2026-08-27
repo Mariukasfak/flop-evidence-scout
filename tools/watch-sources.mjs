@@ -288,12 +288,37 @@ async function main() {
     console.warn(`[watch] rooms: ${err.message}`);
   }
 
-  fs.mkdirSync(path.dirname(STATE_PATH), { recursive: true });
-  fs.writeFileSync(STATE_PATH, JSON.stringify({
-    checkedAt: now,
-    sources,
-    interestingRooms
-  }, null, 2), 'utf8');
+  /**
+   * Advancing the baseline is how an alert gets consumed.
+   *
+   * The baseline is committed, and CI reports a change by diffing against it. So
+   * a local run that writes and commits the new baseline silently destroys the
+   * alert CI would have raised — the next scheduled run compares against a state
+   * that already contains the finding and reports nothing.
+   *
+   * That is not hypothetical. On 2026-08-27 a room called `faucet` appeared, a
+   * local run detected it, the new baseline was committed, and the hourly
+   * workflow was left with nothing to say about the single event this watcher
+   * was built to catch.
+   *
+   * So writing the baseline is now opt-in. Locally the tool is a read-only check
+   * by default and prints what it found; CI passes --commit-baseline because CI
+   * is the one place that also delivers the alert.
+   */
+  const commitBaseline = process.argv.includes('--commit-baseline') || process.env.CI === 'true';
+
+  if (commitBaseline) {
+    fs.mkdirSync(path.dirname(STATE_PATH), { recursive: true });
+    fs.writeFileSync(STATE_PATH, JSON.stringify({
+      checkedAt: now,
+      sources,
+      interestingRooms
+    }, null, 2), 'utf8');
+  } else if (changes.length || newRooms.length || signalAlerts.length) {
+    console.log('[watch] Baseline NOT advanced — this was a local read-only check.');
+    console.log('[watch] The findings below are still pending for the scheduled run to report.');
+    console.log('[watch] Pass --commit-baseline only if you are also delivering the alert.');
+  }
 
   if (stateWasCorrupt) {
     // Exit non-zero so the scheduled workflow goes red instead of green. The
