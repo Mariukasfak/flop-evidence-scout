@@ -1,3 +1,5 @@
+import { messageSkeleton } from './learning-engine.mjs';
+
 export const VERIFIED_FACTS = Object.freeze([
   {
     topic: 'did_identity',
@@ -23,7 +25,7 @@ export const VERIFIED_FACTS = Object.freeze([
   {
     topic: 'fair_launch',
     keywords: ['fair', 'launch', 'vc', 'presale', 'investors', 'fondai', 'saziningas', 'paleidimas', 'snap'],
-    summary_en: 'FLOP is a 100% fair launch: self-funded by Arthur Hayes, 0% VC allocation, no private presale. Airdrop snapshot targeted for Q4 2026, mainnet Q1 2027.',
+    summary_en: 'FLOP is a fair launch: Teaser v0.1 states there is no token sale and no investor allocation, and Hayes says he self-funded the team. The genesis supply is distributed through the testnet airdrop. Testnet Q4 2026 for ~90 days, mainnet Q1 2027.',
     summary_lt: 'FLOP yra 100% sąžiningas paleidimas: Arthur Hayes finansuoja projektą be rizikos kapitalo fondų ar išankstinių pardavimų. Airdrop numatomas 2026 m. Q4, o Mainnet – 2027 m. Q1.',
     source: 'Arthur Hayes & Flop Labs official announcements'
   },
@@ -51,8 +53,8 @@ export const VERIFIED_FACTS = Object.freeze([
   {
     topic: 'security_airdrop',
     keywords: ['token', 'claim', 'presale', 'wallet', 'airdrop', 'snapshot', 'security', 'scam', 'saugumas', 'apgavikai'],
-    summary_en: 'Beware of scam claim links: No official claim portal is live yet. Keep your private key local and safe for the official Q4 2026 signature snapshot.',
-    summary_lt: 'Saugumo įspėjimas: oficialaus tokeno ar claim puslapio dar nėra. Saugokite savo privatų raktą lokaliai – jo prireiks Q4 2026 parašo patvirtinimui.',
+    summary_en: 'Beware of claim links: no official claim portal exists, and no wallet format, address scheme or transaction signing has been published at all — so nobody can hold $FLOP yet. Keep your private key local. /r/faucet on this service is NOT a faucet: it is a room a stranger created where bots post requests at each other.',
+    summary_lt: 'Saugumo įspėjimas: oficialaus claim puslapio nėra, ir neskelbtas joks piniginės formatas ar adresų schema – tad $FLOP kol kas niekas laikyti negali. Saugokite privatų raktą lokaliai. /r/faucet šiame servise NĖRA faucet: tai svetimo sukurtas kambarys, kuriame botai rašo prašymus vienas kitam.',
     source: 'flop.finance security advisory'
   },
   {
@@ -79,8 +81,8 @@ export const VERIFIED_FACTS = Object.freeze([
   {
     topic: 'testnet_allocation',
     keywords: ['allocation', 'supply', '20%', 'tokenomics', 'emission', 'distribution', 'paskirstymas', 'emisija'],
-    summary_en: 'From a direct Hayes interview 2026-08-26: Flop Labs is REVIEWING a ~20% of total supply airdrop for OCTOBER 2026, and Hayes states plainly that the tokenomics and airdrop conditions are not finalised. Eligibility as described: create a testnet wallet, take test tokens, do AI inference tasks; mainnet tokens follow that activity. Testnet is to run about three months and has not launched. Flop Labs takes part of block rewards for ~2 years until the first halving, then that share ends. Tokenomics materials are due within a week, whitepaper within weeks. An earlier reading of "20% over ten years" came from a secondary summary and is superseded by the interview.',
-    summary_lt: 'Iš tiesioginio Hayes interviu 2026-08-26: Flop Labs SVARSTO ~20% visos pasiūlos airdropą 2026 m. SPALĮ, o Hayes aiškiai sako, kad tokenomika ir airdrop sąlygos dar nefinalios. Aprašytas kelias: susikurti testnet piniginę, pasiimti testinius tokenus, atlikti AI inference užduotis; mainnet tokenai seka tą aktyvumą. Testnet turi veikti apie tris mėnesius ir dar nepaleistas. Flop Labs gauna dalį block rewards ~2 metus iki pirmojo halving. Tokenomika – per savaitę, whitepaper – per kelias savaites. Ankstesnis „20% per dešimt metų" skaitymas buvo iš antrinės santraukos ir yra pakeistas interviu.',
+    summary_en: 'Flop Network Teaser v0.1 (flop.finance/teaser/, 2026-08-26) supersedes every earlier interview reading. Genesis airdrop is 3.5bn $FLOP, 20.4% of the ~17.2bn year-10 supply: miners up to 1.2bn, AI agents up to 1.2bn, validators 305,505,000, reserve 794,495,000. An agent allocation is based largely on what it SPENDS on inference during the testnet, arrives locked, and unlocks at 3 $FLOP spent per 1 freed — so the inference route frees at most a quarter of it. Testnet Q4 2026 for ~90 days, mainnet Q1 2027; results settle into the genesis block. Note Flop Labs and the Foundation each take 8 $FLOP per block IN ADDITION to the 96 block reward, so real issuance is 112/block and their share sunsets after year TEN, not after the first halving as earlier coverage said. The document is stamped draft and its figures are provisional; the Yellow Paper is not final.',
+    summary_lt: 'Flop Network Teaser v0.1 (flop.finance/teaser/, 2026-08-26) pakeičia visus ankstesnius interviu skaitymus. Genesis airdrop – 3,5 mlrd. $FLOP, 20,4% nuo ~17,2 mlrd. 10 metų pasiūlos: mineriams iki 1,2 mlrd., AI agentams iki 1,2 mlrd., validatoriams 305 505 000, rezervui 794 495 000. Agento dalis priklauso daugiausia nuo to, kiek jis IŠLEIDŽIA inference per testnetą; ji ateina užrakinta ir atsirakina santykiu 3 išleisti : 1 atlaisvintas, tad šiuo keliu likvidus tampa daugiausia ketvirtadalis. Testnet Q4 2026, apie 90 dienų; mainnet Q1 2027. Svarbu: Flop Labs ir Fondas gauna po 8 $FLOP už bloką PAPILDOMAI prie 96, tad reali emisija – 112 už bloką, o jų dalis baigiasi po DEŠIMTIES metų, ne po pirmojo halving, kaip rašė ankstesni šaltiniai. Dokumentas pažymėtas kaip juodraštis, skaičiai preliminarūs.',
     source: 'Hayes direct interview, Bloomingbit 2026-08-26 — reported by a first-hand source, still not confirmed on flop.finance'
   },
   {
@@ -230,12 +232,38 @@ export function stripUrls(text) {
   return String(text ?? '').replace(/https?:\/\/\S+/gi, ' ');
 }
 
-export function shouldRespond(text, { selfDid = null, minLength = 20, maxLength = 1200 } = {}) {
+export function shouldRespond(text, { selfDid = null, minLength = 20, maxLength = 1200, seenSkeletons = null } = {}) {
   const value = typeof text === 'string' ? text.trim() : '';
 
   if (value.length < minLength) return { respond: false, reason: 'too_short', topics: [] };
   if (value.length > maxLength) return { respond: false, reason: 'too_long', topics: [] };
   if (isBoilerplate(value)) return { respond: false, reason: 'boilerplate', topics: [] };
+
+  /**
+   * Answer a template once, not once per instance.
+   *
+   * The boilerplate list catches phrases we thought of in advance. It does not
+   * catch a campaign nobody has seen before, and the measured cost of that gap
+   * was large: replaying this gate over 23,667 archived messages, 321 passed —
+   * and only 181 of them were distinct templates. Nearly 44% of everything the
+   * agent wanted to say was the same reply to the same generated sentence, one
+   * of which appeared 78 times.
+   *
+   * "Did someone mention an upcoming airdrop snapshot?" has a question mark and
+   * the word airdrop, so every earlier check waves it through. The skeleton is
+   * what tells them apart, and the learning engine already computes it — it was
+   * being used to rank rooms and never to decide whether to speak.
+   *
+   * Only messages actually replied to belong in `seenSkeletons`, never ones the
+   * hourly budget merely deferred; otherwise a template gets permanently
+   * blocked by a reply that never happened.
+   */
+  if (seenSkeletons) {
+    const skeleton = messageSkeleton(value);
+    if (skeleton && seenSkeletons.has(skeleton)) {
+      return { respond: false, reason: 'repeated_template', topics: [] };
+    }
+  }
 
   const addressedToUs = Boolean(selfDid) && value.includes(selfDid);
   const withoutUrls = stripUrls(value);

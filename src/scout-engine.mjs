@@ -1,4 +1,5 @@
 import { formatKnowledgeResponse, shouldRespond } from './knowledge.mjs';
+import { messageSkeleton } from './learning-engine.mjs';
 import { Guardrails } from './guardrails.mjs';
 import { getDidShardedPath, getStateKey } from './identity.mjs';
 
@@ -60,6 +61,21 @@ export class ScoutEngine {
     this.fieldGuideUrl = fieldGuideUrl;
     this.feedRoom = feedRoom;
     this.watchRooms = [...watchRooms];
+
+    /**
+     * Templates already answered, so a campaign is answered once.
+     *
+     * Replaying the reply gate over 23,667 archived messages passed 321 — of
+     * which only 181 were distinct templates. One generated sentence appeared 78
+     * times. Without this, nearly 44% of everything the agent wanted to say was
+     * the same reply to the same sentence, and only the hourly budget hid it.
+     *
+     * Bounded, because this process is meant to run for months. Entries are
+     * added when a reply is actually sent, never when one is merely considered —
+     * a message the budget deferred must stay answerable later.
+     */
+    this.answeredSkeletons = new Set();
+    this.maxAnsweredSkeletons = 2000;
     // Must satisfy /^[a-z0-9][a-z0-9_-]{0,47}$/ — a raw did:key never does.
     this.stateKey = stateKey || getStateKey(identity.did, 'scout');
     this.localState = {
@@ -177,7 +193,7 @@ export class ScoutEngine {
         const author = msg.from || 'unknown';
         if (this.answeredRecently(author)) continue;
 
-        const verdict = shouldRespond(text, { selfDid: this.identity.did });
+        const verdict = shouldRespond(text, { selfDid: this.identity.did, seenSkeletons: this.answeredSkeletons });
         if (verdict.respond) {
           candidate = { room: target, author, text, topics: verdict.topics, reason: verdict.reason };
           break;
@@ -250,6 +266,20 @@ export class ScoutEngine {
         try {
           await this.client.postMessage(targetRoom, outgoingMessage, this.identity);
           this.guardrails.recordSent(outgoingMessage);
+
+          // Recorded only on a reply that actually went out. Marking it earlier
+          // would let a message the hourly budget merely deferred block its whole
+          // template for good.
+          if (candidate?.text) {
+            const skeleton = messageSkeleton(candidate.text);
+            if (skeleton) {
+              this.answeredSkeletons.add(skeleton);
+              if (this.answeredSkeletons.size > this.maxAnsweredSkeletons) {
+                // Drop the oldest; at worst a long-dormant template is answered twice.
+                this.answeredSkeletons.delete(this.answeredSkeletons.values().next().value);
+              }
+            }
+          }
         } catch (err) {
           actionTaken = `send_failed: ${err.message}`;
           console.warn('[Scout] Failed to post message:', err.message);

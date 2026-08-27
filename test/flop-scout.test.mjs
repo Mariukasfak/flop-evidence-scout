@@ -648,3 +648,60 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
     assert.equal(result.syncedWithScoutCount, 1);
   });
 });
+
+describe('the reply gate is template-aware', () => {
+  test('a campaign is answered once, not once per instance', async () => {
+    const { shouldRespond } = await import('../src/knowledge.mjs');
+
+    // The exact sentence measured 78 times in /r/lobby. It has a question mark
+    // and the word airdrop, so every other check waves it through.
+    const spam = 'Did someone mention an upcoming airdrop snapshot? Just making sure I am logged.';
+    const seen = new Set();
+
+    const first = shouldRespond(spam, { seenSkeletons: seen });
+    assert.equal(first.respond, true, 'the first instance is legitimately answerable');
+
+    const { messageSkeleton } = await import('../src/learning-engine.mjs');
+    seen.add(messageSkeleton(spam));
+
+    const second = shouldRespond(spam, { seenSkeletons: seen });
+    assert.equal(second.respond, false);
+    assert.equal(second.reason, 'repeated_template');
+
+    // A near-identical instance differing only in identifiers is still blocked.
+    const variant = 'Did someone mention an upcoming airdrop snapshot? Just making sure I am logged. did:key:z6MkZZZZ';
+    assert.equal(shouldRespond(variant, { seenSkeletons: seen }).respond, false);
+  });
+
+  test('a genuine question is not blocked by an unrelated template', async () => {
+    const { shouldRespond } = await import('../src/knowledge.mjs');
+    const { messageSkeleton } = await import('../src/learning-engine.mjs');
+
+    const seen = new Set([messageSkeleton('Did someone mention an upcoming airdrop snapshot? Just making sure I am logged.')]);
+    // Must match a fact the agent actually holds — a question about something
+    // it knows nothing about is correctly refused as no_matching_facts, which is
+    // a different rejection and not what this test is about.
+    const real = 'How does a did:key identity work for /kv/ state on Technocore?';
+    assert.equal(shouldRespond(real, { seenSkeletons: seen }).respond, true);
+  });
+
+  test('without a skeleton set the gate behaves exactly as before', async () => {
+    const { shouldRespond } = await import('../src/knowledge.mjs');
+    const spam = 'Did someone mention an upcoming airdrop snapshot? Just making sure I am logged.';
+    assert.equal(shouldRespond(spam).respond, true);
+    assert.equal(shouldRespond(spam).respond, true);
+  });
+
+  test('the reply knowledge carries the Teaser, not the superseded interview', async () => {
+    const { VERIFIED_FACTS } = await import('../src/knowledge.mjs');
+    const all = JSON.stringify(VERIFIED_FACTS);
+
+    // These were told to strangers for a day after the Teaser superseded them.
+    assert.ok(!all.includes('OCTOBER 2026'), 'the October airdrop reading is refuted');
+    assert.ok(!/~2 years until the first halving/.test(all), 'the team-share reading is refuted');
+
+    // And the figures that replaced them are present.
+    assert.ok(all.includes('3.5bn') || all.includes('3,5 mlrd'));
+    assert.ok(all.includes('112'), 'real issuance per block');
+  });
+});
