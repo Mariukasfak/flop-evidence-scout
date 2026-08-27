@@ -35,6 +35,11 @@ jobs:
           SCOUT_IDENTITY_JSON: ${{ secrets.SCOUT_IDENTITY_JSON }}
           SCRIBE_IDENTITY_JSON: ${{ secrets.SCRIBE_IDENTITY_JSON }}
           TECHNOCORE_URL: https://technocore.chat
+          # Names this runner in the cross-machine lease, so a process on the
+          # operator's PC and a cloud run can never both write as the same
+          # identity. The daemon also infers "github" from CI=true; this is
+          # explicit rather than inferred.
+          LEASE_HOLDER: github
         run: |
           node src/daemon.mjs --dry-run --url=https://technocore.chat
           node tools/build-index.mjs

@@ -8,6 +8,7 @@ import { Guardrails } from './guardrails.mjs';
 import { ScoutEngine } from './scout-engine.mjs';
 import { ScribeEngine } from './scribe-engine.mjs';
 import { MailboxService } from './mailbox-service.mjs';
+import { Lease, makeHolderId, DEFAULT_TTL_MS } from './lease.mjs';
 import { TelemetryFeed } from './telemetry-feed.mjs';
 import { updateDashboardFile } from './dashboard.mjs';
 import { analyzeChatArchives, getLatestLearningReport } from './learning-engine.mjs';
@@ -55,6 +56,8 @@ function parseArgs(argv) {
     const arg = argv[i];
     if (arg === '--dry-run') options.dryRun = true;
     else if (arg.startsWith('--interval-ms=')) options.intervalMs = Number(arg.slice(14)) || options.intervalMs;
+    else if (arg === '--no-lease') options.lease = false;
+    else if (arg.startsWith('--lease-name=')) options.leaseName = arg.slice(13);
     else if (arg.startsWith('--identity=')) options.identityPath = path.resolve(arg.slice(11));
     else if (arg.startsWith('--url=')) options.serverUrl = arg.slice(6);
     else if (arg.startsWith('--room=')) options.room = arg.slice(7);
@@ -200,8 +203,46 @@ export async function runScoutDaemon(options = {}) {
   appendAudit(config.auditLogPath, { event: 'startup', did: scoutIdentity.did, scribeDid: scribeIdentity.did, server: config.serverUrl });
   await writeHeartbeat('started');
 
+  /**
+   * Only one machine may speak as these identities at a time.
+   *
+   * Running here and in GitHub Actions together is worth doing — they fail for
+   * unrelated reasons, so their combined uptime beats either — but two writers
+   * sharing one did:key would read the same publication history, both decide the
+   * gap had elapsed, and both post. That turns the project whose whole argument
+   * is "we are not the agents spamming the lobby" into two of them.
+   *
+   * The workflow's `concurrency:` group cannot help: it serialises GitHub runs
+   * against each other and cannot see a process on someone's desk. The lease is
+   * a compare-and-set on a Technocore note, so it works across machines that
+   * have no idea the other exists.
+   *
+   * Disable with --no-lease for a single-writer setup.
+   */
+  const useLease = config.lease !== false;
+  const lease = useLease
+    ? new Lease({
+      client,
+      name: config.leaseName || 'scout-cycle',
+      holder: makeHolderId(process.env.LEASE_HOLDER || (process.env.CI === 'true' ? 'github' : 'local')),
+      ttlMs: config.leaseTtlMs || DEFAULT_TTL_MS
+    })
+    : null;
+
   do {
     try {
+      if (lease) {
+        // Acquire covers all three cases: unheld, expired, and already ours.
+        const attempt = await lease.acquire();
+        if (!attempt.acquired) {
+          console.log(`[Lease] Standing down — ${attempt.reason}.`);
+          appendAudit(config.auditLogPath, { event: 'lease_declined', reason: attempt.reason, heldBy: attempt.heldBy ?? null });
+          if (config.dryRun || !running) break;
+          await new Promise((resolve) => setTimeout(resolve, config.intervalMs));
+          continue;
+        }
+      }
+
       // Step A: Scout Agent Turn (/r/lobby)
       const scoutResult = await scoutEngine.runTurn({ room: config.room });
       console.log(`[Scout #${scoutResult.turns}] Action: ${scoutResult.action} | Seq: ${scoutResult.lastSeenSeq}`);
@@ -294,6 +335,11 @@ export async function runScoutDaemon(options = {}) {
 
     await new Promise((resolve) => setTimeout(resolve, config.intervalMs));
   } while (running);
+
+  // Hand the lease back rather than making the other machine wait out the TTL.
+  if (lease) {
+    try { await lease.release(); } catch { /* the expiry is the real mechanism */ }
+  }
 
   // A scheduled tick is one process that starts and exits, so "shutdown" on every
   // cloud run read like a crash in the audit trail. Name the two cases apart.

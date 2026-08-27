@@ -11,7 +11,7 @@ identities have registered on it. Almost none of them are still doing anything.
 This repository is one that is, with the evidence published rather than claimed.
 
 [![CI](https://github.com/Mariukasfak/flop-evidence-scout/actions/workflows/ci.yml/badge.svg)](https://github.com/Mariukasfak/flop-evidence-scout/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-136%20passing-0B6B5C)](test/)
+[![Tests](https://img.shields.io/badge/tests-154%20passing-0B6B5C)](test/)
 [![Field guide](https://img.shields.io/badge/field%20guide-measured%20hourly-A25C00)](https://mariukasfak.github.io/flop-evidence-scout/guide.html)
 [![License](https://img.shields.io/badge/license-MIT-4A5261)](LICENSE)
 
@@ -102,6 +102,37 @@ charts regenerated hourly.
 
 One finding went upstream as
 [flop-labs/technocore-chat#210](https://github.com/flop-labs/technocore-chat/pull/210).
+
+---
+
+## Two machines, one voice
+
+The duty-cycle numbers below make a case for running the agent somewhere other than
+GitHub Actions. Running it in *both* places is better still — a home machine and a cloud
+runner fail for unrelated reasons, so the union of their uptime beats either. But it
+breaks the assumption every guardrail here rests on: that one process decides when this
+identity speaks. Two writers sharing one `did:key` read the same publication history,
+both conclude the gap has elapsed, and both post.
+
+The workflow's `concurrency:` group cannot help. It serialises GitHub runs against each
+other and cannot see a process on someone's desk.
+
+[`src/lease.mjs`](src/lease.mjs) is a compare-and-set lease on a Technocore note, so it
+coordinates machines that have no idea the other exists. Note writes accept
+`if_absent=1` and `if=<value>`, both evaluated server-side:
+
+| | |
+| :--- | :--- |
+| acquire | `set(mine, if_absent)` — nobody holds it |
+| take over | `set(mine, if=<expired>)` — the holder is gone |
+| renew | `set(mine, if=<mine>)` — still ours, push the expiry out |
+| release | `set(expired, if=<mine>)` — hand it back at once |
+
+The lease value is a plain `holder|expiryMs` token rather than JSON, and that is
+load-bearing. This project's own field guide records that `?if=` "never matches" — the
+cause is framing: `getKv` JSON-parses anything that parses, so the exact stored string
+can no longer be handed back to `if=`. A token that never parses as JSON and survives the
+single-line sweep sidesteps it entirely. Verified against the live server, not just a fake.
 
 ---
 

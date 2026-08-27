@@ -1,0 +1,221 @@
+/**
+ * One writer at a time, across machines that cannot see each other.
+ *
+ * Running the agent on a home PC *and* in GitHub Actions is strictly better than
+ * either alone — they fail for unrelated reasons, so the union of their uptime
+ * beats both. But it breaks the one assumption every guardrail here rests on:
+ * that a single process decides when this identity speaks.
+ *
+ * The workflow already has a `concurrency` group, and it is useless for this. It
+ * serialises GitHub runs against each other and cannot see a process on someone's
+ * desk. Two writers sharing one did:key would read the same publication history,
+ * both conclude the gap had elapsed, and both post — turning the project whose
+ * entire argument is "we are not the agents spamming the lobby" into two of them.
+ *
+ * Technocore gives us exactly the primitive needed. Note writes accept
+ * `if_absent=1` and `if=<value>`, both evaluated server-side, so a lease is a
+ * compare-and-set on a note:
+ *
+ *   acquire   set(mine, if_absent)          nobody holds it
+ *   take over set(mine, if=<expired value>) the holder is gone
+ *   renew     set(mine, if=<my value>)      still mine, push the expiry out
+ *   release   set(expired, if=<my value>)   hand it back immediately
+ *
+ * The value is a plain `holder|expiryMs` token rather than JSON, deliberately.
+ * getKv() JSON-parses anything that parses, and setKv() runs a single-line sweep
+ * on the way in — so a JSON lease would be re-serialised on read and the exact
+ * string needed for `if=` would no longer be recoverable. A token with no spaces
+ * and no quotes survives both untouched.
+ */
+
+const HOLDER_PATTERN = /^[a-z0-9][a-z0-9-]{0,38}$/;
+
+export const DEFAULT_LEASE_NS = 'lease';
+export const DEFAULT_TTL_MS = 10 * 60 * 1000;      // survives a missed renewal
+export const DEFAULT_RENEW_MS = 2 * 60 * 1000;     // five renewals per lease
+
+/** `holder|expiryMs` — no spaces, no quotes, no JSON. */
+export function encodeLease(holder, expiresAt) {
+  if (!HOLDER_PATTERN.test(holder)) {
+    throw new Error(`lease holder must match ${HOLDER_PATTERN}: ${holder}`);
+  }
+  return `${holder}|${Math.floor(expiresAt)}`;
+}
+
+export function decodeLease(raw) {
+  if (typeof raw !== 'string') return null;
+  const match = raw.trim().match(/^([a-z0-9][a-z0-9-]{0,38})\|(\d+)$/);
+  if (!match) return null;
+  return { holder: match[1], expiresAt: Number(match[2]) };
+}
+
+/**
+ * A stable-ish id for this process.
+ *
+ * Includes a random suffix on purpose: two runs on the same machine are two
+ * writers, and a holder id that collided between them would let a stale process
+ * renew a lease it had already lost.
+ */
+export function makeHolderId(label = 'local') {
+  const clean = String(label).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 20) || 'x';
+  const suffix = Math.random().toString(36).slice(2, 8);
+  return `${clean}-${suffix}`;
+}
+
+/**
+ * A lease over one named responsibility.
+ *
+ * Every method reports what actually happened rather than throwing on the normal
+ * case — losing a race is the expected outcome for whichever process is second,
+ * not an error.
+ */
+export class Lease {
+  constructor({ client, name, holder, ttlMs = DEFAULT_TTL_MS, ns = DEFAULT_LEASE_NS, now = () => Date.now() }) {
+    if (!client) throw new Error('a lease needs a Technocore client');
+    if (!name) throw new Error('a lease needs a name');
+    this.client = client;
+    this.name = name;
+    this.ns = ns;
+    this.holder = holder || makeHolderId();
+    this.ttlMs = ttlMs;
+    this.now = now;
+    /** The exact string we last wrote, which is what `if=` must be given. */
+    this.currentValue = null;
+    this.heldUntil = 0;
+  }
+
+  /** Raw current value, as stored — not parsed, because `if=` needs it verbatim. */
+  async read() {
+    const value = await this.client.getKv(this.ns, this.name);
+    // getKv JSON-parses when it can. A lease token never parses as JSON, so a
+    // non-string here means somebody wrote something else to this key.
+    return typeof value === 'string' ? value.trim() : null;
+  }
+
+  /**
+   * Try to become the single writer.
+   *
+   * Three ways in: nobody holds it, the holder's lease expired, or we already
+   * hold it. Every one of them is a server-side conditional write, so two
+   * processes racing cannot both succeed.
+   */
+  async acquire() {
+    const now = this.now();
+    const mine = encodeLease(this.holder, now + this.ttlMs);
+    const existing = await this.read();
+
+    if (existing === null) {
+      try {
+        await this.client.setKv(this.ns, this.name, mine, { ifAbsent: true });
+        this.currentValue = mine;
+        this.heldUntil = now + this.ttlMs;
+        return { acquired: true, reason: 'was unheld' };
+      } catch {
+        // Someone won the race between our read and our write. Correct outcome.
+        return { acquired: false, reason: 'lost the race to claim it' };
+      }
+    }
+
+    const current = decodeLease(existing);
+    if (!current) {
+      return { acquired: false, reason: 'the lease note holds something that is not a lease' };
+    }
+
+    const isMine = current.holder === this.holder;
+    const isExpired = current.expiresAt <= now;
+
+    if (!isMine && !isExpired) {
+      return {
+        acquired: false,
+        reason: `held by ${current.holder} for another ${Math.ceil((current.expiresAt - now) / 1000)}s`,
+        heldBy: current.holder,
+        expiresAt: current.expiresAt
+      };
+    }
+
+    try {
+      await this.client.setKv(this.ns, this.name, mine, { ifValue: existing });
+      this.currentValue = mine;
+      this.heldUntil = now + this.ttlMs;
+      return { acquired: true, reason: isMine ? 'renewed our own' : `took over from ${current.holder}, expired` };
+    } catch {
+      return { acquired: false, reason: 'lost the race; the value changed under us' };
+    }
+  }
+
+  /**
+   * Push the expiry out.
+   *
+   * Fails rather than re-acquiring if the value moved: a lease we lost and then
+   * silently took back is the bug this class exists to prevent.
+   */
+  async renew() {
+    if (!this.currentValue) return { renewed: false, reason: 'we do not hold it' };
+
+    const now = this.now();
+    const next = encodeLease(this.holder, now + this.ttlMs);
+    try {
+      await this.client.setKv(this.ns, this.name, next, { ifValue: this.currentValue });
+      this.currentValue = next;
+      this.heldUntil = now + this.ttlMs;
+      return { renewed: true };
+    } catch {
+      this.currentValue = null;
+      this.heldUntil = 0;
+      return { renewed: false, reason: 'the lease was taken while we held it' };
+    }
+  }
+
+  /**
+   * Hand it back at once instead of making the next process wait out the TTL.
+   *
+   * Best-effort by design: a process being killed cannot release anything, which
+   * is exactly why the expiry exists as the real mechanism.
+   */
+  async release() {
+    if (!this.currentValue) return { released: false, reason: 'we do not hold it' };
+    const expired = encodeLease(this.holder, this.now() - 1);
+    try {
+      await this.client.setKv(this.ns, this.name, expired, { ifValue: this.currentValue });
+      this.currentValue = null;
+      this.heldUntil = 0;
+      return { released: true };
+    } catch {
+      this.currentValue = null;
+      this.heldUntil = 0;
+      return { released: false, reason: 'it was already taken' };
+    }
+  }
+
+  /**
+   * Do we still hold it *right now*?
+   *
+   * Local check against the expiry we wrote. It answers "is it safe to act",
+   * and the honest answer near the boundary is no — hence the safety margin,
+   * which stops a long operation starting a second before the lease lapses.
+   */
+  isHeld(marginMs = 30_000) {
+    return this.currentValue !== null && this.now() + marginMs < this.heldUntil;
+  }
+}
+
+/**
+ * Run something only if we can hold the lease for it.
+ *
+ * The shape a scheduled run wants: try, do the work if we won, and always hand
+ * the lease back so the other machine is not locked out for a full TTL.
+ */
+export async function withLease({ client, name, holder, ttlMs = DEFAULT_TTL_MS, ns = DEFAULT_LEASE_NS, now }, work) {
+  const lease = new Lease({ client, name, holder, ttlMs, ns, now });
+  const attempt = await lease.acquire();
+  if (!attempt.acquired) {
+    return { ran: false, reason: attempt.reason, heldBy: attempt.heldBy ?? null };
+  }
+
+  try {
+    const result = await work(lease);
+    return { ran: true, result };
+  } finally {
+    await lease.release();
+  }
+}
