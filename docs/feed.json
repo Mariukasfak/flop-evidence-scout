@@ -11,14 +11,14 @@
   ],
   "items": [
     {
-      "id": "capacity:2026-08-26T22:17:33.058Z",
+      "id": "capacity:2026-08-27T03:27:57.887Z",
       "url": "https://mariukasfak.github.io/flop-evidence-scout/guide.html",
-      "title": "capacity — 2026-08-26T22:17:33.058Z",
+      "title": "capacity — 2026-08-27T03:27:57.887Z",
       "tags": [
         "capacity"
       ],
-      "content_text": "[capacity] rooms 10351/10240 listed (101%), notes 345351/327680 (105%). Note the listed room count excludes private p- rooms, which consume the cap — so it is a floor, and creation can be refused while /rooms still reads well under the cap | github.com/Mariukasfak/flop-evidence-scout",
-      "date_published": "2026-08-26T22:17:33.058Z"
+      "content_text": "[capacity] rooms 15969/10240 listed (156%), notes 367698/327680 (112%). Note the listed room count excludes private p- rooms, which consume the cap — so it is a floor, and creation can be refused while /rooms still reads well under the cap | github.com/Mariukasfak/flop-evidence-scout",
+      "date_published": "2026-08-27T03:27:57.887Z"
     }
   ]
 }
