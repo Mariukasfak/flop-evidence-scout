@@ -396,6 +396,11 @@ export async function runScoutDaemon(options = {}) {
     : null;
 
   do {
+    /**
+     * The top of the cycle, held outside the try so the sleep below can subtract
+     * the work from the interval rather than adding to it.
+     */
+    const cycleTop = Date.now();
     try {
       if (lease) {
         // Acquire covers all three cases: unheld, expired, and already ours.
@@ -633,7 +638,23 @@ export async function runScoutDaemon(options = {}) {
 
     if (config.dryRun || !running) break;
 
-    await new Promise((resolve) => setTimeout(resolve, config.intervalMs));
+    /**
+     * Sleep the REMAINDER of the interval, not the whole of it.
+     *
+     * This slept a full intervalMs after the cycle finished, which made the real
+     * period cycle + interval rather than interval. It cost almost nothing while
+     * a cycle took 7 s against a simulated backend. With a real model a cycle
+     * takes ~52 s, so the period had silently become 112 s — the agent was idle
+     * for 60 s out of every 112 while every duty-cycle metric reported it as
+     * keeping up perfectly.
+     *
+     * A floor rather than zero: a cycle that overruns the interval must not spin
+     * straight into the next one, both to stay polite to a shared server and to
+     * leave the log readable when something is wrong.
+     */
+    const MIN_GAP_MS = 5_000;
+    const elapsed = Date.now() - cycleTop;
+    await new Promise((resolve) => setTimeout(resolve, Math.max(MIN_GAP_MS, config.intervalMs - elapsed)));
   } while (running);
 
   // Hand the lease back rather than making the other machine wait out the TTL.
