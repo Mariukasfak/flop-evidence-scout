@@ -1,5 +1,5 @@
 {
-  "checkedAt": "2026-08-28T11:39:19.561Z",
+  "checkedAt": "2026-08-28T11:50:25.409Z",
   "summary": {
     "ready": 10,
     "action": 1,
@@ -24,14 +24,14 @@
       "id": "state-size",
       "label": "State note fits the server limit",
       "state": "READY",
-      "detail": "712 of 8192 characters",
+      "detail": "946 of 8192 characters",
       "fix": "answeredAuthors is pruned by cooldown age on every save. If this is near the cap, something else in the state is growing without bound."
     },
     {
       "id": "state-persistence",
       "label": "State survives restarts",
       "state": "READY",
-      "detail": "609 turns recorded on the server",
+      "detail": "619 turns recorded on the server",
       "fix": "The daemon must complete at least two turns and write state to /kv/."
     },
     {
@@ -59,7 +59,7 @@
       "id": "ledger",
       "label": "Spend ledger is intact",
       "state": "READY",
-      "detail": "11097 receipts across 2 ledger(s), 0 counted, 11097 simulated, 0 rejected, 0 malformed",
+      "detail": "11277 receipts across 2 ledger(s), 0 counted, 11277 simulated, 0 rejected, 0 malformed",
       "fix": "Investigate rejected or malformed receipts before trusting the total."
     },
     {
@@ -94,7 +94,7 @@
       "id": "continuous-operation",
       "label": "Runs continuously, not in bursts",
       "state": "READY",
-      "detail": "100% duty over 21.1 h, 250 cycles, last 0 min ago",
+      "detail": "100% duty over 21.1 h, 250 cycles, last 1 min ago",
       "fix": "GitHub drops most scheduled runs. Keep the local agent running, or use an always-on host — a rented validator box would run this too, collapsing two decisions into one."
     }
   ],
