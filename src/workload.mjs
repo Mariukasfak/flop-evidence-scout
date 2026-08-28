@@ -211,9 +211,29 @@ export function buildTask(taskId, input, { model = 'qwen2.5:3b', feeFlop = 0 } =
  */
 export function planWorkload({ sourceChange = null, measurements = [], pendingQuestions = [], unclassified = [], seen = null } = {}) {
   const plan = [];
-  // `seen` holds keys of work already done. Omitting it keeps the old behaviour,
-  // which is right for a one-shot run and wrong for a loop.
-  const isNew = (taskId, input) => !seen || !seen.has(jobKey(taskId, input));
+  /**
+   * Two things can make a job redundant, and only one of them was checked.
+   *
+   * `seen` catches work done on a PREVIOUS cycle. Nothing caught the same job
+   * appearing twice in the SAME plan — and that is the common case, not the
+   * exotic one: /r/lobby is 69-78% templated, so a single read of twenty
+   * messages routinely collapses to one distinct piece of work.
+   *
+   * Measured on the real thing: twenty messages, one distinct job, nineteen
+   * duplicates. Free against a simulated backend that answered instantly, which
+   * is why it survived. Against a local model at ~3 s a session it is 57 s of
+   * GPU spent re-answering one question, inside a 24 s cycle deadline — so the
+   * duplicates were not merely wasteful, they were consuming the entire budget
+   * and starving every other kind of work.
+   */
+  const planned = new Set();
+  const isNew = (taskId, input) => {
+    const key = jobKey(taskId, input);
+    if (planned.has(key)) return false;
+    if (seen && seen.has(key)) return false;
+    planned.add(key);
+    return true;
+  };
 
   if (sourceChange?.changes?.length) {
     for (const change of sourceChange.changes.slice(0, 3)) {

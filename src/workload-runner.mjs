@@ -138,6 +138,12 @@ export async function runWorkload({
   };
 
   let deadlineHit = false;
+  /**
+   * The jobs that actually reached a backend, as opposed to the ones we intended
+   * to run. The difference is the whole point: a caller marks work done from
+   * this list, and anything the deadline cut off has to stay eligible.
+   */
+  outcome.ran = [];
 
   await pool(scheduled, outcome.concurrency, async (job) => {
     // The deadline is checked per job rather than enforced by aborting one:
@@ -160,6 +166,7 @@ export async function runWorkload({
     }
 
     const { receipt, completion } = await runSession(session, { backend, identity, now });
+    outcome.ran.push(job);
 
     // Ledger every receipt, including failures and simulated runs. The ledger
     // decides what counts; the runner's job is not to curate the record.
@@ -226,10 +233,18 @@ export async function runBurst({ state = {}, backend, identity, budget = Infinit
   }
   const outcome = await runWorkload({ plan, backend, identity, budget, costPerSession, deadlineMs, model, ledgerPath, now });
 
-  // Mark what was actually scheduled, not what was planned: a job trimmed by the
-  // budget has not been done and must stay eligible for the next burst.
+  /**
+   * Mark what actually RAN, not what was scheduled.
+   *
+   * Scheduling is trimmed by the budget; the deadline trims again, later, and
+   * silently. Marking the scheduled list meant every job the clock cut off was
+   * recorded as done and never came back — measured at 5 marked against 3
+   * completed on a five-job burst. Harmless while the simulated backend
+   * finished everything instantly, and permanent data loss the moment a real
+   * model made the deadline bite on every single cycle.
+   */
   if (seen) {
-    for (const job of prioritise(plan).slice(0, outcome.scheduled)) seen.add(jobKey(job.taskId, job.input));
+    for (const job of outcome.ran || []) seen.add(jobKey(job.taskId, job.input));
   }
   return outcome;
 }

@@ -324,10 +324,16 @@ test('classification keys on the template, so one spam campaign costs one sessio
 
 test('a seen-set stops the planner re-doing work across cycles', async () => {
   const { planWorkload } = await import('../src/workload.mjs');
-  const messages = Array.from({ length: 5 }, (_, i) => ({
-    room: 'lobby',
-    text: `a genuinely distinct message number ${i} about validators and staking`
-  }));
+  // Genuinely distinct WORDING, not one sentence with a different number in it:
+  // messageSkeleton normalises digits away, so numbered variants are a single
+  // template and the planner is right to collapse them into one job.
+  const messages = [
+    { room: 'lobby', text: 'what hardware does a validator actually need for the testnet' },
+    { room: 'lobby', text: 'is the staking reward paid per block or per epoch here' },
+    { room: 'lobby', text: 'anyone know whether the faucet requires a signed did key' },
+    { room: 'lobby', text: 'the halving schedule in the teaser looks inconsistent to me' },
+    { room: 'lobby', text: 'how many validator seats are there and can a seat be lost' }
+  ];
 
   const seen = new Set();
   const first = planWorkload({ unclassified: messages, seen });
@@ -350,7 +356,11 @@ test('a seen-set stops the planner re-doing work across cycles', async () => {
 
 test('without a seen-set the planner behaves as it always did', async () => {
   const { planWorkload } = await import('../src/workload.mjs');
-  const messages = Array.from({ length: 3 }, (_, i) => ({ room: 'lobby', text: `distinct message ${i} validators` }));
+  const messages = [
+    { room: 'lobby', text: 'where is the validator application form published' },
+    { room: 'lobby', text: 'does the miner spec require sixteen gigabytes of vram' },
+    { room: 'lobby', text: 'has anyone measured the lobby message rate lately' }
+  ];
   assert.equal(planWorkload({ unclassified: messages }).length, 3);
   assert.equal(planWorkload({ unclassified: messages }).length, 3);
 });
@@ -417,4 +427,62 @@ test('a measurement is explained once, not every cycle until it changes', () => 
   const grown = [...series, { at: '2026-08-27', sharded_did_estimate: 1006 }];
   const third = planWorkload({ measurements: grown, seen });
   assert.equal(third.filter((j) => j.taskId === 'explain-measurement').length, 1);
+});
+
+/**
+ * /r/lobby is 69-78% templated, so one read of twenty messages routinely
+ * collapses to a single distinct piece of work. The planner deduplicated against
+ * previous cycles but not against the plan it was building, which was free while
+ * the backend answered instantly and ruinous the moment a real model arrived:
+ * measured at nineteen duplicate jobs out of twenty, roughly 57 s of GPU inside
+ * a 24 s cycle deadline, starving every other kind of work.
+ */
+test('one template plans one job, however many copies of it arrived', async () => {
+  const { planWorkload, jobKey } = await import('../src/workload.mjs');
+  const templated = Array.from({ length: 20 }, (_, i) => ({
+    room: 'lobby', text: `Agent #${1000 + i} checking in for $FLOP`
+  }));
+
+  const plan = planWorkload({ unclassified: templated, seen: new Set() });
+  assert.equal(plan.length, 1, 'twenty copies of one template are one job');
+
+  // And a genuinely different message is still planned alongside it.
+  const mixed = [...templated, { room: 'lobby', text: 'where exactly will the testnet faucet be published' }];
+  const both = planWorkload({ unclassified: mixed, seen: new Set() });
+  assert.equal(both.length, 2);
+
+  const keys = both.map((j) => jobKey(j.taskId, j.input));
+  assert.equal(new Set(keys).size, both.length, 'no plan may contain the same job twice');
+});
+
+test('a job the deadline cut off is not recorded as done', async () => {
+  const identity = generateIdentity();
+  // One second a call, like a real model and unlike the simulator.
+  const slow = {
+    id: 'slow', simulated: false, maxConcurrency: 1,
+    available: async () => true,
+    async generate() {
+      await new Promise((r) => setTimeout(r, 1000));
+      return { text: 'QUESTION|HIGH', modelId: 'slow' };
+    }
+  };
+  const unclassified = [
+    { room: 'lobby', text: 'what hardware does a validator need to run reliably' },
+    { room: 'lobby', text: 'is the faucet going to require a signed did key' },
+    { room: 'lobby', text: 'how often are the worst validators replaced' },
+    { room: 'lobby', text: 'where can the halving schedule be checked against source' },
+    { room: 'lobby', text: 'does anyone publish measured lobby throughput numbers' }
+  ];
+
+  const seen = new Set();
+  const outcome = await runBurst({
+    state: { unclassified }, seen, backend: slow, identity,
+    deadlineMs: 2500, ledgerPath: tempLedger()
+  });
+
+  assert.equal(outcome.stoppedBecause, 'deadline');
+  assert.ok(outcome.completed < outcome.planned, 'the deadline really did cut the burst short');
+  // The invariant: work left undone must stay eligible for the next cycle.
+  assert.ok(seen.size <= outcome.completed,
+    `marked ${seen.size} jobs done but only completed ${outcome.completed}`);
 });
