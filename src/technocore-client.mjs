@@ -69,11 +69,31 @@ export class TechnocoreClient {
   constructor({
     baseUrl = 'https://technocore.chat',
     fetchFn = globalThis.fetch,
-    timeoutMs = 15_000
+    timeoutMs = 15_000,
+    readOnly = false
   } = {}) {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
     this.fetch = fetchFn;
     this.timeoutMs = timeoutMs;
+    /**
+     * Refuse every write, here, rather than in each caller.
+     *
+     * --dry-run used to mean only "stop after one cycle". It gated the lease and
+     * nothing else, so a dry run posted signed messages to the live lobby,
+     * claimed rooms and wrote notes exactly as a real run did — a flag whose name
+     * promises a rehearsal while delivering the opposite. `npm run dry-run` is a
+     * published entry point in this repository.
+     *
+     * Gating at the client is the reason it stays fixed: four engines write, and
+     * a fifth added later inherits the guarantee instead of having to remember
+     * it. Reads are untouched — observing costs nobody anything.
+     */
+    this.readOnly = readOnly;
+  }
+
+  /** The one place a write is refused, so no caller can forget to ask. */
+  assertWritable(what) {
+    if (this.readOnly) throw new Error(`dry run: refusing to ${what}`);
   }
 
   async readRoom(room = 'lobby', { since = null, wait = 0, limit = 50, format = 'text' } = {}) {
@@ -121,6 +141,7 @@ export class TechnocoreClient {
   }
 
   async postSignedMessage(room = 'lobby', text, identity) {
+    this.assertWritable(`post a signed message to /r/${room}`);
     if (!identity?.did || !identity?.privateKeyPem) {
       throw new Error('Identity required for signed message');
     }
@@ -161,6 +182,7 @@ export class TechnocoreClient {
   }
 
   async postMessage(room = 'lobby', content, identity) {
+    this.assertWritable(`post to /r/${room}`);
     return await this.postSignedMessage(room, content, identity);
   }
 
@@ -217,6 +239,7 @@ export class TechnocoreClient {
   }
 
   async setKv(ns, key, value, { ifValue = null, ifAbsent = false } = {}) {
+    this.assertWritable(`write the note /kv/${ns}/${key}`);
     assertValidName('namespace', ns);
     assertValidName('key', key);
 
@@ -284,6 +307,7 @@ export class TechnocoreClient {
    * Signature covers `room-owners|d-<room>|<nonce>|<the same did:key>`.
    */
   async claimRoomOwnership(roomName, identity, { nonce = Date.now() } = {}) {
+    this.assertWritable(`claim ownership of /r/${roomName}`);
     const room = roomName.startsWith('d-') ? roomName : `d-${roomName}`;
     assertValidName('room', room);
     if (!identity?.did || !identity?.privateKeyPem) {

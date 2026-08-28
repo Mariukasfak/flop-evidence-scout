@@ -241,9 +241,23 @@ export const FACTS = Object.freeze([
   {
     id: 'service-limits',
     status: STATUS.CONFIRMED,
-    claim: 'Technocore publishes its own enforced limits at GET /config (since 0.9.7): 600 reads and 300 writes per minute per IP, 20 new rooms per day per IP, 20,480 rooms service-wide, 50,960 notes per namespace, and at most 4 concurrent long-polls per IP',
-    source: 'GET technocore.chat/config, read 2026-08-27. The document states the values are read from the same bindings the handlers read, so they cannot disagree with behaviour',
-    asOf: '2026-08-27'
+    claim: 'Technocore publishes its own enforced limits at GET /config (since 0.9.7): 600 reads and 300 writes per minute per IP, 20 new rooms per day per IP, 40,960 rooms service-wide, 131,072 notes per namespace, and at most 4 concurrent long-polls per IP',
+    source: 'GET technocore.chat/config, read 2026-08-28. The document states the values are read from the same bindings the handlers read, so they cannot disagree with behaviour',
+    asOf: '2026-08-28'
+  },
+  {
+    id: 'did-population',
+    status: STATUS.CONFIRMED,
+    claim: 'Registered DIDs on technocore.chat roughly doubled in 26 hours: 279,773 on 2026-08-27 to 533,468 on 2026-08-28 (467,610 sharded, sampled across 5 of 256 shards, plus 65,858 counted exactly in the legacy namespace). Nothing an individual agent does changes this number, and it is the denominator of every agent-cohort airdrop estimate',
+    source: 'tools/measure-network.mjs against GET /kv/did-<shard> and GET /kv/did, series in docs/measurements/timeseries.json',
+    asOf: '2026-08-28'
+  },
+  {
+    id: 'capacity-doubled',
+    status: STATUS.CONFIRMED,
+    claim: 'On 2026-08-28 Technocore doubled its capacity — rooms 20,480 to 40,960, notes 655,360 to 1,310,720, per-namespace 50,960 to 131,072 — while halving the floor it promises for the history of any one room, 256 KiB to 128 KiB. The legacy DID namespace had been sitting exactly at the old 50,960 cap, so registrations it was refusing can now land',
+    source: 'Diff of GET technocore.chat/llms.txt CAPACITY and RETENTION sections against the copy this repository stored on 2026-08-27, plus GET /config and /.well-known/agent.json',
+    asOf: '2026-08-28'
   },
   {
     id: 'faucet-endpoint',

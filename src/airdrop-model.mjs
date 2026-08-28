@@ -64,9 +64,30 @@ export const PARTICIPANT_SCENARIOS = Object.freeze([
   { n: 1_000, label: 'Agents doing real work', basis: 'Our template analysis suggests genuine actors are a tiny minority' },
   { n: 5_000, label: 'Small serious cohort', basis: 'Roughly 3% of DIDs measured on 2026-08-26' },
   { n: 25_000, label: 'Moderate turnout', basis: 'About one registered DID in six participates' },
-  { n: 130_000, label: 'Everyone registered today', basis: '115,558 sharded + 40,960 legacy, measured 2026-08-26' },
-  { n: 500_000, label: 'Registration keeps growing', basis: 'Measured growth was ~4,700 DIDs/hour; testnet is months away' }
+  { n: 533_000, label: 'Everyone registered today', basis: '467,610 sharded + 65,858 legacy, measured 2026-08-28' },
+  { n: 2_000_000, label: 'Registration keeps growing', basis: 'The population went 279,773 -> 533,468 in 26 hours; testnet is still months away' }
 ]);
+
+/**
+ * A note on why these two rows keep moving.
+ *
+ * Every previous version of this table was overtaken within days. "Everyone
+ * registered today" was 130,000 on 2026-08-26 and is 533,000 two days later;
+ * the row named "registration keeps growing" was 500,000, and the measured
+ * population passed it before that row was ever revised.
+ *
+ * That is the finding, not a maintenance chore. The denominator of the agent
+ * share is the one term in this model that nothing we do can influence, and it
+ * is compounding faster than any scenario written down for it. On 2026-08-28 the
+ * service also doubled its own capacity and the legacy DID namespace, which had
+ * been refusing writes at its cap, absorbed 14,898 registrations within hours —
+ * so part of the jump is demand that was already queued behind a limit.
+ *
+ * Read the grid accordingly: our realistic row is the bottom two, and the honest
+ * lever is not a better multiple but choosing a cohort whose denominator is
+ * bounded. The validator set is capped at 1,000 seats. This one is not capped
+ * at all.
+ */
 
 /**
  * One cell of the grid.

@@ -82,14 +82,14 @@ const header = `  ${'Participants'.padEnd(36)}` + MULTIPLES.map((m) => `${m}x`.p
 console.log(header);
 console.log(`  ${'(gross $FLOP before the 3:1 lock)'.padEnd(36)}${'-'.repeat(MULTIPLES.length * 10)}`);
 for (const row of agentGrid({ multiples: MULTIPLES })) {
-  const label = `${fmt(row.n).padStart(7)}  ${row.label}`;
+  const label = `${fmt(row.n).padStart(9)}  ${row.label}`;
   console.log(`  ${label.padEnd(36)}` + row.cells.map((c) => M(c.gross).padStart(10)).join(''));
 }
 
 console.log('\n  Same grid, after the 3:1 unlock - what could ever become liquid:');
 console.log(header);
 for (const row of agentGrid({ multiples: MULTIPLES })) {
-  const label = `${fmt(row.n).padStart(7)}  ${row.label}`;
+  const label = `${fmt(row.n).padStart(9)}  ${row.label}`;
   console.log(`  ${label.padEnd(36)}` + row.cells.map((c) => M(c.maxLiquid).padStart(10)).join(''));
 }
 

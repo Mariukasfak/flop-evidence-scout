@@ -210,8 +210,14 @@ export function planWorkload({ sourceChange = null, measurements = [], pendingQu
     if (isNew('draft-answer', input)) plan.push({ taskId: 'draft-answer', input });
   }
 
+  // Guarded like every other task. Without the check this one job re-ran every
+  // cycle forever: the series only moves when a measurement lands, so explaining
+  // it a second time before then buys nothing. The key covers the whole series,
+  // so a new observation makes it eligible again — which is exactly when the
+  // explanation is worth having.
   if (measurements.length >= 4) {
-    plan.push({ taskId: 'explain-measurement', input: { series: measurements, metric: 'sharded_did_estimate' } });
+    const input = { series: measurements, metric: 'sharded_did_estimate' };
+    if (isNew('explain-measurement', input)) plan.push({ taskId: 'explain-measurement', input });
   }
 
   // Filtered BEFORE the cap: twenty already-classified messages would otherwise

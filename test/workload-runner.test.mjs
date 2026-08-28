@@ -11,6 +11,8 @@ import {
   affordableSessions, prioritise, runWorkload, runBurst,
   DEFAULT_CONCURRENCY, TASK_PRIORITY, KNOWN_TASKS
 } from '../src/workload-runner.mjs';
+import { planWorkload, jobKey } from '../src/workload.mjs';
+import { loadSeen, saveSeen } from '../src/seen-work.mjs';
 
 const identity = generateIdentity();
 
@@ -351,4 +353,68 @@ test('without a seen-set the planner behaves as it always did', async () => {
   const messages = Array.from({ length: 3 }, (_, i) => ({ room: 'lobby', text: `distinct message ${i} validators` }));
   assert.equal(planWorkload({ unclassified: messages }).length, 3);
   assert.equal(planWorkload({ unclassified: messages }).length, 3);
+});
+
+/**
+ * The seen-set used to live only in memory. Seven restarts appear in one day of
+ * audit log, and each one made the agent forget everything it had done and
+ * re-classify whatever the next room read returned. Free with a simulated
+ * backend; the airdrop budget, once a session costs $FLOP.
+ */
+test('what has been done survives a restart', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flop-seen-'));
+  const file = path.join(dir, 'seen-work.json');
+
+  const before = new Set(['job-a', 'job-b', 'job-c']);
+  assert.equal(saveSeen(before, file).saved, true);
+
+  // A new process, with nothing but the file.
+  const after = loadSeen(file);
+  assert.deepEqual([...after], ['job-a', 'job-b', 'job-c']);
+});
+
+test('a corrupt seen-file costs repeated work, never the daemon', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flop-seen-'));
+  const file = path.join(dir, 'seen-work.json');
+  fs.writeFileSync(file, '{ this is not json', 'utf8');
+
+  const seen = loadSeen(file);
+  assert.equal(seen.size, 0, 'an unreadable cache reads as empty rather than throwing');
+  assert.equal(loadSeen(path.join(dir, 'absent.json')).size, 0);
+});
+
+test('the persisted set is capped, keeping the newest keys', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flop-seen-'));
+  const file = path.join(dir, 'seen-work.json');
+
+  const seen = new Set(Array.from({ length: 50 }, (_, i) => `job-${i}`));
+  saveSeen(seen, file, { cap: 10 });
+
+  const loaded = [...loadSeen(file, { cap: 10 })];
+  assert.equal(loaded.length, 10);
+  assert.equal(loaded[0], 'job-40', 'the oldest keys were dropped, not the newest');
+  assert.equal(loaded.at(-1), 'job-49');
+});
+
+/**
+ * explain-measurement was the one task pushed without a seen-check. It never
+ * showed up because nothing passed it a series — the moment the daemon did, it
+ * would have re-run every cycle forever against a series that only moves once
+ * a day.
+ */
+test('a measurement is explained once, not every cycle until it changes', () => {
+  const series = Array.from({ length: 6 }, (_, i) => ({ at: `2026-08-2${i}`, sharded_did_estimate: 1000 + i }));
+  const seen = new Set();
+
+  const first = planWorkload({ measurements: series, seen });
+  assert.equal(first.filter((j) => j.taskId === 'explain-measurement').length, 1);
+  for (const job of first) seen.add(jobKey(job.taskId, job.input));
+
+  const second = planWorkload({ measurements: series, seen });
+  assert.equal(second.filter((j) => j.taskId === 'explain-measurement').length, 0, 'the same series is not re-explained');
+
+  // A new observation is new work, which is exactly when it is worth having.
+  const grown = [...series, { at: '2026-08-27', sharded_did_estimate: 1006 }];
+  const third = planWorkload({ measurements: grown, seen });
+  assert.equal(third.filter((j) => j.taskId === 'explain-measurement').length, 1);
 });

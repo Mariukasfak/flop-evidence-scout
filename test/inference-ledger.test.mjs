@@ -10,7 +10,7 @@ import { simulatedBackend, flopSessionBackend } from '../src/inference-backends.
 import { buildTask } from '../src/workload.mjs';
 import {
   DEFAULT_LEDGER_PATH, readLedger, appendReceipt, ledgerTotals,
-  observedThroughput, ledgerSummary
+  observedThroughput, ledgerSummary, compactLedger, compactIfLarge, compactionRecordPath
 } from '../src/inference-ledger.mjs';
 
 const identity = generateIdentity();
@@ -192,4 +192,91 @@ test('writing a ledger never touches the production path', () => {
     ? fs.statSync(DEFAULT_LEDGER_PATH).mtimeMs
     : null;
   assert.equal(after, before, 'a test wrote to the production ledger');
+});
+
+/**
+ * The duplicate check used to re-read and re-parse the whole file per append,
+ * which is O(n²) over a run and was measured costing 1.2 s of every cycle at
+ * 10,845 receipts. These prove the index that replaced it is still correct:
+ * a fast wrong answer here would silently double-count the airdrop total.
+ */
+test('a receipt already on disk is refused even when this process never wrote it', () => {
+  const ledger = tempLedger();
+  const receipt = genuineReceipt();
+  appendReceipt(receipt, ledger);
+
+  // Another machine appends behind our back — the cloud run and the home PC
+  // both write receipts, so the index must never be trusted over the file.
+  fs.appendFileSync(ledger, '\n' + JSON.stringify({ ...genuineReceipt(), requestId: 'from-elsewhere' }), 'utf8');
+
+  const again = appendReceipt({ ...genuineReceipt(), requestId: 'from-elsewhere' }, ledger);
+  assert.equal(again.appended, false);
+  assert.equal(again.reason, 'duplicate requestId');
+  assert.equal(readLedger(ledger).receipts.length, 2, 'nothing was added or lost');
+});
+
+test('an index built before a compaction does not resurrect dropped ids', () => {
+  const ledger = tempLedger();
+  for (let i = 0; i < 12; i++) {
+    appendReceipt({ ...genuineReceipt(), requestId: `sim-${i}`, simulated: true }, ledger);
+  }
+  compactLedger(ledger, { keepSimulated: 2 });
+
+  // The file shrank. A stale index would refuse this as a duplicate and the
+  // receipt would be lost with no error anywhere.
+  const re = appendReceipt({ ...genuineReceipt(), requestId: 'sim-0', simulated: true }, ledger);
+  assert.equal(re.appended, true, 'a shrunken file must rebuild the index, not trust it');
+  assert.equal(readLedger(ledger).receipts.length, 3);
+});
+
+test('compaction never drops a receipt that counts', () => {
+  const ledger = tempLedger();
+  // Evidence, buried at the very start where a naive "keep the tail" would lose it.
+  appendReceipt({ ...genuineReceipt({ feeFlop: 7 }), requestId: 'evidence-1' }, ledger);
+  for (let i = 0; i < 40; i++) {
+    appendReceipt({ ...genuineReceipt(), requestId: `sim-${i}`, simulated: true }, ledger);
+  }
+  appendReceipt({ ...genuineReceipt({ feeFlop: 3 }), requestId: 'evidence-2' }, ledger);
+
+  const result = compactLedger(ledger, { keepSimulated: 5 });
+  assert.equal(result.compacted, true);
+  assert.equal(result.dropped, 35);
+
+  const ids = readLedger(ledger).receipts.map((r) => r.requestId);
+  assert.ok(ids.includes('evidence-1'), 'the oldest genuine receipt survived');
+  assert.ok(ids.includes('evidence-2'));
+  assert.equal(ids.filter((id) => id.startsWith('sim-')).length, 5);
+});
+
+test('what compaction discarded is written down rather than silently gone', () => {
+  const ledger = tempLedger();
+  for (let i = 0; i < 30; i++) {
+    appendReceipt({ ...genuineReceipt(), requestId: `sim-${i}`, simulated: true }, ledger);
+  }
+  compactLedger(ledger, { keepSimulated: 4 });
+  for (let i = 30; i < 60; i++) {
+    appendReceipt({ ...genuineReceipt(), requestId: `sim-${i}`, simulated: true }, ledger);
+  }
+  compactLedger(ledger, { keepSimulated: 4 });
+
+  const totals = ledgerTotals(ledger);
+  assert.equal(totals.simulatedDropped, 56, 'the count accumulates across compactions');
+  // On disk plus discarded equals everything that ever happened.
+  assert.equal(totals.receiptsOnDisk + totals.simulatedDropped, 60);
+  assert.ok(fs.existsSync(compactionRecordPath(ledger)));
+});
+
+test('compaction leaves a ledger alone until it is actually large', () => {
+  const ledger = tempLedger();
+  for (let i = 0; i < 10; i++) {
+    appendReceipt({ ...genuineReceipt(), requestId: `sim-${i}`, simulated: true }, ledger);
+  }
+  const skipped = compactIfLarge(ledger, { maxBytes: 10 * 1024 * 1024 });
+  assert.equal(skipped.compacted, false);
+  assert.equal(skipped.reason, 'below threshold');
+  assert.equal(readLedger(ledger).receipts.length, 10);
+
+  const done = compactIfLarge(ledger, { maxBytes: 1, keepSimulated: 3 });
+  assert.equal(done.compacted, true);
+  assert.equal(readLedger(ledger).receipts.length, 3);
 });

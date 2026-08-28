@@ -60,8 +60,10 @@ async function measureRate(room, seconds = 20) {
  * instrument kept reporting the old one, so `legacyAtCap` would have gone false
  * and the note would have printed a number that was simply wrong.
  *
- * A limit the service publishes is a limit we read. The fallback is the last
- * value actually observed, not a guess, and it is labelled when it is used.
+ * It moved again on 2026-08-28, to 131072. That is the argument settled: the cap
+ * has now changed twice in the life of this file, and each time the reading was
+ * right only because it comes from the service. The fallback is the last value
+ * actually observed, not a guess, and it is labelled when it is used.
  */
 async function readNamespaceCap() {
   try {
@@ -69,7 +71,7 @@ async function readNamespaceCap() {
     const cap = config?.settings?.max_notes_per_ns;
     if (Number.isFinite(cap) && cap > 0) return { cap, source: 'GET /config' };
   } catch { /* fall through */ }
-  return { cap: 50960, source: 'fallback — /config unreadable; last observed value' };
+  return { cap: 131072, source: 'fallback — /config unreadable; last observed value' };
 }
 
 async function estimateDidPopulation(shards = ['00', '3f', '85', 'c1', 'e0']) {
@@ -201,6 +203,32 @@ function appendToSeries(data) {
     console.log('[measure] A reading for this minute is already in the series.');
     return;
   }
+
+  /**
+   * Refresh the caps as well as the readings.
+   *
+   * This appended observations against a `caps` block written once and never
+   * touched again, and the service raised its capacity twice underneath it. The
+   * result was published: the telemetry feed posted "rooms 18845/10240 listed
+   * (184%)" and "notes 625674/327680 (191%)" to /r/d-scout-telemetry, signed,
+   * where anyone could read an agent confidently reporting 191% of a cap.
+   *
+   * A measurement carries the limits it was measured against, or the ratio it
+   * feeds is arithmetic on two different days.
+   */
+  const limits = data.server?.limits || {};
+  const freshCaps = {
+    notes: limits.notes ?? series.caps?.notes,
+    notes_per_namespace: data.didPopulation?.namespaceCap ?? series.caps?.notes_per_namespace,
+    rooms: limits.rooms ?? series.caps?.rooms,
+    room_bytes_total: limits.room_bytes_total ?? series.caps?.room_bytes_total
+  };
+  const capsMoved = JSON.stringify(freshCaps) !== JSON.stringify(series.caps);
+  if (capsMoved) {
+    console.log(`[measure] Caps changed: ${JSON.stringify(series.caps)} -> ${JSON.stringify(freshCaps)}`);
+    series.caps = freshCaps;
+  }
+  row.caps = freshCaps;
 
   series.observations.push(row);
   series.observations.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));

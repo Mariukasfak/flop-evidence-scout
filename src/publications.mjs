@@ -128,15 +128,29 @@ export function buildCapacityPost(observations, caps) {
   if (!Array.isArray(observations) || observations.length < 2) return null;
   const last = observations[observations.length - 1];
 
-  const roomPct = (last.rooms_used / caps.rooms) * 100;
-  const notePct = (last.notes_used / caps.notes) * 100;
+  // An observation that carries its own caps is measured against those, not
+  // against whatever the series header last happened to say.
+  const against = last.caps || caps;
+  const roomPct = (last.rooms_used / against.rooms) * 100;
+  const notePct = (last.notes_used / against.notes) * 100;
+
+  /**
+   * A reading over its own cap is a broken instrument, not a finding.
+   *
+   * The series held a caps block written once while the service raised its
+   * capacity twice underneath it, so this published "184%" and "191%" of a cap —
+   * signed, to a public room, by a project whose entire claim is that it checks
+   * things. Impossible arithmetic is never news: staying quiet costs one post,
+   * and posting it costs the credibility that is the whole product.
+   */
+  if (roomPct > 100 || notePct > 100) return null;
   if (roomPct < 70 && notePct < 70) return null;
 
   return {
     type: 'capacity',
     key: `capacity:${Math.round(roomPct)}:${Math.round(notePct)}`,
     line: line('capacity',
-      `rooms ${last.rooms_used}/${caps.rooms} listed (${roomPct.toFixed(0)}%), notes ${last.notes_used}/${caps.notes} (${notePct.toFixed(0)}%). `
+      `rooms ${last.rooms_used}/${against.rooms} listed (${roomPct.toFixed(0)}%), notes ${last.notes_used}/${against.notes} (${notePct.toFixed(0)}%). `
       + 'Note the listed room count excludes private p- rooms, which consume the cap — so it is a floor, '
       + 'and creation can be refused while /rooms still reads well under the cap')
   };

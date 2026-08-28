@@ -11,8 +11,11 @@ import { MailboxService } from './mailbox-service.mjs';
 import { Lease, makeHolderId, DEFAULT_TTL_MS } from './lease.mjs';
 import { recordCycle } from './shared-state.mjs';
 import { runBurst } from './workload-runner.mjs';
+import { loadSeen, saveSeen, trimSeen } from './seen-work.mjs';
+import { compactIfLarge } from './inference-ledger.mjs';
 import { selectBackend } from './inference-backends.mjs';
 import { TelemetryFeed } from './telemetry-feed.mjs';
+import { FACTS } from './flop-facts.mjs';
 import { updateDashboardFile } from './dashboard.mjs';
 import { analyzeChatArchives, getLatestLearningReport } from './learning-engine.mjs';
 
@@ -81,6 +84,22 @@ function readSourceChange(dataDir) {
   }
 }
 
+/**
+ * The DID population series, for the task that explains what it is doing.
+ *
+ * Committed to the repository rather than written per-run, so it is the same
+ * series on both machines and a cloud run explains the same numbers a local one
+ * would. Missing or unreadable simply means there is nothing to explain yet.
+ */
+function readMeasurements() {
+  try {
+    const series = JSON.parse(fs.readFileSync(path.resolve('docs/measurements/timeseries.json'), 'utf8'));
+    return Array.isArray(series.observations) ? series.observations : [];
+  } catch {
+    return [];
+  }
+}
+
 function appendAudit(logPath, record) {
   try {
     fs.mkdirSync(path.dirname(logPath), { recursive: true });
@@ -133,7 +152,19 @@ export async function runScoutDaemon(options = {}) {
   const scribeIdentity = loadOrCreateIdentity(config.scribeIdentityPath, 'SCRIBE_IDENTITY_JSON');
   console.log(`[Agent #2 - Scribe] DID: ${scribeIdentity.did}`);
 
-  const client = new TechnocoreClient({ baseUrl: config.serverUrl });
+  /**
+   * --dry-run carries two meanings that were quietly one: stop after a cycle,
+   * and write nothing. It only ever did the first, so a dry run posted signed
+   * messages to the live lobby exactly as a real run did.
+   *
+   * They are separate options now, and readOnly follows dryRun unless a caller
+   * says otherwise — the CLI flag does the safe thing, while a test driving a
+   * single cycle against its own mock server can still exercise the write path
+   * by asking for it explicitly.
+   */
+  const readOnly = config.readOnly ?? config.dryRun;
+  const client = new TechnocoreClient({ baseUrl: config.serverUrl, readOnly });
+  if (readOnly) console.log('[Dry Run] Reads only — every write will be refused.');
   const scoutGuardrails = new Guardrails({ maxPerHour: 2, minCooldownMs: 60_000 });
   const scribeGuardrails = new Guardrails({ maxPerHour: 2, minCooldownMs: 60_000 });
 
@@ -162,7 +193,8 @@ export async function runScoutDaemon(options = {}) {
     identity: scribeIdentity,
     client,
     statePath: config.feedStatePath,
-    feedPath: config.feedPath
+    feedPath: config.feedPath,
+    dryRun: config.dryRun
   });
 
   console.log(`[Dual Agent Mesh] Connected to: ${config.serverUrl} (Rooms: ${config.room} & events)`);
@@ -257,18 +289,14 @@ export async function runScoutDaemon(options = {}) {
    * Bounded, because an unbounded set in a process meant to run for months is a
    * leak. The oldest keys fall out first and the worst case is that a very old
    * message gets classified a second time.
+   *
+   * Loaded from disk, because it used to be memory-only and a restart therefore
+   * wiped the whole history — seven restarts in one day of audit log, each one
+   * quietly re-doing everything the next room read returned.
    */
-  const seenWork = new Set();
-  const SEEN_CAP = 5000;
-  const trimSeen = () => {
-    if (seenWork.size <= SEEN_CAP) return;
-    const drop = seenWork.size - Math.floor(SEEN_CAP * 0.8);
-    let i = 0;
-    for (const key of seenWork) {
-      if (i++ >= drop) break;
-      seenWork.delete(key);
-    }
-  };
+  const seenWorkPath = path.join(config.dataDir, 'seen-work.json');
+  const seenWork = loadSeen(seenWorkPath);
+  if (seenWork.size > 0) console.log(`[Work] Resuming with ${seenWork.size} jobs already done.`);
 
   const useLease = config.lease !== false;
   const lease = useLease
@@ -373,6 +401,8 @@ export async function runScoutDaemon(options = {}) {
 
       // Step C: answer anything a stranger sent to our mailbox.
       const mailboxResult = await mailboxService.runTurn();
+      // Questions a stranger actually asked, for the workload to draft answers to.
+      const pendingQuestions = Array.isArray(mailboxResult.questions) ? mailboxResult.questions : [];
       console.log(`[Mailbox #${mailboxResult.turns}] Action: ${mailboxResult.action} | Inbound: ${mailboxResult.details?.inbound ?? 0}`);
       appendAudit(config.auditLogPath, mailboxResult);
 
@@ -404,22 +434,57 @@ export async function runScoutDaemon(options = {}) {
       // actually scored on, and until now the runner existed without ever being
       // called. The deadline keeps a slow model from eating the whole cycle.
       let work = { genuineSessions: 0, genuineSpend: 0, completed: 0 };
+      const ledgerPath = path.join(config.dataDir, 'inference-receipts.jsonl');
       try {
         const { backend } = await selectBackend({});
         work = await runBurst({
-          state: { unclassified: recentMessages, sourceChange: readSourceChange(config.dataDir) },
+          /**
+           * All four sources of work, not just the one.
+           *
+           * The planner reads five task kinds and only ever received messages to
+           * classify, so 10,792 of 10,792 receipts on disk were one task —
+           * measurable proof that three capabilities were built, tested and then
+           * never handed an input. The series and the questions were already in
+           * scope here; nothing was missing but the wiring.
+           */
+          state: {
+            unclassified: recentMessages,
+            sourceChange: readSourceChange(config.dataDir),
+            measurements: readMeasurements(),
+            pendingQuestions: pendingQuestions.map((q) => ({ text: q.text, facts: FACTS }))
+          },
           seen: seenWork,
           backend,
           identity: scoutIdentity,
           deadlineMs: Math.max(20_000, Math.floor(config.intervalMs * 0.4)),
-          ledgerPath: path.join(config.dataDir, 'inference-receipts.jsonl')
+          ledgerPath
         });
-        trimSeen();
+        trimSeen(seenWork);
+        saveSeen(seenWork, seenWorkPath);
         if (work.scheduled > 0) {
-          console.log(`[Work] ${work.completed}/${work.scheduled} sessions | genuine: ${work.genuineSessions} | ${work.stoppedBecause}`);
+          const kinds = Object.entries(work.byTask || {}).map(([t, n]) => `${t}×${n}`).join(' ');
+          console.log(`[Work] ${work.completed}/${work.scheduled} sessions | genuine: ${work.genuineSessions} | ${kinds || work.stoppedBecause}`);
         }
       } catch (err) {
         console.log(`[Work] Skipped — ${err.message}`);
+      }
+
+      /**
+       * Keep the ledger from strangling the work it exists to record.
+       *
+       * Every receipt so far is simulated, and a simulated receipt can never be
+       * evidence — yet they accumulated at 8 MB a day and the duplicate check
+       * re-read all of it on every append. Left alone, that check would have
+       * consumed the entire per-cycle inference deadline within about three
+       * weeks. Genuine receipts are never dropped; only the rehearsal tail is.
+       */
+      try {
+        const compaction = compactIfLarge(ledgerPath);
+        if (compaction.compacted) {
+          console.log(`[Ledger] Compacted — ${compaction.dropped} rehearsal receipts dropped, ${compaction.kept} kept. No evidence discarded.`);
+        }
+      } catch (err) {
+        console.log(`[Ledger] Compaction skipped — ${err.message}`);
       }
 
       // The shared record is the only place both machines' work adds up. Local

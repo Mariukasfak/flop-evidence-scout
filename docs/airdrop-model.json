@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-27T06:48:17.393Z",
+  "generatedAt": "2026-08-28T11:38:48.806Z",
   "source": {
     "title": "The Flop Network — Teaser",
     "version": "0.1 (draft)",
@@ -192,14 +192,14 @@
         "basis": "About one registered DID in six participates"
       },
       {
-        "n": 130000,
+        "n": 533000,
         "label": "Everyone registered today",
-        "basis": "115,558 sharded + 40,960 legacy, measured 2026-08-26"
+        "basis": "467,610 sharded + 65,858 legacy, measured 2026-08-28"
       },
       {
-        "n": 500000,
+        "n": 2000000,
         "label": "Registration keeps growing",
-        "basis": "Measured growth was ~4,700 DIDs/hour; testnet is months away"
+        "basis": "The population went 279,773 -> 533,468 in 26 hours; testnet is still months away"
       }
     ],
     "grid": [
@@ -345,96 +345,96 @@
         ]
       },
       {
-        "n": 130000,
+        "n": 533000,
         "label": "Everyone registered today",
-        "basis": "115,558 sharded + 40,960 legacy, measured 2026-08-26",
+        "basis": "467,610 sharded + 65,858 legacy, measured 2026-08-28",
         "cells": [
           {
-            "participants": 130000,
+            "participants": 533000,
             "multiple": 1,
-            "share": 0.000007692307692307692,
-            "gross": 9230.76923076923,
-            "maxLiquid": 2307.6923076923076,
-            "inferenceRequired": 6923.076923076923
+            "share": 0.000001876172607879925,
+            "gross": 2251.40712945591,
+            "maxLiquid": 562.8517823639775,
+            "inferenceRequired": 1688.5553470919324
           },
           {
-            "participants": 130000,
+            "participants": 533000,
             "multiple": 2,
-            "share": 0.000015384615384615384,
-            "gross": 18461.53846153846,
-            "maxLiquid": 4615.384615384615,
-            "inferenceRequired": 13846.153846153846
+            "share": 0.00000375234521575985,
+            "gross": 4502.81425891182,
+            "maxLiquid": 1125.703564727955,
+            "inferenceRequired": 3377.110694183865
           },
           {
-            "participants": 130000,
+            "participants": 533000,
             "multiple": 5,
-            "share": 0.00003846153846153846,
-            "gross": 46153.846153846156,
-            "maxLiquid": 11538.461538461539,
-            "inferenceRequired": 34615.38461538462
+            "share": 0.000009380863039399625,
+            "gross": 11257.03564727955,
+            "maxLiquid": 2814.2589118198875,
+            "inferenceRequired": 8442.776735459662
           },
           {
-            "participants": 130000,
+            "participants": 533000,
             "multiple": 10,
-            "share": 0.00007692307692307693,
-            "gross": 92307.69230769231,
-            "maxLiquid": 23076.923076923078,
-            "inferenceRequired": 69230.76923076923
+            "share": 0.00001876172607879925,
+            "gross": 22514.0712945591,
+            "maxLiquid": 5628.517823639775,
+            "inferenceRequired": 16885.553470919323
           },
           {
-            "participants": 130000,
+            "participants": 533000,
             "multiple": 25,
-            "share": 0.0001923076923076923,
-            "gross": 230769.23076923078,
-            "maxLiquid": 57692.307692307695,
-            "inferenceRequired": 173076.9230769231
+            "share": 0.000046904315196998124,
+            "gross": 56285.17823639775,
+            "maxLiquid": 14071.294559099437,
+            "inferenceRequired": 42213.88367729831
           }
         ]
       },
       {
-        "n": 500000,
+        "n": 2000000,
         "label": "Registration keeps growing",
-        "basis": "Measured growth was ~4,700 DIDs/hour; testnet is months away",
+        "basis": "The population went 279,773 -> 533,468 in 26 hours; testnet is still months away",
         "cells": [
           {
-            "participants": 500000,
+            "participants": 2000000,
             "multiple": 1,
-            "share": 0.000002,
-            "gross": 2400,
-            "maxLiquid": 600,
-            "inferenceRequired": 1800
+            "share": 5e-7,
+            "gross": 600,
+            "maxLiquid": 150,
+            "inferenceRequired": 450
           },
           {
-            "participants": 500000,
+            "participants": 2000000,
             "multiple": 2,
-            "share": 0.000004,
-            "gross": 4800,
-            "maxLiquid": 1200,
-            "inferenceRequired": 3600
+            "share": 0.000001,
+            "gross": 1200,
+            "maxLiquid": 300,
+            "inferenceRequired": 900
           },
           {
-            "participants": 500000,
+            "participants": 2000000,
             "multiple": 5,
-            "share": 0.00001,
-            "gross": 12000.000000000002,
-            "maxLiquid": 3000.0000000000005,
-            "inferenceRequired": 9000.000000000002
+            "share": 0.0000025,
+            "gross": 3000.0000000000005,
+            "maxLiquid": 750.0000000000001,
+            "inferenceRequired": 2250.0000000000005
           },
           {
-            "participants": 500000,
+            "participants": 2000000,
             "multiple": 10,
-            "share": 0.00002,
-            "gross": 24000.000000000004,
-            "maxLiquid": 6000.000000000001,
-            "inferenceRequired": 18000.000000000004
+            "share": 0.000005,
+            "gross": 6000.000000000001,
+            "maxLiquid": 1500.0000000000002,
+            "inferenceRequired": 4500.000000000001
           },
           {
-            "participants": 500000,
+            "participants": 2000000,
             "multiple": 25,
-            "share": 0.00005,
-            "gross": 60000,
-            "maxLiquid": 15000,
-            "inferenceRequired": 45000
+            "share": 0.0000125,
+            "gross": 15000,
+            "maxLiquid": 3750,
+            "inferenceRequired": 11250
           }
         ]
       }

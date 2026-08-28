@@ -1,7 +1,10 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { FEED_ROOM, FEED_TOPIC, FALLBACK_ROOM } from '../src/telemetry-feed.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { FEED_ROOM, FEED_TOPIC, FALLBACK_ROOM, TelemetryFeed } from '../src/telemetry-feed.mjs';
 import {
   selectPost, POST_GAPS_MS, nextFactsPost,
   buildProtocolPost, buildAdvisoryPost, buildRoomsPost, buildCapacityPost, buildTelemetryPost
@@ -15,7 +18,9 @@ const factsExhausted = () => {
   while ((post = nextFactsPost(out))) out.push({ ...post, at: '2026-08-20T00:00Z' });
   return out;
 };
-import { isValidTechnocoreName } from '../src/identity.mjs';
+import { isValidTechnocoreName, generateIdentity } from '../src/identity.mjs';
+
+const identity = generateIdentity();
 
 const CAPS = { rooms: 10240, notes: 327680 };
 const reading = (at, dids, rooms, notes, lobby) => ({
@@ -166,4 +171,72 @@ describe('Choosing what to publish', () => {
     // And an unchanged board stops rather than repeating itself forever.
     assert.equal(nextFactsPost(published), null);
   });
+});
+
+/**
+ * A dry run posted to the live feed room for real, because --dry-run reached the
+ * lease and nothing else. Found by running one and then reading the room.
+ */
+test('a dry run signs nothing and posts nothing', async () => {
+  const posts = [];
+  const client = {
+    postMessage: async (room, text) => { posts.push({ room, text }); },
+    claimRoomOwnership: async () => { posts.push({ claim: true }); return { ok: true, status: 200 }; },
+    setRoomTopic: async () => { posts.push({ topic: true }); }
+  };
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flop-feed-dry-'));
+  const feed = new TelemetryFeed({
+    identity,
+    client,
+    statePath: path.join(dir, 'feed-state.json'),
+    feedPath: path.join(dir, 'feed.json'),
+    dryRun: true
+  });
+
+  const result = await feed.runTurn({
+    observations: [
+      { at: '2026-08-26T00:00Z', sharded_did_estimate: 100000, legacy_did_count: 50960, notes_used: 10, rooms_used: 10, lobby_msgs_per_min: 500 },
+      { at: '2026-08-27T00:00Z', sharded_did_estimate: 200000, legacy_did_count: 50960, notes_used: 20, rooms_used: 20, lobby_msgs_per_min: 900 }
+    ],
+    caps: { rooms: 40960, notes: 1310720 }
+  });
+
+  assert.equal(result.action, 'feed_dry_run');
+  assert.ok(result.details.wouldPost, 'it still reports what it would have said');
+  assert.deepEqual(posts, [], 'nothing reached the network — no post, no claim, no topic');
+});
+
+/**
+ * The series carried a caps block written once while the service raised its
+ * capacity twice underneath it, and this published "184%" and "191%" of a cap to
+ * a public room, signed.
+ */
+test('a reading over its own cap is treated as a broken instrument, not news', () => {
+  const stale = [
+    { at: '2026-08-26T00:00Z', rooms_used: 9000, notes_used: 300000 },
+    { at: '2026-08-27T00:00Z', rooms_used: 18845, notes_used: 625674 }
+  ];
+  assert.equal(buildCapacityPost(stale, { rooms: 10240, notes: 327680 }), null,
+    'impossible arithmetic is never published');
+
+  // Against the caps actually in force it is an ordinary, unremarkable reading.
+  assert.equal(buildCapacityPost(stale, { rooms: 40960, notes: 1310720 }), null,
+    'and below the threshold there is nothing to say either');
+});
+
+test('an observation is measured against the caps it was taken under', () => {
+  const observations = [
+    { at: '2026-08-26T00:00Z', rooms_used: 9000, notes_used: 300000 },
+    {
+      at: '2026-08-27T00:00Z',
+      rooms_used: 38000,
+      notes_used: 900000,
+      caps: { rooms: 40960, notes: 1310720 }
+    }
+  ];
+  // The stale header caps would make this 371%; the row's own caps make it 93%.
+  const post = buildCapacityPost(observations, { rooms: 10240, notes: 327680 });
+  assert.ok(post, 'a real reading near a real cap is worth publishing');
+  assert.match(post.line, /38000\/40960 listed \(93%\)/);
 });

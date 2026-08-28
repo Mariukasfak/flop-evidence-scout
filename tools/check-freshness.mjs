@@ -165,47 +165,6 @@ for (const artefact of ARTEFACTS) {
   });
 }
 
-if (!quiet) {
-  console.log('\n=== SCHEDULED WORK: IS IT ACTUALLY RUNNING? ===\n');
-  const w = Math.max(...results.map((r) => r.label.length));
-  for (const r of results) {
-    const age = r.ageMin == null ? '' : `${r.ageMin < 60 ? `${Math.round(r.ageMin)} min` : `${(r.ageMin / 60).toFixed(1)} h`} old`;
-    console.log(`  [${r.state === 'FRESH' ? ' OK ' : 'STALE'}] ${r.label.padEnd(w)}  ${age.padEnd(10)} ${r.detail || ''}`);
-  }
-
-  const withDuty = results.filter((r) => r.duty);
-  if (withDuty.length) {
-    console.log('\n  Delivered vs scheduled:\n');
-    console.log(`    ${'artefact'.padEnd(w)}  every  got/want   duty   median gap   worst gap   missed`);
-    for (const r of withDuty) {
-      const d = r.duty;
-      console.log(
-        `    ${r.label.padEnd(w)}  ${String(r.cadenceMin).padStart(3)}m  `
-        + `${String(d.records).padStart(3)}/${String(d.expected).padEnd(3)}  `
-        + `${(d.ratio * 100).toFixed(0).padStart(4)}%  `
-        + `${d.medianGapMin.toFixed(0).padStart(7)}m  `
-        + `${d.worstGapMin.toFixed(0).padStart(9)}m  `
-        + `${String(d.apparentlyMissed).padStart(6)}`
-      );
-    }
-    console.log('\n  Duty cycle is what reached the artefact, not what the scheduler believed it ran.');
-    console.log('  GitHub delays or drops scheduled workflows under load; this is by how much.');
-  }
-  console.log();
-}
-
-/**
- * The combined picture, read from the server rather than from files.
- *
- * The duty cycles above come from committed artefacts, and those only ever
- * contain cloud runs — local cycles write to data/local, which is gitignored.
- * So once the agent also runs on a machine at home, the file-based figure keeps
- * reporting the cloud's coverage and gets further from the truth the more the
- * local process helps. A metric that grows more wrong as the system improves is
- * worse than no metric.
- *
- * The shared activity note is where both machines add up.
- */
 let combined = null;
 try {
   const { TechnocoreClient } = await import('../src/technocore-client.mjs');
@@ -245,6 +204,76 @@ try {
   if (!quiet) console.log(`  Combined view unavailable — ${err.message}\n`);
 }
 
+/**
+ * A machine standing down is not a machine that stopped.
+ *
+ * docs/audit-history.json is written by the GitHub Actions run. Once the lease
+ * landed, the cloud run correctly declines the cycle whenever the home PC holds
+ * it, so that file stops advancing while the agent is running perfectly well —
+ * and this check called it stale and failed the workflow.
+ *
+ * The cost was not cosmetic. "Watch official sources" went red on every single
+ * run, so the one job whose output is an alert was permanently the colour that
+ * means "ignore me". Technocore doubled its capacity and raised the DID
+ * namespace cap, and that had to be found by hand.
+ *
+ * The right question was never "did this machine run" but "did the agent run
+ * anywhere", and the shared note answers it for both.
+ */
+const daemonResult = results.find((r) => r.id === 'daemon');
+if (daemonResult?.state === 'STALE' && combined && Number.isFinite(combined.ageMin)) {
+  const daemonTolerance = ARTEFACTS.find((a) => a.id === 'daemon').toleranceMin;
+  if (combined.ageMin <= daemonTolerance) {
+    daemonResult.state = 'STANDING DOWN';
+    daemonResult.detail = `this machine's log is ${daemonResult.ageMin?.toFixed(0) ?? '?'} min old, `
+      + `but the shared record shows a cycle ${combined.ageMin.toFixed(0)} min ago — another holder has the lease`;
+    stale--;
+  }
+}
+
+if (!quiet) {
+  console.log('\n=== SCHEDULED WORK: IS IT ACTUALLY RUNNING? ===\n');
+  const w = Math.max(...results.map((r) => r.label.length));
+  for (const r of results) {
+    const age = r.ageMin == null ? '' : `${r.ageMin < 60 ? `${Math.round(r.ageMin)} min` : `${(r.ageMin / 60).toFixed(1)} h`} old`;
+    // Three states, not two: standing down for a lease is neither fresh nor broken.
+    const tag = r.state === 'FRESH' ? ' OK ' : (r.state === 'STANDING DOWN' ? 'IDLE' : 'STALE');
+    console.log(`  [${tag}] ${r.label.padEnd(w)}  ${age.padEnd(10)} ${r.detail || ''}`);
+  }
+
+  const withDuty = results.filter((r) => r.duty);
+  if (withDuty.length) {
+    console.log('\n  Delivered vs scheduled:\n');
+    console.log(`    ${'artefact'.padEnd(w)}  every  got/want   duty   median gap   worst gap   missed`);
+    for (const r of withDuty) {
+      const d = r.duty;
+      console.log(
+        `    ${r.label.padEnd(w)}  ${String(r.cadenceMin).padStart(3)}m  `
+        + `${String(d.records).padStart(3)}/${String(d.expected).padEnd(3)}  `
+        + `${(d.ratio * 100).toFixed(0).padStart(4)}%  `
+        + `${d.medianGapMin.toFixed(0).padStart(7)}m  `
+        + `${d.worstGapMin.toFixed(0).padStart(9)}m  `
+        + `${String(d.apparentlyMissed).padStart(6)}`
+      );
+    }
+    console.log('\n  Duty cycle is what reached the artefact, not what the scheduler believed it ran.');
+    console.log('  GitHub delays or drops scheduled workflows under load; this is by how much.');
+  }
+  console.log();
+}
+
+/**
+ * The combined picture, read from the server rather than from files.
+ *
+ * The duty cycles above come from committed artefacts, and those only ever
+ * contain cloud runs — local cycles write to data/local, which is gitignored.
+ * So once the agent also runs on a machine at home, the file-based figure keeps
+ * reporting the cloud's coverage and gets further from the truth the more the
+ * local process helps. A metric that grows more wrong as the system improves is
+ * worse than no metric.
+ *
+ * The shared activity note is where both machines add up.
+ */
 if (!quiet) console.log();
 
 fs.mkdirSync(path.dirname(OUT), { recursive: true });

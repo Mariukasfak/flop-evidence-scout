@@ -148,6 +148,16 @@ export class MailboxService {
     const details = { mailbox: this.mailbox, inbound: fresh.length };
     const skipped = [];
     let replies = 0;
+    /**
+     * Genuine questions this turn, for the inference workload to draft answers to.
+     *
+     * Replies here come from a fixed lookup table, which is the one thing a
+     * grounded model would do better — and `draft-answer` existed for exactly
+     * that while never receiving a single input, because nothing collected the
+     * questions. A draft is work and evidence, not a reply: nothing on this path
+     * is posted, so a model's output still cannot reach a stranger.
+     */
+    const questions = [];
 
     for (const msg of fresh) {
       if (replies >= MAX_REPLIES_PER_TURN) {
@@ -170,6 +180,10 @@ export class MailboxService {
         skipped.push({ from: senderDid, reason: verdict.reason });
         continue;
       }
+
+      // Recorded before the guardrail, because a question we were rate-limited
+      // out of answering is still a question worth drafting an answer to.
+      questions.push({ text, topics: verdict.topics.map((t) => t.topic) });
 
       const target = await this.resolveReplyRoom(senderDid);
       const answer = formatKnowledgeResponse(text);
@@ -216,6 +230,7 @@ export class MailboxService {
       handled: this.localState.handled,
       lastMailboxSeq: this.localState.lastMailboxSeq,
       stateError: this.lastStateError,
+      questions,
       details,
       timestamp: new Date().toISOString()
     };

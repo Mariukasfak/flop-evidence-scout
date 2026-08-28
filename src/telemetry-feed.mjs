@@ -73,7 +73,7 @@ export function writeFeedFile(entries, { feedPath = FEED_PATH, did = null } = {}
 export class TelemetryFeed {
   constructor({
     identity, client, room = FEED_ROOM, fallbackRoom = FALLBACK_ROOM,
-    statePath = 'data/feed-state.json', feedPath = FEED_PATH
+    statePath = 'data/feed-state.json', feedPath = FEED_PATH, dryRun = false
   }) {
     if (!identity?.did) throw new Error('Identity required for TelemetryFeed');
     this.identity = identity;
@@ -82,6 +82,14 @@ export class TelemetryFeed {
     this.fallbackRoom = fallbackRoom;
     this.statePath = path.resolve(statePath);
     this.feedPath = feedPath;
+    /**
+     * A rehearsal must not be a publication.
+     *
+     * --dry-run reached the lease and nothing else, so a dry run signed and
+     * posted to the live feed room exactly as a real one did. Found the only way
+     * it could be: by running one and then reading the room afterwards.
+     */
+    this.dryRun = dryRun;
     this.state = { claimed: false, topicSet: false, published: [] };
 
     if (fs.existsSync(this.statePath)) {
@@ -100,6 +108,10 @@ export class TelemetryFeed {
 
   async ensureRoom() {
     const notes = [];
+    // Claiming a room and setting its topic are writes like any other, and a
+    // room claim is not even reversible — it is the last thing a rehearsal
+    // should be allowed to do.
+    if (this.dryRun) return ['dry run — no room claimed, no topic set'];
     if (!this.state.claimed) {
       const result = await this.client.claimRoomOwnership(this.room, this.identity);
       // 409 means someone already owns it — an answer, not a failure to retry.
@@ -137,6 +149,16 @@ export class TelemetryFeed {
     // Try our own room first; fall back to a topical one if the network cannot
     // give us a room. A publication that goes silent for want of a venue has
     // stopped being a publication.
+    if (this.dryRun) {
+      this.save();
+      return {
+        agent: 'feed',
+        action: 'feed_dry_run',
+        room: this.room,
+        details: { reason: 'dry run — nothing was posted', wouldPost: digest.line, notes }
+      };
+    }
+
     let publishedTo = this.room;
     try {
       await this.client.postMessage(this.room, digest.line, this.identity);

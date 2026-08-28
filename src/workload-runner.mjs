@@ -198,6 +198,14 @@ export async function runWorkload({
   const genuine = outcome.receipts.filter(isEvidenceOfWork);
   outcome.genuineSessions = genuine.length;
   outcome.genuineSpend = genuine.reduce((sum, r) => sum + (r.request?.feeFlop || 0), 0);
+
+  // Which kinds of work actually ran. A single-task monoculture is invisible in
+  // a bare session count, and this project ran one for a day without noticing.
+  outcome.byTask = {};
+  for (const receipt of outcome.receipts) {
+    const task = receipt.request?.task || 'unknown';
+    outcome.byTask[task] = (outcome.byTask[task] || 0) + 1;
+  }
   outcome.spendAssumption = 'Failed sessions are not counted as spend. The teaser does not say '
     + 'whether a failed session is still charged.';
 
@@ -214,7 +222,7 @@ export async function runWorkload({
 export async function runBurst({ state = {}, backend, identity, budget = Infinity, costPerSession = DEFAULT_SESSION_COST, deadlineMs = 10 * 60 * 1000, model, ledgerPath, seen = null, now } = {}) {
   const plan = planWorkload({ ...state, seen });
   if (plan.length === 0) {
-    return { planned: 0, scheduled: 0, completed: 0, failed: 0, invalidOutput: 0, spend: 0, receipts: [], stoppedBecause: 'nothing to do', elapsedMs: 0, genuineSessions: 0, genuineSpend: 0 };
+    return { planned: 0, scheduled: 0, completed: 0, failed: 0, invalidOutput: 0, spend: 0, receipts: [], stoppedBecause: 'nothing to do', elapsedMs: 0, genuineSessions: 0, genuineSpend: 0, byTask: {} };
   }
   const outcome = await runWorkload({ plan, backend, identity, budget, costPerSession, deadlineMs, model, ledgerPath, now });
 

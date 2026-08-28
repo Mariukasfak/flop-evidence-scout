@@ -447,6 +447,9 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
 
     await runScoutDaemon({
       dryRun: true,
+      // One cycle, but against the mock server — this test exercises the write
+      // path, so it opts out of the read-only default that --dry-run now carries.
+      readOnly: false,
       identityPath: path.join(tmpDir, 'identity.json'),
       scribeIdentityPath: path.join(tmpDir, 'scribe.json'),
       auditLogPath,
@@ -843,5 +846,46 @@ describe('an intention is not recorded as an action', () => {
     assert.equal(result.action, 'answered_inquiry');
     assert.equal(Object.keys(scout.localState.answeredAuthors).length, 1);
     assert.equal(scout.localState.handledCount, 1);
+  });
+});
+
+/**
+ * --dry-run used to gate only the lease. Every agent still posted signed
+ * messages to the live lobby, wrote notes and claimed rooms — a flag whose name
+ * promises a rehearsal while delivering a real run, and `npm run dry-run` is a
+ * published entry point. The gate lives in the client so a future engine
+ * inherits it rather than having to remember it.
+ */
+describe('A read-only client', () => {
+  const identity = generateIdentity();
+  let attempted = 0;
+  const client = () => new TechnocoreClient({
+    baseUrl: 'https://example.invalid',
+    readOnly: true,
+    fetchFn: async () => { attempted++; throw new Error('a read-only client must never reach the network to write'); }
+  });
+
+  test('refuses to post, sign, write a note or claim a room', async () => {
+    attempted = 0;
+    await assert.rejects(() => client().postMessage('lobby', 'hello', identity), /refusing to post to \/r\/lobby/);
+    await assert.rejects(() => client().postSignedMessage('lobby', 'hello', identity), /refusing to post a signed message/);
+    await assert.rejects(() => client().setKv('scout', 'state', '{}'), /refusing to write the note \/kv\/scout\/state/);
+    await assert.rejects(() => client().claimRoomOwnership('d-test', identity), /refusing to claim ownership/);
+    assert.equal(attempted, 0, 'no write ever became a request');
+  });
+
+  test('still reads, because observing costs nobody anything', async () => {
+    const reading = new TechnocoreClient({
+      baseUrl: 'https://example.invalid',
+      readOnly: true,
+      fetchFn: async () => ({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'text/plain' },
+        text: async () => '[1] 2026-08-28T00:00:00Z <~someone> hello'
+      })
+    });
+    const result = await reading.readRoom('lobby');
+    assert.equal(result.messages.length, 1);
   });
 });
