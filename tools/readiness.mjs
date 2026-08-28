@@ -163,8 +163,10 @@ async function main() {
     'A real model is reachable',
     real ? READY : ACTION,
     `backend: ${backend.id}${backend.model ? ` (${backend.model})` : ''}`,
-    'Install Ollama and pull one model (e.g. qwen2.5:3b). This earns no $FLOP — it is a '
-    + 'rehearsal backend that produces real latency, real token counts and real failure modes.'
+    'Two ways, either works. Free API: put a key from console.groq.com into '
+    + '.secrets/inference-api.json (and the same key into the INFERENCE_API_KEY repo secret '
+    + 'so cloud runs use it too). Local: install Ollama and pull qwen2.5:3b. Rehearsal either '
+    + 'way — real latency, real tokens, real failures, zero $FLOP earned yet.'
   );
 
   /**

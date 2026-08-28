@@ -34,6 +34,13 @@ jobs:
         env:
           SCOUT_IDENTITY_JSON: ${{ secrets.SCOUT_IDENTITY_JSON }}
           SCRIBE_IDENTITY_JSON: ${{ secrets.SCRIBE_IDENTITY_JSON }}
+          # Optional: a free-tier inference API key (Groq / Google AI Studio,
+          # OpenAI chat shape). When set, cloud bursts do real inference and the
+          # operator's PC does not need to be on at all. Unset, the run falls
+          # back to the simulated backend exactly as before.
+          INFERENCE_API_KEY: ${{ secrets.INFERENCE_API_KEY }}
+          INFERENCE_API_URL: ${{ secrets.INFERENCE_API_URL }}
+          INFERENCE_API_MODEL: ${{ secrets.INFERENCE_API_MODEL }}
           TECHNOCORE_URL: https://technocore.chat
           # Names this runner in the cross-machine lease, so a process on the
           # operator's PC and a cloud run can never both write as the same

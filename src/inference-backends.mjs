@@ -18,6 +18,8 @@
  *               published this is the only file that needs to change.
  */
 
+import fs from 'node:fs';
+
 const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
 
 /**
@@ -131,6 +133,117 @@ export function ollamaBackend({ model = process.env.OLLAMA_MODEL || 'qwen2.5:3b'
 }
 
 /**
+ * Where the API backend's configuration may live, in priority order.
+ *
+ * Environment first, because that is how GitHub Actions passes a secret; a file
+ * under .secrets/ second, because that is how a person on Windows does it once
+ * and forgets about it. The directory is gitignored alongside the identities,
+ * and the key never appears in a receipt, a log line or an error message.
+ */
+export function loadApiConfig({ env = process.env, secretsPath = '.secrets/inference-api.json' } = {}) {
+  const fromEnv = {
+    url: env.INFERENCE_API_URL,
+    key: env.INFERENCE_API_KEY,
+    model: env.INFERENCE_API_MODEL
+  };
+  if (fromEnv.key) {
+    return {
+      url: fromEnv.url || 'https://api.groq.com/openai/v1/chat/completions',
+      key: fromEnv.key,
+      model: fromEnv.model || 'llama-3.1-8b-instant',
+      source: 'environment'
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(secretsPath, 'utf8'));
+    if (parsed?.key) {
+      return {
+        url: parsed.url || 'https://api.groq.com/openai/v1/chat/completions',
+        key: parsed.key,
+        model: parsed.model || 'llama-3.1-8b-instant',
+        source: secretsPath
+      };
+    }
+  } catch { /* no file, or not JSON yet — both mean "not configured" */ }
+
+  return null;
+}
+
+/**
+ * A real model behind a free-tier HTTP API, in the OpenAI chat shape.
+ *
+ * This exists because the operator asked the right question: why keep a PC on
+ * around the clock to run a 3B model, when free tiers at Groq and Google AI
+ * Studio serve bigger models at zero cost? With this backend the GitHub Actions
+ * bursts do real inference too — the daemon no longer needs this machine at all.
+ *
+ * What it is NOT: local. The prompts leave the machine. Everything in them is
+ * already public — room text strangers posted to a world-readable server, our
+ * own telemetry — and the confidential flag on every task is false, so nothing
+ * changes hands that was not already published. If a task ever carries anything
+ * private, it must not use this backend; the flag is the contract.
+ *
+ * Rate limits are the price of free. Groq's free tier allows ~30 requests a
+ * minute, which comfortably covers a cycle's burst; a 429 is surfaced as a
+ * failed session rather than retried in a loop that would double the pressure.
+ */
+export function apiBackend({ config = loadApiConfig(), timeoutMs = 60_000 } = {}) {
+  return {
+    id: 'api',
+    simulated: false,
+    model: config?.model,
+    // Two in flight keeps a burst inside free-tier per-minute limits; more buys
+    // 429s, not throughput.
+    maxConcurrency: 2,
+
+    async available() {
+      // Configured means available. A probe request would spend the same free
+      // quota the work needs, and a wrong key surfaces on the first real call
+      // with a clear 401 instead of a silent fallback to the simulator.
+      return Boolean(config?.key);
+    },
+
+    async generate({ prompt, request }) {
+      const res = await fetch(config.url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${config.key}`
+        },
+        body: JSON.stringify({
+          model: config.model,
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 512,
+          temperature: 0.2
+        }),
+        signal: AbortSignal.timeout(Math.min(timeoutMs, (request?.maxLatencyMs ?? timeoutMs) * 2))
+      });
+
+      if (res.status === 429) {
+        throw new Error('api backend rate limited (HTTP 429) — the free tier will refill on its own');
+      }
+      if (res.status === 401 || res.status === 403) {
+        // Deliberately does not echo anything from the response: an auth error
+        // body can quote the credential it rejected.
+        throw new Error(`api backend refused the key (HTTP ${res.status}) — check ${config.source}`);
+      }
+      if (!res.ok) throw new Error(`api backend returned HTTP ${res.status}`);
+
+      const body = await res.json();
+      const choice = body.choices?.[0];
+      return {
+        text: choice?.message?.content ?? '',
+        modelId: body.model ?? config.model,
+        promptTokens: body.usage?.prompt_tokens,
+        completionTokens: body.usage?.completion_tokens,
+        parameters: null
+      };
+    }
+  };
+}
+
+/**
  * The real thing, when it exists.
  *
  * Kept as an explicit refusal rather than an absence, so the shape of the switch
@@ -159,7 +272,9 @@ export const flopSessionBackend = {
 export async function selectBackend({ preferred = null, model } = {}) {
   const candidates = [];
   if (preferred) candidates.push(preferred);
-  candidates.push(flopSessionBackend, ollamaBackend({ ...(model ? { model } : {}) }), simulatedBackend);
+  // Local Ollama outranks the API: no rate limits, no text leaving the machine.
+  // The API outranks the simulator: real inference beats none.
+  candidates.push(flopSessionBackend, ollamaBackend({ ...(model ? { model } : {}) }), apiBackend(), simulatedBackend);
 
   for (const backend of candidates) {
     if (await backend.available()) {

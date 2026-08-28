@@ -213,3 +213,108 @@ test('the ollama backend reports unavailable rather than throwing when absent', 
   const backend = ollamaBackend({ host: 'http://127.0.0.1:1' });
   assert.equal(await backend.available(), false);
 });
+
+/**
+ * The API backend exists so the operator does not have to keep a PC on around
+ * the clock: free tiers at Groq and Google serve real models, and GitHub
+ * Actions bursts can use them too. The tests run against a local mock in the
+ * OpenAI chat shape — no network, no real key.
+ */
+test('the api backend runs a session end to end and the key never reaches the receipt', async () => {
+  const http = await import('node:http');
+  const seen = { auth: null, body: null };
+  const server = http.createServer((req, res) => {
+    seen.auth = req.headers.authorization;
+    let data = '';
+    req.on('data', (c) => { data += c; });
+    req.on('end', () => {
+      seen.body = JSON.parse(data);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        choices: [{ message: { content: 'TEMPLATE|HIGH' } }],
+        usage: { prompt_tokens: 120, completion_tokens: 4 }
+      }));
+    });
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${server.address().port}/v1/chat/completions`;
+
+  try {
+    const { apiBackend } = await import('../src/inference-backends.mjs');
+    const backend = apiBackend({ config: { url, key: 'sk-test-SECRET', model: 'llama-3.1-8b-instant', source: 'test' } });
+    assert.equal(await backend.available(), true);
+    assert.equal(backend.simulated, false, 'an API call is real inference');
+
+    const identity = generateIdentity();
+    const session = buildTask('classify-message', { text: 'gm gm checking in', room: 'lobby' });
+    const { receipt, completion } = await runSession(session, { backend, identity });
+
+    assert.equal(seen.auth, 'Bearer sk-test-SECRET', 'the key went to the API');
+    assert.equal(seen.body.model, 'llama-3.1-8b-instant');
+    assert.equal(completion, 'TEMPLATE|HIGH');
+    assert.equal(receipt.result.ok, true);
+    assert.equal(receipt.result.promptTokens, 120, 'token counts come from the API, not the estimate');
+    assert.equal(receipt.simulated, false);
+
+    // The one property that must hold whatever else changes.
+    assert.equal(JSON.stringify(receipt).includes('SECRET'), false, 'the key leaked into the receipt');
+  } finally {
+    server.close();
+  }
+});
+
+test('a rate limit and a bad key fail with a reason, and the reason never quotes the key', async () => {
+  const http = await import('node:http');
+  let status = 429;
+  const server = http.createServer((req, res) => {
+    res.writeHead(status, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: { message: `bad key sk-test-SECRET was rejected` } }));
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${server.address().port}/v1/chat/completions`;
+
+  try {
+    const { apiBackend } = await import('../src/inference-backends.mjs');
+    const backend = apiBackend({ config: { url, key: 'sk-test-SECRET', model: 'm', source: '.secrets/inference-api.json' } });
+
+    await assert.rejects(() => backend.generate({ prompt: 'x' }), /429/);
+
+    status = 401;
+    // The server's error body quotes the credential; ours must not.
+    await assert.rejects(() => backend.generate({ prompt: 'x' }), (err) => {
+      assert.match(err.message, /refused the key/);
+      assert.match(err.message, /\.secrets\/inference-api\.json/, 'the error says where to fix it');
+      assert.equal(err.message.includes('SECRET'), false, 'the error echoed the credential');
+      return true;
+    });
+  } finally {
+    server.close();
+  }
+});
+
+test('api configuration reads the environment first, then the secrets file, then gives up', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { loadApiConfig } = await import('../src/inference-backends.mjs');
+
+  // Environment wins, and fills sensible defaults around a bare key.
+  const fromEnv = loadApiConfig({ env: { INFERENCE_API_KEY: 'k1' }, secretsPath: 'does-not-exist.json' });
+  assert.equal(fromEnv.key, 'k1');
+  assert.match(fromEnv.url, /groq/);
+  assert.equal(fromEnv.source, 'environment');
+
+  // The file works alone.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flop-api-'));
+  const file = path.join(dir, 'inference-api.json');
+  fs.writeFileSync(file, JSON.stringify({ key: 'k2', model: 'custom-model' }), 'utf8');
+  const fromFile = loadApiConfig({ env: {}, secretsPath: file });
+  assert.equal(fromFile.key, 'k2');
+  assert.equal(fromFile.model, 'custom-model');
+
+  // A malformed file means "not configured", never a crash.
+  fs.writeFileSync(file, '{ not json', 'utf8');
+  assert.equal(loadApiConfig({ env: {}, secretsPath: file }), null);
+  assert.equal(loadApiConfig({ env: {}, secretsPath: 'missing.json' }), null);
+});
