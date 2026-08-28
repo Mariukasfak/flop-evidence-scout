@@ -325,7 +325,7 @@ export async function runScoutDaemon(options = {}) {
         lastAnalysisAt = Date.now();
         analyzeChatArchives();
       }
-      await updateDashboardFile(config.docsDir || 'docs', config.serverUrl);
+      await updateDashboardFile(config.docsDir || 'docs', config.serverUrl, config.dataDir);
     } catch {
       // ignore
     }

@@ -886,7 +886,18 @@ export function generateDashboardHtml({
 </html>`;
 }
 
-export async function updateDashboardFile(outputDir = 'docs', serverUrl = 'https://technocore.chat') {
+/**
+ * @param dataDir Where the daemon actually writes its state.
+ *
+ * This read `data/scout-heartbeat.json` and `data/scout-audit.jsonl` as string
+ * literals while the local daemon runs with `--data-dir=data/local`, so the
+ * dashboard has been rendering whatever a cloud run last committed rather than
+ * what the agent on this machine is doing right now. That is the fourth
+ * appearance of the hardcoded-path bug this file's own history warns about —
+ * the faucet alert, the heartbeat, the telemetry feed, and now the page that
+ * displays all three.
+ */
+export async function updateDashboardFile(outputDir = 'docs', serverUrl = 'https://technocore.chat', dataDir = path.resolve('data')) {
   const resolvedDir = path.resolve(outputDir);
   fs.mkdirSync(resolvedDir, { recursive: true });
 
@@ -899,12 +910,12 @@ export async function updateDashboardFile(outputDir = 'docs', serverUrl = 'https
   let logs = [];
   const roomMessages = { lobby: [], events: [], [scoutMailbox]: [] };
 
-  const heartbeatPath = path.resolve('data/scout-heartbeat.json');
+  const heartbeatPath = path.join(dataDir, 'scout-heartbeat.json');
   if (fs.existsSync(heartbeatPath)) {
     try { heartbeat = JSON.parse(fs.readFileSync(heartbeatPath, 'utf8')); } catch { }
   }
 
-  const auditPath = path.resolve('data/scout-audit.jsonl');
+  const auditPath = path.join(dataDir, 'scout-audit.jsonl');
   if (fs.existsSync(auditPath)) {
     try {
       const lines = fs.readFileSync(auditPath, 'utf8').split('\n').filter(Boolean);
