@@ -606,7 +606,23 @@ export async function runScoutDaemon(options = {}) {
       if (cycleMs > config.intervalMs * 0.75) {
         console.log(`[Cycle] ${(cycleMs / 1000).toFixed(1)}s of a ${(config.intervalMs / 1000).toFixed(0)}s interval — the loop is falling behind.`);
       }
-      appendAudit(config.auditLogPath, { event: 'cycle_timing', cycleMs, intervalMs: config.intervalMs });
+      /**
+       * Split the cycle into the inference and everything else.
+       *
+       * A single total cannot answer "is the model the bottleneck, or are we?"
+       * — and that is the only question worth asking of a loop that now spends
+       * real seconds on a real model. `workMs` is what the burst took; the
+       * remainder is network round-trips, state writes and the dashboard.
+       */
+      appendAudit(config.auditLogPath, {
+        event: 'cycle_timing',
+        cycleMs,
+        workMs: work.elapsedMs ?? 0,
+        otherMs: cycleMs - (work.elapsedMs ?? 0),
+        sessions: work.completed ?? 0,
+        planned: work.planned ?? 0,
+        intervalMs: config.intervalMs
+      });
 
       await writeHeartbeat('active', scoutResult);
     } catch (err) {
