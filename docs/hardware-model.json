@@ -1,0 +1,183 @@
+{
+  "generatedAt": "2026-08-28T18:36:59.946Z",
+  "blocksPerYear": 31536000,
+  "perBlock": {
+    "miners": {
+      "perBlock": 71.59322033898306,
+      "shareOfReward": 0.7457627118644068
+    },
+    "validators": {
+      "perBlock": 9.76271186440678,
+      "shareOfReward": 0.1016949152542373
+    },
+    "brokersAgents": {
+      "perBlock": 9.76271186440678,
+      "shareOfReward": 0.1016949152542373
+    },
+    "stakingRewards": {
+      "perBlock": 4.88135593220339,
+      "shareOfReward": 0.05084745762711865
+    }
+  },
+  "gpuTiers": [
+    {
+      "id": "marketplace-16gb",
+      "label": "Marketplace 16 GB (spot / interruptible)",
+      "hourlyUsd": 0.22,
+      "bandUsd": [
+        0.15,
+        0.35
+      ],
+      "fits": "Meets the stated 16 GB floor and nothing more.",
+      "risk": "Interruptible. Reclaimed without notice, which is fatal to anything measured on continuity."
+    },
+    {
+      "id": "marketplace-24gb",
+      "label": "Marketplace 24 GB (dedicated)",
+      "hourlyUsd": 0.45,
+      "bandUsd": [
+        0.3,
+        0.7
+      ],
+      "fits": "Comfortable headroom over the floor; the sensible default if mining at all.",
+      "risk": "Small providers, variable reliability, and payment usually up front."
+    },
+    {
+      "id": "cloud-80gb",
+      "label": "Major-cloud 80 GB (reserved)",
+      "hourlyUsd": 2.4,
+      "bandUsd": [
+        1.8,
+        3.5
+      ],
+      "fits": "Datacentre-grade, contractual uptime.",
+      "risk": "Ten times the marketplace rate. Needs a reward curve that pays for capability, and no such curve is published."
+    }
+  ],
+  "serverTiers": [
+    {
+      "id": "budget-dedicated",
+      "label": "Budget dedicated server",
+      "monthlyEur": 45,
+      "bandEur": [
+        40,
+        60
+      ],
+      "fits": "Typically 8c/16t, 64 GB, 2 x 1 TB NVMe. Note 2 x 1 TB in RAID1 is 1 TB usable, not 2 TB.",
+      "risk": "Consumer-grade lines and best-effort support. Cheapest per month, weakest on the criterion being scored."
+    },
+    {
+      "id": "standard-dedicated",
+      "label": "Standard dedicated server",
+      "monthlyEur": 75,
+      "bandEur": [
+        60,
+        110
+      ],
+      "fits": "Modern 8c/16t, 64 GB ECC, 2 TB NVMe, 1 Gbps unmetered.",
+      "risk": "The sensible default if the provisional spec holds."
+    },
+    {
+      "id": "managed-cloud",
+      "label": "Managed cloud instance + block storage",
+      "monthlyEur": 150,
+      "bandEur": [
+        110,
+        220
+      ],
+      "fits": "16 vCPU / 64 GB plus a 2 TB volume. Snapshots and quick rebuilds included.",
+      "risk": "Most expensive, easiest to recover, and the only tier where a failed disk is somebody else’s problem."
+    }
+  ],
+  "validator": {
+    "seats": 1000,
+    "share": 0.001,
+    "flopPerYear": 307876.8813559322,
+    "costEurPerYear": 900,
+    "airdropFlop": 305505,
+    "airdropIsStake": true,
+    "note": "The airdrop IS the required stake: bonded at launch as slashing collateral, locked through the first halving, then released over 1,000 days. It is not spendable on arrival and it is at risk while bonded."
+  },
+  "minerAt10k": {
+    "competingUnits": 10000,
+    "units": 1,
+    "share": 0.0001,
+    "flopPerYear": 225776.379661017,
+    "costEurPerYear": 3649.9999999999995,
+    "monthlyEur": 304.16666666666663,
+    "airdropNote": "The miner airdrop is up to 1.2bn $FLOP across an unbounded field. Per-participant value cannot be stated because nothing caps the number of miners."
+  },
+  "breakEvenAt10k": {
+    "validator": {
+      "seats": 1000,
+      "share": 0.001,
+      "flopPerYear": 307876.8813559322,
+      "costEurPerYear": 900,
+      "airdropFlop": 305505,
+      "airdropIsStake": true,
+      "note": "The airdrop IS the required stake: bonded at launch as slashing collateral, locked through the first halving, then released over 1,000 days. It is not spendable on arrival and it is at risk while bonded.",
+      "breakEvenEurPerFlop": 0.002923246448503298
+    },
+    "miner": {
+      "competingUnits": 10000,
+      "units": 1,
+      "share": 0.0001,
+      "flopPerYear": 225776.379661017,
+      "costEurPerYear": 3649.9999999999995,
+      "monthlyEur": 304.16666666666663,
+      "airdropNote": "The miner airdrop is up to 1.2bn $FLOP across an unbounded field. Per-participant value cannot be stated because nothing caps the number of miners.",
+      "breakEvenEurPerFlop": 0.016166438692480353
+    }
+  },
+  "fieldSensitivity": [
+    {
+      "competingUnits": 1000,
+      "minerFlopPerYear": 2257763.79661017,
+      "minerBreakEven": 0.0016166438692480354,
+      "validatorFlopPerYear": 307876.8813559322,
+      "validatorBreakEven": 0.002923246448503298,
+      "minerPenalty": 0.5530303030303029
+    },
+    {
+      "competingUnits": 5000,
+      "minerFlopPerYear": 451552.759322034,
+      "minerBreakEven": 0.008083219346240176,
+      "validatorFlopPerYear": 307876.8813559322,
+      "validatorBreakEven": 0.002923246448503298,
+      "minerPenalty": 2.765151515151514
+    },
+    {
+      "competingUnits": 25000,
+      "minerFlopPerYear": 90310.5518644068,
+      "minerBreakEven": 0.04041609673120088,
+      "validatorFlopPerYear": 307876.8813559322,
+      "validatorBreakEven": 0.002923246448503298,
+      "minerPenalty": 13.82575757575757
+    },
+    {
+      "competingUnits": 100000,
+      "minerFlopPerYear": 22577.6379661017,
+      "minerBreakEven": 0.16166438692480353,
+      "validatorFlopPerYear": 307876.8813559322,
+      "validatorBreakEven": 0.002923246448503298,
+      "minerPenalty": 55.30303030303028
+    },
+    {
+      "competingUnits": 500000,
+      "minerFlopPerYear": 4515.527593220339,
+      "minerBreakEven": 0.8083219346240178,
+      "validatorFlopPerYear": 307876.8813559322,
+      "validatorBreakEven": 0.002923246448503298,
+      "minerPenalty": 276.51515151515144
+    }
+  ],
+  "unmodelled": [
+    "Inference fees. Miners take 85% of every fee and validators 15%, on top of block rewards. No fee level is published, so this models block rewards only — and the omission favours mining.",
+    "How compute converts to miner reward share. \"16 GB+ VRAM per unit\" is a floor, not a curve.",
+    "How many miners show up. The field size is the dominant term and it is a guess.",
+    "Whether a validator seat can be won at all: 1,000 seats, selection criteria unpublished, and roughly monthly replacement of the worst 50.",
+    "Slashing. A validator stake is collateral, so the downside is not merely a missed reward.",
+    "The $FLOP price, which does not exist, and the token has no market and no wallet format.",
+    "Rental prices, which are market observations from 2026-08 and move."
+  ]
+}
