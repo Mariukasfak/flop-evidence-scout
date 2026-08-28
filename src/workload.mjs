@@ -100,12 +100,29 @@ export const TASKS = Object.freeze({
     untrusted: true,
     maxLatencyMs: 30_000,
     build({ text, room }) {
+      /**
+       * Named placeholders, then examples — because a small model answers with
+       * the placeholder.
+       *
+       * The first version said "reply in this format: CATEGORY|CONFIDENCE", and
+       * the first real model to see it replied, literally, `CATEGORY|CONFIDENCE`
+       * on two of four messages — and did it on the ambiguous ones, where it had
+       * least to go on. The validator caught every one, so nothing bad reached
+       * the status board; it simply threw away half the work.
+       *
+       * Nothing but a real model could have surfaced this. The simulated backend
+       * returns a digest and never reads an instruction, so a prompt that reads
+       * as a fill-in-the-blank template looked fine for 10,845 sessions.
+       */
       return `${SYSTEM}\n\nClassify one message from the room /r/${room}.\n\n`
         + `${wrapUntrusted(text, 'MESSAGE')}\n\n`
-        + 'Reply with exactly one line in this format, no other text:\n'
-        + 'CATEGORY|CONFIDENCE\n'
-        + 'CATEGORY is one of: TEMPLATE, QUESTION, ANNOUNCEMENT, SCAM, DISCUSSION, NOISE.\n'
-        + 'CONFIDENCE is one of: HIGH, MEDIUM, LOW.';
+        + 'Answer with one word from this list: TEMPLATE, QUESTION, ANNOUNCEMENT, SCAM, DISCUSSION, NOISE.\n'
+        + 'Then a pipe character, then one word from this list: HIGH, MEDIUM, LOW.\n'
+        + 'Write nothing else — no explanation, no label, no quotes.\n\n'
+        + 'Examples of correct answers:\n'
+        + 'QUESTION|HIGH\n'
+        + 'TEMPLATE|MEDIUM\n'
+        + 'NOISE|LOW';
     },
     validate: (text) => /^(TEMPLATE|QUESTION|ANNOUNCEMENT|SCAM|DISCUSSION|NOISE)\|(HIGH|MEDIUM|LOW)\s*$/m.test(text.trim())
   },

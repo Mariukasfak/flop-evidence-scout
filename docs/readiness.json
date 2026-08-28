@@ -1,8 +1,8 @@
 {
-  "checkedAt": "2026-08-28T19:17:24.327Z",
+  "checkedAt": "2026-08-28T19:54:53.509Z",
   "summary": {
-    "ready": 10,
-    "action": 2,
+    "ready": 11,
+    "action": 1,
     "blocked": 2
   },
   "checks": [
@@ -24,7 +24,7 @@
       "id": "state-size",
       "label": "State note fits the server limit",
       "state": "READY",
-      "detail": "597 of 8192 characters",
+      "detail": "847 of 8192 characters",
       "fix": "answeredAuthors is pruned by cooldown age on every save. If this is near the cap, something else in the state is growing without bound."
     },
     {
@@ -38,7 +38,7 @@
       "id": "state-persistence",
       "label": "State survives restarts",
       "state": "READY",
-      "detail": "763 turns recorded on the server",
+      "detail": "785 turns recorded on the server",
       "fix": "The daemon must complete at least two turns and write state to /kv/."
     },
     {
@@ -58,15 +58,15 @@
     {
       "id": "inference-backend",
       "label": "A real model is reachable",
-      "state": "ACTION",
-      "detail": "backend: simulated",
-      "fix": "Install Ollama and pull one model (e.g. qwen2.5:3b). This earns no $FLOP — it is a rehearsal backend that produces real latency, real token counts and real failure modes."
+      "state": "READY",
+      "detail": "backend: ollama (qwen2.5:3b)",
+      "fix": "Two ways, either works. Free API: put a key from console.groq.com into .secrets/inference-api.json (and the same key into the INFERENCE_API_KEY repo secret so cloud runs use it too). Local: install Ollama and pull qwen2.5:3b. Rehearsal either way — real latency, real tokens, real failures, zero $FLOP earned yet."
     },
     {
       "id": "ledger",
       "label": "Spend ledger is intact",
       "state": "READY",
-      "detail": "2516 receipts across 2 ledger(s), 0 counted, 2516 simulated, 0 rejected, 0 malformed",
+      "detail": "2722 receipts across 2 ledger(s), 9 counted, 2713 simulated, 0 rejected, 0 malformed",
       "fix": "Investigate rejected or malformed receipts before trusting the total."
     },
     {
@@ -101,7 +101,7 @@
       "id": "continuous-operation",
       "label": "Runs continuously, not in bursts",
       "state": "READY",
-      "detail": "100% duty over 25.8 h, 250 cycles, last 0 min ago",
+      "detail": "100% duty over 26.0 h, 250 cycles, last 0 min ago",
       "fix": "GitHub drops most scheduled runs. Keep the local agent running, or use an always-on host — a rented validator box would run this too, collapsing two decisions into one."
     }
   ],
