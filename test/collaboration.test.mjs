@@ -195,3 +195,60 @@ describe('Writing the record', () => {
     assert.deepEqual(read.record.exchanges, [], 'a fresh record, and the loss is reported');
   });
 });
+
+/**
+ * The end the whole mechanism exists for. Before this, the Scribe pinged and the
+ * Scout stayed silent, so the record could only ever carry one acknowledging key
+ * — which is one agent, not two working together.
+ */
+describe('The handshake closes', () => {
+  test('both halves of an exchange make the record mutual', async () => {
+    const scoutId = generateIdentity();
+    const scribeId = generateIdentity();
+
+    let stored = null;
+    const client = {
+      async readNote() {
+        return stored === null
+          ? { reachable: true, found: false, value: null, error: null }
+          : { reachable: true, found: true, value: stored, error: null };
+      },
+      async setKv(ns, key, value) { stored = value; }
+    };
+
+    // Scribe pings the Scout's mailbox; the Scout signs what it received.
+    const scoutAck = signExchange({
+      fromDid: scribeId.did, toDid: scoutId.did,
+      room: 'mb-p-scout-aaa', seq: 11, content: 'Sentinel active | events seq #33810'
+    }, scoutId);
+    const first = await recordExchange(client, { didA: scoutId.did, didB: scribeId.did, exchange: scoutAck });
+    assert.equal(first.recorded, true);
+    assert.equal(first.summary.mutual, false, 'one key signing is not yet collaboration');
+
+    // The Scout replies into the Scribe's mailbox; the Scribe signs that.
+    const scribeAck = signExchange({
+      fromDid: scoutId.did, toDid: scribeId.did,
+      room: 'mb-p-scribe-bbb', seq: 12, content: 'received your sync at seq #11'
+    }, scribeId);
+    const second = await recordExchange(client, { didA: scribeId.did, didB: scoutId.did, exchange: scribeAck });
+
+    assert.equal(second.recorded, true);
+    assert.equal(second.summary.mutual, true, 'both keys have now signed');
+    assert.equal(second.summary.distinctAcknowledgers, 2);
+    assert.equal(second.summary.rejected, 0);
+
+    // Both directions are counted, and both halves still verify from the note.
+    const record = JSON.parse(stored);
+    assert.equal(Object.keys(record.totals).length, 2, 'one tally per direction');
+    for (const exchange of record.exchanges) {
+      assert.equal(verifyExchange(exchange, { pair: record.pair }).ok, true);
+    }
+  });
+
+  test('both agents write to the same note whichever of them goes first', () => {
+    const a = generateIdentity();
+    const b = generateIdentity();
+    // The Scout passes (self, peer); the Scribe passes (self, peer) — reversed.
+    assert.equal(pairKey(a.did, b.did), pairKey(b.did, a.did));
+  });
+});

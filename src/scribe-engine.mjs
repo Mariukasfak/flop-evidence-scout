@@ -1,5 +1,6 @@
 import { getDidShardedPath, getStateKey, singleLineSweep } from './identity.mjs';
 import { Guardrails } from './guardrails.mjs';
+import { signExchange, recordExchange } from './collaboration.mjs';
 
 /** What a testnet faucet room would plausibly be called when it appears. */
 export const FAUCET_PATTERNS = [/faucet/i, /testnet/i, /\bdrip\b/i, /\btap\b/i];
@@ -98,14 +99,48 @@ export class ScribeEngine {
     let outgoingMessage = null;
     let targetRoom = lobbyRoom;
 
-    // 2. Read Scribe's own private mailbox for Scout ACKs & tasks
+    /**
+     * 2. Read Scribe's own mailbox — and sign what the Scout sent back.
+     *
+     * This used to count inbound messages and throw them away, which is why the
+     * collaboration record could never become mutual: only one of the two keys
+     * ever signed anything. Counting is not attesting. Now each message from the
+     * peer is acknowledged into the same world-readable record the Scout writes
+     * to, so both DIDs appear as acknowledgers and a stranger can tell two
+     * agents apart from one agent posting twice.
+     *
+     * JSON, because the text lane truncates the author to four base58
+     * characters and the whole point here is knowing exactly who wrote it.
+     */
+    let coopAcks = 0;
     try {
-      const mbData = await this.client.readRoom(myMailbox, { limit: 5 });
+      const mbData = await this.client.readRoom(myMailbox, { limit: 5, format: 'json' });
       const mbMsgs = Array.isArray(mbData?.messages) ? mbData.messages : [];
       const newMb = mbMsgs.filter(m => Number(m.seq || 0) > (this.localState.lastMailboxSeq || 0));
       if (newMb.length > 0) {
         this.localState.lastMailboxSeq = Math.max(...newMb.map(m => Number(m.seq || 0)));
         this.localState.syncedWithScoutCount += newMb.length;
+      }
+
+      const peerDid = this.scoutIdentity?.did;
+      for (const msg of newMb) {
+        if (!peerDid || msg.from !== peerDid) continue;
+        try {
+          const exchange = signExchange({
+            fromDid: peerDid,
+            toDid: this.identity.did,
+            room: myMailbox,
+            seq: Number(msg.seq || 0),
+            content: msg.content ?? msg.text ?? ''
+          }, this.identity);
+          const result = await recordExchange(this.client, {
+            didA: this.identity.did, didB: peerDid, exchange
+          });
+          if (result.recorded) coopAcks += 1;
+        } catch {
+          // Best-effort: failing to publish an acknowledgement must never cost
+          // the Scribe its actual job, which is watching /r/events.
+        }
       }
     } catch {
       // Non-blocking mailbox check
@@ -235,6 +270,7 @@ export class ScribeEngine {
       turns: this.localState.totalTurns,
       lastEventsSeq: this.localState.lastEventsSeq,
       syncedWithScoutCount: this.localState.syncedWithScoutCount,
+      coopAcks,
       discoveredRooms: discoveredRooms.length,
       faucetAlerts,
       faucetDiscovered: Boolean(this.localState.faucetDiscovered),

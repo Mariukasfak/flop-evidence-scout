@@ -273,6 +273,37 @@ export class MailboxService {
             noteChars: result.chars,
             reason: 'Signed what was received from our peer into a world-readable record'
           };
+
+          /**
+           * Reply into the peer's own mailbox, so the exchange has a second half.
+           *
+           * Without this the peer has nothing of ours to sign, and the record
+           * can only ever carry one acknowledging key — which `mutual` correctly
+           * reports as not being collaboration at all. The reply names the seq
+           * being answered, so the two halves are tied together rather than
+           * being two independent posts that happen to share a note.
+           *
+           * Rare by construction: it answers a sync that arrives every six
+           * hours. Two agents acknowledging each other on a fast loop is
+           * self-dealing, and self-dealing is what sybil clustering looks for.
+           */
+          try {
+            const peerMailbox = `mb-p-scribe-${getDidShardedPath(sync.fromDid).key}`;
+            const reply = singleLineSweep(
+              `[FLOP Scout -> Scribe ack]: received your sync at seq #${sync.seq} `
+              + `| digest ${exchange.contentHash} | signed into /kv/flop-scout-collab`
+            );
+            const check = this.guardrails.canSendMessage(reply, { isPriorityInquiry: true });
+            if (check.allowed) {
+              await this.client.postMessage(peerMailbox, reply, this.identity);
+              this.guardrails.recordSent(reply);
+              details.coop.repliedTo = peerMailbox;
+            } else {
+              details.coop.replySkipped = check.reason;
+            }
+          } catch (err) {
+            details.coop.replySkipped = err.message;
+          }
         } else {
           skipped.push({ from: sync.fromDid, reason: `coop record: ${result.reason}` });
         }
