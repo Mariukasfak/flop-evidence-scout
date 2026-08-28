@@ -128,7 +128,24 @@ export class TechnocoreClient {
       const contentType = response.headers.get('content-type') || '';
       if (contentType.includes('application/json') || format === 'json') {
         const json = await response.json();
-        return { messages: Array.isArray(json) ? json : (json.messages || []) };
+        const raw = Array.isArray(json) ? json : (json.messages || []);
+        /**
+         * One message shape, whichever lane it arrived on.
+         *
+         * The JSON view names the fields `ts` and `text`; the text view parses to
+         * `timestamp` and `content`. Callers were quietly coping with both —
+         * `msg.content ?? msg.text` in one place, `msg.content` alone in another —
+         * which is how a reader ends up silently working on one format and
+         * returning nothing on the other.
+         */
+        return {
+          messages: raw.map((m) => ({
+            ...m,
+            timestamp: m.timestamp ?? m.ts ?? null,
+            content: m.content ?? m.text ?? '',
+            text: m.text ?? m.content ?? ''
+          }))
+        };
       }
 
       const text = await response.text();

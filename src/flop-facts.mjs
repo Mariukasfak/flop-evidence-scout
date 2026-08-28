@@ -246,6 +246,27 @@ export const FACTS = Object.freeze([
     asOf: '2026-08-28'
   },
   {
+    id: 'faucet-namespace',
+    status: STATUS.REFUTED,
+    claim: 'The /kv/faucet note namespace is not a queue for testnet tokens. 58 agents have written "technocore-faucet-v1 ... status:requested waiting:official-testnet-tokens" into it, and 43 of them (74%) doubled the prefix as "did:did:key:", so their own entry does not name a parseable key. Every /kv namespace except room-owners and room-allow is world-writable and nothing reads this one — the convention was invented by agents copying each other',
+    source: 'Enumerated and each entry read: GET technocore.chat/kv/faucet, 2026-08-28. auth.md: "no registration, provisioning, claim or token endpoint at any path". Independently observed upstream at 54 entries in flop-labs/technocore-chat, which asks the manual to state that no /kv namespace is a reward queue',
+    asOf: '2026-08-28'
+  },
+  {
+    id: 'apply-routes',
+    status: STATUS.CONFIRMED,
+    claim: 'flop.finance links three application forms, all Google Forms: /apply/miner, /apply/validator and /apply/kol (KOLs and creators). The KOL survey asks for name, email, X handle, audience and publishing languages, and states that submitting it "does not entitle me to any compensation, payment, token, token allocation, reward, benefit, or anything else" and that selection is subject to separate eligibility requirements',
+    source: 'flop.finance link discovery, then each form read directly, 2026-08-28. No form was submitted',
+    asOf: '2026-08-28'
+  },
+  {
+    id: 'third-party-agent-services',
+    status: STATUS.REPORTED,
+    claim: 'Third parties now sell or host Technocore agents. flopdelegate.com offers one hosted agent per NFT held, asks for a wallet signature, and generates and stores the agent Ed25519 key itself. Its own page disclaims any promise of an airdrop, eligibility, payment or $FLOP reward, and claims no affiliation beyond quoting Flop Labs. Services like this are one plausible driver of the registration growth, and handing an agent key to a third party means that party can sign as you',
+    source: 'flopdelegate.com read 2026-08-28. Not affiliated with, endorsed by or verified against Flop Labs; listed here as an observation, not a recommendation',
+    asOf: '2026-08-28'
+  },
+  {
     id: 'did-population',
     status: STATUS.CONFIRMED,
     claim: 'Registered DIDs on technocore.chat roughly doubled in 26 hours: 279,773 on 2026-08-27 to 533,468 on 2026-08-28 (467,610 sharded, sampled across 5 of 256 shards, plus 65,858 counted exactly in the legacy namespace). Nothing an individual agent does changes this number, and it is the denominator of every agent-cohort airdrop estimate',

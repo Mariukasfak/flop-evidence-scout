@@ -889,3 +889,91 @@ describe('A read-only client', () => {
     assert.equal(result.messages.length, 1);
   });
 });
+
+/**
+ * The text view renders a verified writer as `<z6Mk…KiGa>`, and every Ed25519
+ * did:key begins `z6Mk` — so the whole discriminating content is four base58
+ * characters, 23.4 bits. Reading that as the author broke three things at once.
+ */
+describe('Room reads carry a real identity', () => {
+  test('the two lanes agree on field names', async () => {
+    const jsonClient = new TechnocoreClient({
+      baseUrl: 'https://example.invalid',
+      fetchFn: async () => ({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => ([{ seq: 7, ts: '2026-08-28T00:00:00Z', from: 'did:key:z6MkFULL', text: 'hello' }])
+      })
+    });
+    const textClient = new TechnocoreClient({
+      baseUrl: 'https://example.invalid',
+      fetchFn: async () => ({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'text/plain' },
+        text: async () => '[7] 2026-08-28T00:00:00Z <z6Mk…FULL> hello'
+      })
+    });
+
+    const [j] = (await jsonClient.readRoom('lobby', { format: 'json' })).messages;
+    const [t] = (await textClient.readRoom('lobby')).messages;
+
+    // A reader must not have to know which lane it got.
+    for (const field of ['seq', 'timestamp', 'content']) {
+      assert.ok(j[field] !== undefined, `json message is missing ${field}`);
+      assert.ok(t[field] !== undefined, `text message is missing ${field}`);
+    }
+    assert.equal(j.content, 'hello');
+    assert.equal(t.content, 'hello');
+
+    // The one field that genuinely differs, and the reason for reading JSON.
+    assert.equal(j.from, 'did:key:z6MkFULL', 'json carries the whole key');
+    assert.equal(t.from, 'z6Mk…FULL', 'text carries 23 bits of it');
+  });
+
+  test('the scout excludes its own messages, which the text view made impossible', async () => {
+    const identity = generateIdentity();
+    const abbreviated = `z6Mk…${identity.did.slice(-4)}`;
+
+    // The old comparison, spelled out: this is what ran for every read.
+    assert.notEqual(abbreviated, identity.did,
+      'an abbreviated marker never equals a did:key, so the self-filter never fired');
+
+    const client = new TechnocoreClient({
+      baseUrl: 'https://example.invalid',
+      fetchFn: async () => ({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => ([
+          { seq: 1, ts: '2026-08-28T00:00:00Z', from: identity.did, text: 'a message we posted ourselves' },
+          { seq: 2, ts: '2026-08-28T00:00:01Z', from: 'did:key:z6MkSomeoneElse', text: 'a message from a stranger' }
+        ])
+      })
+    });
+
+    const scout = new ScoutEngine({
+      identity,
+      scribeIdentity: generateIdentity(),
+      client,
+      guardrails: new Guardrails({ maxPerHour: 2, minCooldownMs: 0 })
+    });
+
+    const { fresh, maxSeq } = await scout.collectNewMessages('lobby');
+    assert.equal(fresh.length, 1, 'our own message was excluded');
+    assert.equal(fresh[0].from, 'did:key:z6MkSomeoneElse');
+    assert.equal(maxSeq, 2, 'the cursor still advances past our own message');
+  });
+
+  test('two distinct agents are not one author just because they render alike', async () => {
+    // Upstream measured 1,452 colliding pairs across 180,794 real keys, and the
+    // population is now 533,468. A cooldown keyed on the marker suppresses a
+    // stranger because someone unrelated was answered six hours ago.
+    const a = 'did:key:z6MkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKiGa';
+    const b = 'did:key:z6MkBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBKiGa';
+    assert.notEqual(a, b);
+    assert.equal(`z6Mk…${a.slice(-4)}`, `z6Mk…${b.slice(-4)}`,
+      'the text view cannot tell these two apart — which is why we read JSON');
+  });
+});

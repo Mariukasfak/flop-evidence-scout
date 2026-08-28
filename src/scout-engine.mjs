@@ -166,9 +166,29 @@ export class ScoutEngine {
   /** Reads one room and returns the messages this agent has not seen yet. */
   async collectNewMessages(room) {
     const cursor = Number(this.localState.roomCursors?.[room] || 0);
+    /**
+     * JSON, because the text view does not carry an identity.
+     *
+     * The text lane renders a verified writer as `<z6Mk…KiGa>` — and every
+     * Ed25519 did:key begins `z6Mk`, so the whole discriminating content is four
+     * base58 characters: 23.4 bits. Reading that as the author broke three
+     * things at once.
+     *
+     * The self-filter below compared it against our full did:key and therefore
+     * never matched, so our own posts came back as candidates to answer. The
+     * per-author cooldown was keyed on a marker that thousands of identities
+     * share at the measured population of 533,468 — upstream counted 1,452
+     * colliding pairs at 180,794 keys, including two substantial writers that
+     * rendered identically in /r/lobby for five and a half hours. And the reply
+     * itself addressed that ambiguous marker in public.
+     *
+     * ?format=json carries the full DID in `from`. The mailbox already read it
+     * this way; the room reader did not.
+     */
     const data = await this.client.readRoom(room, {
       since: cursor > 0 ? cursor : null,
-      limit: 20
+      limit: 20,
+      format: 'json'
     });
 
     const messages = Array.isArray(data?.messages) ? data.messages : [];
