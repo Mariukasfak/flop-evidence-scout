@@ -24,6 +24,7 @@ import {
 
 import { Guardrails } from '../src/guardrails.mjs';
 import { TechnocoreClient } from '../src/technocore-client.mjs';
+import { archiveRoomMessages, trimArchive, resetArchiveIndex } from '../src/daemon.mjs';
 import { ScoutEngine } from '../src/scout-engine.mjs';
 
 describe('FLOP Scout Identity & Cryptography', () => {
@@ -975,5 +976,71 @@ describe('Room reads carry a real identity', () => {
     assert.notEqual(a, b);
     assert.equal(`z6Mk…${a.slice(-4)}`, `z6Mk…${b.slice(-4)}`,
       'the text view cannot tell these two apart — which is why we read JSON');
+  });
+});
+
+/**
+ * The archive carried the same O(n-squared) shape the inference ledger did:
+ * every append re-read and re-parsed the whole file. Measured at 31 ms per
+ * append on a 2.8 MB archive, across six rooms, every cycle, growing.
+ */
+describe('The chat archive', () => {
+  const tempArchive = () => fs.mkdtempSync(path.join(os.tmpdir(), 'flop-archive-'));
+  const msgs = (base, n = 5) => Array.from({ length: n }, (_, i) => ({
+    seq: base + i, from: 'did:key:zTest', content: `message ${base + i}`, ts: '2026-08-28T00:00:00Z'
+  }));
+
+  test('a message already archived is not archived twice', () => {
+    const dir = tempArchive();
+    resetArchiveIndex();
+    archiveRoomMessages('lobby', msgs(100), dir);
+    archiveRoomMessages('lobby', msgs(100), dir);
+
+    const lines = fs.readFileSync(path.join(dir, 'lobby-archive.jsonl'), 'utf8').split('\n').filter(Boolean);
+    assert.equal(lines.length, 5, 'the second pass added nothing');
+  });
+
+  test('messages written by another process are still seen as duplicates', () => {
+    const dir = tempArchive();
+    const file = path.join(dir, 'lobby-archive.jsonl');
+    resetArchiveIndex();
+    archiveRoomMessages('lobby', msgs(200), dir);
+
+    // A second daemon appends behind our back.
+    fs.appendFileSync(file, JSON.stringify({ seq: 999, content: 'from elsewhere' }) + '\n', 'utf8');
+    archiveRoomMessages('lobby', [{ seq: 999, content: 'from elsewhere' }], dir);
+
+    const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
+    assert.equal(lines.length, 6, 'the index refreshed from the file rather than trusting itself');
+  });
+
+  test('the archive is bounded, and keeps the newest', () => {
+    const dir = tempArchive();
+    const file = path.join(dir, 'lobby-archive.jsonl');
+    resetArchiveIndex();
+    // Well past a small cap, in one go.
+    archiveRoomMessages('lobby', msgs(1000, 400), dir);
+    const before = fs.statSync(file).size;
+
+    const result = trimArchive(file, { maxBytes: 1000 });
+    assert.equal(result.trimmed, true);
+    assert.ok(fs.statSync(file).size < before);
+
+    const kept = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).seq);
+    assert.equal(kept.at(-1), 1399, 'the newest line survived');
+    assert.ok(kept[0] > 1000, 'the oldest lines were the ones dropped');
+  });
+
+  test('a trimmed archive can still accept the messages it just dropped', () => {
+    const dir = tempArchive();
+    const file = path.join(dir, 'lobby-archive.jsonl');
+    resetArchiveIndex();
+    archiveRoomMessages('lobby', msgs(500, 40), dir);
+    trimArchive(file, { maxBytes: 200 });
+
+    // A stale index would refuse these as duplicates and lose them silently.
+    archiveRoomMessages('lobby', msgs(500, 5), dir);
+    const seqs = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).seq);
+    assert.ok(seqs.includes(500), 'a dropped message can be re-archived after a trim');
   });
 });

@@ -110,28 +110,95 @@ function appendAudit(logPath, record) {
   }
 }
 
+/**
+ * Seqs already archived per room, and the byte offset they were read up to.
+ *
+ * The duplicate check used to re-read and re-parse the entire archive on every
+ * append — the same O(n²) shape that was costing the inference ledger 1.2 s a
+ * cycle, in a second file. Measured here at 31 ms per append on a 2.8 MB
+ * archive, across six watched rooms, every cycle, growing with the archive.
+ */
+const archiveIndex = new Map();
+
+/** Forget every cached archive index. Tests write archives behind our back. */
+export function resetArchiveIndex() {
+  archiveIndex.clear();
+}
+
+/**
+ * Keep the archive useful without keeping it forever.
+ *
+ * These are a learning corpus, not a record of anything: the template analysis
+ * wants a representative sample of how rooms talk, and the ten-thousandth copy
+ * of "gm" teaches it nothing the first thousand did not. Left alone they reached
+ * 17 MB across six rooms and every cycle re-read all of it twice — once to
+ * archive, once to analyse.
+ *
+ * Trimming keeps the NEWEST lines, because room language drifts and a stale
+ * corpus describes a room that no longer exists.
+ */
+export const ARCHIVE_MAX_BYTES = 3 * 1024 * 1024;
+
+export function trimArchive(archivePath, { maxBytes = ARCHIVE_MAX_BYTES } = {}) {
+  if (!fs.existsSync(archivePath) || fs.statSync(archivePath).size <= maxBytes) {
+    return { trimmed: false };
+  }
+  const lines = fs.readFileSync(archivePath, 'utf8').split('\n').filter(Boolean);
+  // Halve rather than trim to the line: trimming to the cap would re-trim on
+  // the very next append, which is the cost this exists to avoid.
+  const kept = lines.slice(Math.floor(lines.length / 2));
+  const temp = `${archivePath}.trimming`;
+  fs.writeFileSync(temp, kept.join('\n') + '\n', 'utf8');
+  fs.renameSync(temp, archivePath);
+  archiveIndex.delete(path.resolve(archivePath));
+  return { trimmed: true, dropped: lines.length - kept.length, kept: kept.length };
+}
+
 export function archiveRoomMessages(room, messages = [], archiveDir = path.resolve('data/chats')) {
   if (!Array.isArray(messages) || messages.length === 0) return;
   const archivePath = path.join(archiveDir, `${room}-archive.jsonl`);
   try {
     fs.mkdirSync(path.dirname(archivePath), { recursive: true });
-    const existingSeqs = new Set();
-    if (fs.existsSync(archivePath)) {
-      const lines = fs.readFileSync(archivePath, 'utf8').split('\n').filter(Boolean);
-      for (const l of lines) {
-        try { const p = JSON.parse(l); if (p.seq) existingSeqs.add(p.seq); } catch {}
-      }
+
+    const key = path.resolve(archivePath);
+    let entry = archiveIndex.get(key);
+    const size = fs.existsSync(archivePath) ? fs.statSync(archivePath).size : 0;
+
+    // A shrunken file was trimmed or replaced, so the index is rebuilt rather
+    // than trusted — a stale index would silently drop new messages as dupes.
+    if (!entry || size < entry.offset) {
+      entry = { offset: 0, seqs: new Set() };
+      archiveIndex.set(key, entry);
     }
+    if (size > entry.offset) {
+      const fd = fs.openSync(archivePath, 'r');
+      try {
+        const buffer = Buffer.allocUnsafe(size - entry.offset);
+        fs.readSync(fd, buffer, 0, buffer.length, entry.offset);
+        for (const line of buffer.toString('utf8').split('\n')) {
+          if (!line.trim()) continue;
+          try { const p = JSON.parse(line); if (p.seq) entry.seqs.add(p.seq); } catch { /* torn line */ }
+        }
+      } finally {
+        fs.closeSync(fd);
+      }
+      entry.offset = size;
+    }
+
     const newLines = [];
     for (const m of messages) {
-      if (m && m.seq && !existingSeqs.has(m.seq)) {
+      if (m && m.seq && !entry.seqs.has(m.seq)) {
         newLines.push(JSON.stringify(m) + '\n');
-        existingSeqs.add(m.seq);
+        entry.seqs.add(m.seq);
       }
     }
     if (newLines.length > 0) {
-      fs.appendFileSync(archivePath, newLines.join(''), 'utf8');
+      const payload = newLines.join('');
+      fs.appendFileSync(archivePath, payload, 'utf8');
+      entry.offset += Buffer.byteLength(payload, 'utf8');
     }
+
+    trimArchive(archivePath);
   } catch (err) {
     console.warn(`[Archive Error] ${room}:`, err.message);
   }
@@ -217,6 +284,9 @@ export async function runScoutDaemon(options = {}) {
   // run that writes into data/ leaves residue the published pages then report as
   // fact. That is exactly how a stale "faucet radar: HIT" reached the front page.
   const heartbeatPath = config.heartbeatPath;
+  /** The corpus analysis runs on this clock rather than every cycle. */
+  const ANALYSIS_INTERVAL_MS = 30 * 60 * 1000;
+  let lastAnalysisAt = 0;
   const writeHeartbeat = async (status, lastResult = {}) => {
     try {
       fs.mkdirSync(path.dirname(heartbeatPath), { recursive: true });
@@ -240,8 +310,21 @@ export async function runScoutDaemon(options = {}) {
         stateError: scoutEngine.lastStateError || scribeEngine.lastStateError || null
       }, null, 2), 'utf8');
       
-      // Auto-analyze chats and refresh dashboard
-      analyzeChatArchives();
+      /**
+       * Re-analyse the corpus on a clock, not on every cycle.
+       *
+       * It costs 140-190 ms and re-reads every archive. It feeds one thing: the
+       * feed's "where the signal is" post, which has a twelve-hour minimum gap.
+       * Running it sixty times an hour to supply a post made twice a day was
+       * pure overhead, and the report is written to a file that
+       * getLatestLearningReport reads independently — so a slightly older
+       * report costs nothing.
+       */
+      const sinceAnalysis = Date.now() - lastAnalysisAt;
+      if (sinceAnalysis > ANALYSIS_INTERVAL_MS) {
+        lastAnalysisAt = Date.now();
+        analyzeChatArchives();
+      }
       await updateDashboardFile(config.docsDir || 'docs', config.serverUrl);
     } catch {
       // ignore
@@ -339,6 +422,16 @@ export async function runScoutDaemon(options = {}) {
           continue;
         }
       }
+
+      /**
+       * Cycle timing, measured rather than assumed.
+       *
+       * Two O(n-squared) re-reads hid in this loop for weeks — the inference
+       * ledger and the chat archive — and neither showed up as an error. A
+       * number printed every cycle is what turns that class of problem from an
+       * archaeology exercise into something visible the day it starts.
+       */
+      const cycleStartedAt = Date.now();
 
       // Step A: Scout Agent Turn (/r/lobby)
       const scoutResult = await scoutEngine.runTurn({ room: config.room });
@@ -508,6 +601,12 @@ export async function runScoutDaemon(options = {}) {
       } catch (err) {
         console.log(`[Activity] Not recorded — ${err.message}`);
       }
+
+      const cycleMs = Date.now() - cycleStartedAt;
+      if (cycleMs > config.intervalMs * 0.75) {
+        console.log(`[Cycle] ${(cycleMs / 1000).toFixed(1)}s of a ${(config.intervalMs / 1000).toFixed(0)}s interval — the loop is falling behind.`);
+      }
+      appendAudit(config.auditLogPath, { event: 'cycle_timing', cycleMs, intervalMs: config.intervalMs });
 
       await writeHeartbeat('active', scoutResult);
     } catch (err) {
