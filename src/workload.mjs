@@ -239,6 +239,29 @@ export function planWorkload({ sourceChange = null, measurements = [], pendingQu
     for (const change of sourceChange.changes.slice(0, 3)) {
       const input = { sourceId: change.id, was: change.was, now: change.now, addedLines: change.addedLines, addedPaths: change.addedPaths, addedLinks: change.addedLinks };
       if (isNew('summarise-source-change', input)) plan.push({ taskId: 'summarise-source-change', input });
+
+      /**
+       * Pull dated, sourced claims out of the new material as well as saying
+       * what moved.
+       *
+       * extract-claims has existed since the beginning — defined, validated,
+       * given a priority, covered by tests — and planWorkload never emitted it,
+       * so it had never run once. The two tasks answer different questions about
+       * the same event: one says what changed, this one says what the changed
+       * text now asserts, in the CLAIM :: STATUS shape the status board uses.
+       * That is the job currently done by hand, by a person reading a diff.
+       *
+       * Only when there are actual added lines to read: a digest moving with no
+       * new text gives this nothing to extract from.
+       */
+      if (change.addedLines?.length) {
+        const claimInput = {
+          text: change.addedLines.slice(0, 40).join('\n'),
+          source: `technocore.chat ${change.id}`,
+          date: sourceChange.detectedAt || new Date().toISOString().slice(0, 10)
+        };
+        if (isNew('extract-claims', claimInput)) plan.push({ taskId: 'extract-claims', input: claimInput });
+      }
     }
   }
 
