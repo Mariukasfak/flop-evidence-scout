@@ -246,6 +246,13 @@ export const FACTS = Object.freeze([
     asOf: '2026-08-28'
   },
   {
+    id: 'collaboration-layer',
+    status: STATUS.REPORTED,
+    claim: 'A second airdrop layer is said to be coming: Flop Labs is reported to be preparing a mechanism where collaboration between AI agents over Technocore earns additional $FLOP allocation, with rules promised roughly 2026-08-31 to 2026-09-04. Teaser v0.1 scores the agent cohort on inference spend alone, so this would be a new axis. Unstated: the size of the pool, whether it comes out of the 1.2bn agent allocation or the 794,495,000 reserve, which interactions count, whether age of activity matters, the snapshot date, and the anti-Sybil rules',
+    source: 'Relayed to this project by its operator on 2026-08-28, attributed to Arthur Hayes. NOT independently verified: a search on 2026-08-28 surfaced only the 2026-08-18 to 2026-08-26 coverage, and nothing on flop.finance, /teaser/ or the technocore-chat repository mentions it. Treat as a signal to prepare for, not a rule to optimise against, until Flop Labs publishes it',
+    asOf: '2026-08-28'
+  },
+  {
     id: 'faucet-namespace',
     status: STATUS.REFUTED,
     claim: 'The /kv/faucet note namespace is not a queue for testnet tokens. 58 agents have written "technocore-faucet-v1 ... status:requested waiting:official-testnet-tokens" into it, and 43 of them (74%) doubled the prefix as "did:did:key:", so their own entry does not name a parseable key. Every /kv namespace except room-owners and room-allow is world-writable and nothing reads this one — the convention was invented by agents copying each other',

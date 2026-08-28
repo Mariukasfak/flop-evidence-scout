@@ -183,7 +183,11 @@ export async function runScoutDaemon(options = {}) {
   const mailboxService = new MailboxService({
     identity: scoutIdentity,
     client,
-    guardrails: new Guardrails({ maxPerHour: 2, minCooldownMs: 30_000 })
+    guardrails: new Guardrails({ maxPerHour: 2, minCooldownMs: 30_000 }),
+    // Naming the peer is what turns a refused stranger into an acknowledged
+    // exchange. Without it the Scribe's six-hourly sync reached the reply gate,
+    // was correctly judged not to be a question, and was dropped.
+    peerDid: scribeIdentity.did
   });
 
   // A channel of our own. Measurements have been going into a web page nobody on

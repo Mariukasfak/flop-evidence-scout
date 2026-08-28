@@ -102,6 +102,37 @@ async function main() {
     + 'something else in the state is growing without bound.'
   );
 
+  /**
+   * Collaboration between the two agents, as something a stranger can check.
+   *
+   * Flop Labs is reported to be preparing a mechanism that rewards agents
+   * collaborating over Technocore. Whatever the rules turn out to be, the thing
+   * worth holding is evidence: two keys signing statements about the same
+   * messages, in a world-readable note. `mutual` is the honest measure — one key
+   * producing many signatures is one agent, however many it produces.
+   */
+  try {
+    const { readRecord, summariseRecord } = await import('../src/collaboration.mjs');
+    const collabClient = new (await import('../src/technocore-client.mjs')).TechnocoreClient({ baseUrl: BASE, readOnly: true });
+    const { reachable, record: collabRecord } = await readRecord(collabClient, scout.did, scribe.did);
+    const collab = reachable ? summariseRecord(collabRecord) : null;
+
+    record(
+      'collaboration',
+      'Agent collaboration is on record',
+      collab?.mutual ? READY : ACTION,
+      !reachable
+        ? 'Technocore unreachable — nothing checked'
+        : `${collab.verified} verified, ${collab.rejected} rejected, ${collab.distinctAcknowledgers} distinct acknowledger(s)`,
+      'Each peer sync is acknowledged by signing what was received into '
+      + '/kv/flop-scout-collab. Mutual means both keys have signed; until the other agent '
+      + 'acknowledges too, this is one agent attesting. Check it with tools/verify-collab.mjs.'
+    );
+  } catch (err) {
+    record('collaboration', 'Agent collaboration is on record', ACTION, `could not be read: ${err.message}`,
+      'Run tools/verify-collab.mjs to see the record directly.');
+  }
+
   record(
     'state-persistence',
     'State survives restarts',

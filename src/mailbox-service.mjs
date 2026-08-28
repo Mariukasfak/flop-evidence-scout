@@ -1,6 +1,7 @@
 import { getDidShardedPath, getStateKey, singleLineSweep, isValidTechnocoreName } from './identity.mjs';
 import { formatKnowledgeResponse, shouldRespond } from './knowledge.mjs';
 import { Guardrails } from './guardrails.mjs';
+import { signExchange, recordExchange } from './collaboration.mjs';
 
 /**
  * Makes the agent addressable instead of merely audible.
@@ -38,7 +39,16 @@ export class MailboxService {
     guardrails = new Guardrails({ maxPerHour: 4, minCooldownMs: 15_000 }),
     stateKey = null,
     publicFallbackRoom = 'technocore',
-    mailboxPrefix = 'mb-p-scout'
+    mailboxPrefix = 'mb-p-scout',
+    /**
+     * The other agent this operator runs.
+     *
+     * Without it a peer sync arrives as an anonymous stranger, gets judged by
+     * the stranger reply gate, and is correctly refused — a status digest is not
+     * a question. That is why three coop syncs produced three
+     * `mailbox_no_reply_warranted` and never an acknowledgement.
+     */
+    peerDid = null
   }) {
     if (!identity?.did || !identity?.privateKeyPem) {
       throw new Error('Valid Ed25519 identity is required for MailboxService');
@@ -49,6 +59,7 @@ export class MailboxService {
     this.client = client;
     this.guardrails = guardrails;
     this.publicFallbackRoom = publicFallbackRoom;
+    this.peerDid = peerDid;
     this.mailbox = `${mailboxPrefix}-${getDidShardedPath(identity.did).key}`;
     this.stateKey = stateKey || getStateKey(identity.did, 'mbox');
     this.localState = {
@@ -158,6 +169,8 @@ export class MailboxService {
      * is posted, so a model's output still cannot reach a stranger.
      */
     const questions = [];
+    /** Syncs from our own peer agent, acknowledged after the loop. */
+    const peerSyncs = [];
 
     for (const msg of fresh) {
       if (replies >= MAX_REPLIES_PER_TURN) {
@@ -167,6 +180,25 @@ export class MailboxService {
 
       const senderDid = typeof msg.from === 'string' ? msg.from : '';
       const text = typeof msg.content === 'string' ? msg.content : (msg.text || '');
+
+      /**
+       * A sync from our own other agent is an exchange, not an inquiry.
+       *
+       * It is acknowledged by signing what was received into a world-readable
+       * note, which costs nothing against the hourly message budget that
+       * answering strangers competes for, and — unlike a reply into a room only
+       * we can see — leaves something a third party can check.
+       */
+      if (this.peerDid && senderDid === this.peerDid) {
+        peerSyncs.push({
+          fromDid: senderDid,
+          toDid: this.identity.did,
+          room: this.mailbox,
+          seq: Number(msg.seq || msg.id || 0),
+          content: text
+        });
+        continue;
+      }
 
       if (!this.cooledDown(senderDid)) {
         skipped.push({ from: senderDid, reason: 'sender answered within the last hour' });
@@ -212,6 +244,40 @@ export class MailboxService {
       } catch (err) {
         action = `send_failed: ${err.message}`;
         skipped.push({ from: senderDid, reason: err.message });
+      }
+    }
+
+    /**
+     * Acknowledge every peer sync by signing it into the shared record.
+     *
+     * Best-effort and after the reply loop: failing to publish an acknowledgement
+     * must never cost a stranger their answer. Each failure is reported rather
+     * than swallowed, because a collaboration record that silently stops growing
+     * is exactly the sort of number that looks like a number.
+     */
+    for (const sync of peerSyncs) {
+      try {
+        const exchange = signExchange(sync, this.identity);
+        const result = await recordExchange(this.client, {
+          didA: this.identity.did,
+          didB: sync.fromDid,
+          exchange
+        });
+        if (result.recorded) {
+          action = 'coop_ack';
+          details.coop = {
+            peer: sync.fromDid,
+            seq: sync.seq,
+            verified: result.summary.verified,
+            mutual: result.summary.mutual,
+            noteChars: result.chars,
+            reason: 'Signed what was received from our peer into a world-readable record'
+          };
+        } else {
+          skipped.push({ from: sync.fromDid, reason: `coop record: ${result.reason}` });
+        }
+      } catch (err) {
+        skipped.push({ from: sync.fromDid, reason: `coop record: ${err.message}` });
       }
     }
 
