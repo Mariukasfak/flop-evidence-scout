@@ -381,6 +381,8 @@ export async function runScoutDaemon(options = {}) {
    * wiped the whole history — seven restarts in one day of audit log, each one
    * quietly re-doing everything the next room read returned.
    */
+  /** Tracks the backend across cycles so a downgrade is announced once, not endlessly. */
+  let lastBackendWasReal = null;
   const seenWorkPath = path.join(config.dataDir, 'seen-work.json');
   const seenWork = loadSeen(seenWorkPath);
   if (seenWork.size > 0) console.log(`[Work] Resuming with ${seenWork.size} jobs already done.`);
@@ -538,7 +540,26 @@ export async function runScoutDaemon(options = {}) {
       let work = { genuineSessions: 0, genuineSpend: 0, completed: 0 };
       const ledgerPath = path.join(config.dataDir, 'inference-receipts.jsonl');
       try {
-        const { backend } = await selectBackend({});
+        const { backend, real } = await selectBackend({});
+        /**
+         * Say it out loud when the model is gone.
+         *
+         * Falling back to the simulator is silent by design — nothing errors, the
+         * cycle completes, sessions are counted. But a simulated receipt can
+         * never be evidence, so an agent quietly running on it is doing work
+         * that scores zero, indefinitely. Ollama does not start with Windows, so
+         * one reboot is all it takes.
+         *
+         * Announced on the transition rather than every cycle: a warning that
+         * repeats sixty times an hour is one nobody reads.
+         */
+        if (real !== lastBackendWasReal) {
+          console.log(real
+            ? `[Work] Real model reachable again — ${backend.id}${backend.model ? ` (${backend.model})` : ''}.`
+            : '[Work] NO REAL MODEL — falling back to the simulator. These sessions count for nothing. '
+              + 'Start Ollama, or set an inference API key.');
+          lastBackendWasReal = real;
+        }
         work = await runBurst({
           /**
            * All four sources of work, not just the one.
