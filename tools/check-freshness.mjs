@@ -233,12 +233,32 @@ try {
  * anywhere", and the shared note answers it for both.
  */
 const daemonResult = results.find((r) => r.id === 'daemon');
-if (daemonResult?.state === 'STALE' && combined && Number.isFinite(combined.ageMin)) {
+if (daemonResult?.state === 'STALE') {
   const daemonTolerance = ARTEFACTS.find((a) => a.id === 'daemon').toleranceMin;
-  if (combined.ageMin <= daemonTolerance) {
+
+  if (combined && Number.isFinite(combined.ageMin) && combined.ageMin <= daemonTolerance) {
     daemonResult.state = 'STANDING DOWN';
     daemonResult.detail = `this machine's log is ${daemonResult.ageMin?.toFixed(0) ?? '?'} min old, `
       + `but the shared record shows a cycle ${combined.ageMin.toFixed(0)} min ago — another holder has the lease`;
+    stale--;
+  } else if (!combined) {
+    /**
+     * Failing to look is not the same as seeing it stopped.
+     *
+     * This file's own artefact ages by design whenever the other machine holds
+     * the lease, and the shared note is the only thing that can tell a normal
+     * standdown from a real stoppage. When Technocore cannot be reached — 54
+     * server 503s in one night — that evidence is simply absent, and calling it
+     * a stoppage turns a server blip into a red alerting run, which is the third
+     * distinct way this check has cried wolf.
+     *
+     * So: say plainly that it could not be verified, and let the next scheduled
+     * run answer. A genuine stoppage stays visible, because the very next run
+     * that does reach the server reports it.
+     */
+    daemonResult.state = 'UNVERIFIED';
+    daemonResult.detail = "this machine's log is old, and the shared record could not be read — "
+      + 'a standdown and a stoppage look identical from here';
     stale--;
   }
 }
@@ -249,7 +269,9 @@ if (!quiet) {
   for (const r of results) {
     const age = r.ageMin == null ? '' : `${r.ageMin < 60 ? `${Math.round(r.ageMin)} min` : `${(r.ageMin / 60).toFixed(1)} h`} old`;
     // Three states, not two: standing down for a lease is neither fresh nor broken.
-    const tag = r.state === 'FRESH' ? ' OK ' : (r.state === 'STANDING DOWN' ? 'IDLE' : 'STALE');
+    const tag = r.state === 'FRESH' ? ' OK '
+      : r.state === 'STANDING DOWN' ? 'IDLE'
+        : r.state === 'UNVERIFIED' ? ' ?? ' : 'STALE';
     console.log(`  [${tag}] ${r.label.padEnd(w)}  ${age.padEnd(10)} ${r.detail || ''}`);
   }
 
