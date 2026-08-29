@@ -298,7 +298,7 @@ export const FACTS = Object.freeze([
     id: 'guaranteed-allocation',
     status: STATUS.REFUTED,
     claim: 'That registering a DID guarantees an allocation',
-    source: 'No published criteria exist; ~130k DID profiles are registered. Anyone selling certainty is selling something else',
+    source: 'No published criteria exist, and the field keeps growing: 279,773 DIDs on 2026-08-27, 533,468 on 2026-08-28, 839,481 on 2026-08-29, measured in docs/measurements/timeseries.json. A hard count is not written into this claim because it goes stale in a day. Anyone selling certainty is selling something else',
     asOf: '2026-08-26'
   }
 ]);

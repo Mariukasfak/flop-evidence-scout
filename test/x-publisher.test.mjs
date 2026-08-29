@@ -192,3 +192,56 @@ describe('Credentials', () => {
     assert.equal(loadXConfig({ env: {}, secretsPath: file }), null, 'an empty value is not a credential');
   });
 });
+
+/**
+ * The generated copy was read and rejected: six posts sharing one opening line,
+ * two truncated mid-word at exactly 280, and one carrying a DID count six and a
+ * half times out of date. These lock in the properties that reading found
+ * missing.
+ */
+describe('The copy is written, not assembled', () => {
+  test('a refutation with no written copy cannot be posted at all', async () => {
+    const { X_COPY } = await import('../src/x-copy.mjs');
+    const invented = { id: 'a-refutation-nobody-has-written-yet', status: 'REFUTED', claim: 'x', source: 'y' };
+
+    assert.equal(buildRefutationPost(invented), null,
+      'the status board gets it immediately; the timeline waits for a sentence');
+    assert.equal(Object.keys(X_COPY).includes(invented.id), false);
+  });
+
+  test('every refuted fact on the board has copy, so none is silently unpublishable', async () => {
+    const { X_COPY } = await import('../src/x-copy.mjs');
+    for (const fact of refuted) {
+      assert.ok(X_COPY[fact.id], `${fact.id} is REFUTED with no X copy written`);
+    }
+  });
+
+  test('nothing is ever cut mid-word', () => {
+    for (const fact of refuted) {
+      const post = buildRefutationPost(fact);
+      assert.ok(post, fact.id);
+      assert.ok(post.chars <= MAX_POST_CHARS, `${fact.id} is ${post.chars}`);
+      assert.equal(post.text.includes('…'), false, `${fact.id} was truncated`);
+      assert.equal(post.text.endsWith('-'), false);
+    }
+  });
+
+  test('no two posts open with the same line', () => {
+    const openings = refuted.map((f) => buildRefutationPost(f).text.split('\n')[0]);
+    assert.equal(new Set(openings).size, openings.length,
+      'a shared first line across every post is a bot signature');
+  });
+
+  test('a post carries a hard number only where that number is dated', () => {
+    // The DID count moved 279,773 -> 533,468 -> 839,481 in three days. A bare
+    // "~130k" went out of date in a day and nearly went out under the operator's
+    // name, so any figure that moves must arrive with its dates alongside.
+    for (const fact of refuted) {
+      const text = buildRefutationPost(fact).text;
+      if (/\d{3},\d{3}/.test(text)) {
+        assert.match(text, /in three days|2026-\d\d-\d\d|daily/,
+          `${fact.id} states a moving figure without saying when it was measured`);
+      }
+    }
+  });
+});

@@ -99,7 +99,7 @@ Claimed somewhere, and contradicted by what is actually published.
 - **The /kv/faucet note namespace is not a queue for testnet tokens. 58 agents have written "technocore-faucet-v1 ... status:requested waiting:official-testnet-tokens" into it, and 43 of them (74%) doubled the prefix as "did:did:key:", so their own entry does not name a parseable key. Every /kv namespace except room-owners and room-allow is world-writable and nothing reads this one — the convention was invented by agents copying each other**  
   _Enumerated and each entry read: GET technocore.chat/kv/faucet, 2026-08-28. auth.md: "no registration, provisioning, claim or token endpoint at any path". Independently observed upstream at 54 entries in flop-labs/technocore-chat, which asks the manual to state that no /kv namespace is a reward queue_ · as of 2026-08-28
 - **That registering a DID guarantees an allocation**  
-  _No published criteria exist; ~130k DID profiles are registered. Anyone selling certainty is selling something else_ · as of 2026-08-26
+  _No published criteria exist, and the field keeps growing: 279,773 DIDs on 2026-08-27, 533,468 on 2026-08-28, 839,481 on 2026-08-29, measured in docs/measurements/timeseries.json. A hard count is not written into this claim because it goes stale in a day. Anyone selling certainty is selling something else_ · as of 2026-08-26
 
 ---
 

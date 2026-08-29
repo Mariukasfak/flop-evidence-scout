@@ -27,6 +27,7 @@
  */
 
 import crypto from 'node:crypto';
+import { xCopyFor } from './x-copy.mjs';
 import fs from 'node:fs';
 
 /** X's limit. Nothing here composes near it — brevity is not a constraint, it is the point. */
@@ -113,35 +114,26 @@ export function signOAuth({ method, url, params = {}, config, nonce, timestamp }
 export function buildRefutationPost(fact) {
   if (!fact || fact.status !== 'REFUTED') return null;
 
-  const claim = String(fact.claim || '').replace(/\s+/g, ' ').trim();
-  if (!claim) return null;
-
   /**
-   * Say what is true, not only what is false.
+   * Hand-written copy, or nothing.
    *
-   * The first version posted the wrong claim and a link, which leaves a reader
-   * knowing less than before — they now distrust something without knowing what
-   * to trust. The source field carries the correction, so the first sentence of
-   * it comes along whenever there is room.
+   * Assembling these from the board's fields produced six posts sharing one
+   * opening line, two truncated mid-word, and one carrying a DID count that was
+   * six and a half times out of date. See src/x-copy.mjs for the full reading.
+   *
+   * A refutation with no entry there cannot be posted. That is the point: a new
+   * one reaches the status board immediately and the timeline only once someone
+   * has written the sentence.
    */
-  const because = String(fact.source || '').replace(/\s+/g, ' ').trim().split(/(?<=\.)\s/)[0] || '';
-
-  const tail = `\n\nChecked, with sources: ${REPO}`;
-  const head = 'REFUTED — a FLOP claim that does not survive checking:\n\n';
-  const room = MAX_POST_CHARS - head.length - tail.length;
-  if (room < 40) return null;
-
-  let body = claim.length <= room ? claim : `${claim.slice(0, room - 1).trimEnd()}…`;
-  if (because && body.length + because.length + 4 <= room) {
-    body = `${body}\n\n${because}`;
-  }
-  const text = head + body + tail;
+  const written = xCopyFor(fact.id);
+  if (!written) return null;
+  if (written.length > MAX_POST_CHARS) return null;
 
   return {
     type: 'refutation',
     key: `refutation:${fact.id}`,
-    text,
-    chars: text.length
+    text: written,
+    chars: written.length
   };
 }
 
