@@ -61,7 +61,21 @@ const SOURCES = [
   // teaser is watched directly AND link discovery below reports any new path.
   { id: 'flop-teaser', url: 'https://flop.finance/teaser/', kind: 'html' },
   { id: 'upstream-commits', url: 'https://api.github.com/repos/flop-labs/technocore-chat/commits?per_page=5', kind: 'gh' },
-  { id: 'upstream-releases', url: 'https://api.github.com/repos/flop-labs/technocore-chat/releases?per_page=1', kind: 'gh' }
+  { id: 'upstream-releases', url: 'https://api.github.com/repos/flop-labs/technocore-chat/releases?per_page=1', kind: 'gh' },
+  /**
+   * Hayes writes here, and this list did not have him.
+   *
+   * Everything above watches Flop Labs the organisation — its site, its teaser,
+   * its server. The person who announces things about Flop Network was missing
+   * entirely, and the reported collaboration mechanism is exactly the kind of
+   * thing that gets said in a post before it appears on a product page.
+   *
+   * The RSS feed rather than X: it is public, needs no credential, and scraping
+   * X would breach its terms. Found by cross-checking a second FLOP project of
+   * this operator's, which listed the Substack as a first-party link while this
+   * watcher had never heard of it.
+   */
+  { id: 'hayes-substack', url: 'https://cryptohayes.substack.com/feed', kind: 'rss' }
 ];
 
 /**
@@ -112,6 +126,20 @@ async function fetchText(url) {
 
 /** Strip the parts of a page that change without the content changing. */
 function normalise(kind, body) {
+  /**
+   * An RSS feed is watched for its POSTS, not its bytes.
+   *
+   * Hayes's feed carries full post bodies and runs to 1.4 MB, so digesting the
+   * whole thing would fire on every edit, re-render and changed tracking
+   * parameter. An alert that cries wolf hourly is one nobody reads — the exact
+   * failure this file has already had twice — so only the item titles count.
+   */
+  if (kind === 'rss') {
+    const titles = [...body.matchAll(/<title>(?:<!\[CDATA\[)?([^<\]]{0,120})/g)]
+      .map((m) => m[1].trim())
+      .filter(Boolean);
+    return titles.slice(0, 20).join(' | ');
+  }
   if (kind === 'html') {
     return body
       .replace(/<script[\s\S]*?<\/script>/gi, '')
