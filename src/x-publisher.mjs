@@ -27,7 +27,7 @@
  */
 
 import crypto from 'node:crypto';
-import { xCopyFor } from './x-copy.mjs';
+import { xCopyFor, orderForX } from './x-copy.mjs';
 import fs from 'node:fs';
 
 /** X's limit. Nothing here composes near it — brevity is not a constraint, it is the point. */
@@ -152,7 +152,9 @@ export function selectXPost({ facts = [], published = [], now = Date.now() } = {
   }
 
   const used = new Set(published.map((p) => p.key));
-  for (const fact of facts) {
+  // Publication order, not board order — see X_ORDER for why the first post on
+  // the account must not be a correction to something nobody there has read.
+  for (const fact of orderForX(facts)) {
     const post = buildRefutationPost(fact);
     if (post && !used.has(post.key)) return { post, reason: 'a refutation not yet published' };
   }

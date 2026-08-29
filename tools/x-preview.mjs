@@ -16,6 +16,7 @@ import {
   selectXPost, buildRefutationPost, loadXConfig, publishToX,
   MAX_POST_CHARS, MAX_POSTS_PER_DAY
 } from '../src/x-publisher.mjs';
+import { orderForX } from '../src/x-copy.mjs';
 
 const HISTORY = path.resolve('data/x-published.json');
 
@@ -52,9 +53,11 @@ if (post) {
 }
 
 console.log('  EVERYTHING IT COULD EVER SAY\n');
-const all = FACTS.filter((f) => f.status === 'REFUTED').map(buildRefutationPost).filter(Boolean);
+const all = orderForX(FACTS.filter((f) => f.status === 'REFUTED')).map(buildRefutationPost).filter(Boolean);
 for (const p of all) {
-  const first = p.text.split('\n')[2] || '';
+  // The OPENING line. Whether six posts read as six posts or as one bot is
+  // decided by their first lines, so that is what a review has to show.
+  const first = p.text.split('\n')[0] || '';
   console.log(`  [${String(p.chars).padStart(3)}] ${first.slice(0, 84)}`);
 }
 console.log(`\n  ${all.length} refutations total. One a day at most, each posted once, never on a timer.`);

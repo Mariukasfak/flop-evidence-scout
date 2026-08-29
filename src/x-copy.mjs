@@ -86,3 +86,33 @@ export function xCopyFor(factId) {
   if (!entry) return null;
   return entry.text + X_TRAILER;
 }
+
+/**
+ * The order they should go out in, which is not the order the board holds them.
+ *
+ * The board is chronological. Taking its first unpublished entry made the very
+ * first post on the account "A correction to something I published" — a
+ * correction to a post nobody there had seen, from an account that had said
+ * nothing yet. True, and unreadable as an opener.
+ *
+ * So the two that are immediately useful to a stranger lead: the room that looks
+ * like a faucet and is not, and the queue that looks like a queue and is not.
+ * Someone who reads only one post should get the one that saves them something.
+ * The self-correction is worth publishing — it is the strongest credibility
+ * signal here — but it lands after the account has said something to correct
+ * against.
+ */
+export const X_ORDER = Object.freeze([
+  'fake-faucet-room',
+  'faucet-namespace',
+  'guaranteed-allocation',
+  'company-block-rewards',
+  'date-tension',
+  'ten-year-correction'
+]);
+
+/** Facts in publication order, with anything unwritten left out. */
+export function orderForX(facts = []) {
+  const byId = new Map(facts.map((f) => [f.id, f]));
+  return X_ORDER.map((id) => byId.get(id)).filter(Boolean);
+}

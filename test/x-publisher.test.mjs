@@ -245,3 +245,20 @@ describe('The copy is written, not assembled', () => {
     }
   });
 });
+
+test('the first post is not a correction to something nobody has read', async () => {
+  const { X_ORDER } = await import('../src/x-copy.mjs');
+  const first = selectXPost({ facts: FACTS, published: [] });
+
+  assert.equal(first.post.key, `refutation:${X_ORDER[0]}`, 'publication order decides, not board order');
+  assert.notEqual(X_ORDER[0], 'ten-year-correction',
+    'a correction is a strong signal and a terrible opener — it needs an account that has said something');
+  assert.equal(X_ORDER.at(-1), 'ten-year-correction');
+});
+
+test('publication order covers every written post exactly once', async () => {
+  const { X_ORDER, X_COPY } = await import('../src/x-copy.mjs');
+  assert.equal(new Set(X_ORDER).size, X_ORDER.length, 'no duplicates');
+  assert.deepEqual([...X_ORDER].sort(), Object.keys(X_COPY).sort(),
+    'a written post left out of the order would never be published');
+});
