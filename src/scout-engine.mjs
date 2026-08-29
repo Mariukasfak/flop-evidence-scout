@@ -197,8 +197,26 @@ export class ScoutEngine {
       return seq > cursor && m.from !== this.identity.did;
     });
 
+    /**
+     * Did the room drop history we had not read yet?
+     *
+     * A room is a ring. /r/lobby runs at roughly 2,900 messages a minute and
+     * keeps only the last ~10 MiB, so a cursor left behind by a restart, a lease
+     * standdown or an outage does not fall behind — it falls off. Every read
+     * after that looks perfectly healthy: a 200, some messages, no error.
+     *
+     * The same check catches a room that was reaped and recreated, whose seq
+     * restarted below our cursor. Reported rather than repaired: the messages
+     * are genuinely gone, and the honest thing is to say how many.
+     */
+    let gap = null;
+    if (cursor > 0 && Number.isFinite(data?.firstSeq) && data.firstSeq > cursor + 1) {
+      gap = { room, from: cursor + 1, to: data.firstSeq - 1, missed: data.firstSeq - cursor - 1 };
+      console.warn(`[Scout] /r/${room}: missed ${gap.missed} message(s) — the room dropped them before we read them.`);
+    }
+
     const maxSeq = messages.reduce((acc, m) => Math.max(acc, Number(m.seq || m.id || 0)), cursor);
-    return { fresh, maxSeq };
+    return { fresh, maxSeq, gap };
   }
 
   answeredRecently(author) {
@@ -230,6 +248,8 @@ export class ScoutEngine {
     // Topical rooms first: a question there is real, in lobby it is usually noise.
     const rooms = [...new Set([...this.watchRooms, room])];
     const roomErrors = {};
+    // Rooms that dropped history before we read it. Counted, never swallowed.
+    const gaps = [];
     let candidate = null;
     let scanned = 0;
     let primaryReadFailed = false;
@@ -244,6 +264,7 @@ export class ScoutEngine {
         continue;
       }
 
+      if (result.gap) gaps.push(result.gap);
       this.localState.roomCursors[target] = result.maxSeq;
       if (target === room) this.localState.lastSeenSeq = result.maxSeq;
       scanned += result.fresh.length;
@@ -374,6 +395,9 @@ export class ScoutEngine {
     }
 
     if (Object.keys(roomErrors).length > 0) detailPayload.roomErrors = roomErrors;
+    // Recorded in the audit log so a gap is countable later, not just a warning
+    // that scrolled past in a terminal nobody was watching.
+    if (gaps.length > 0) detailPayload.missedMessages = gaps;
 
     await this.saveRemoteState();
 

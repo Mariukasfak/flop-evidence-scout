@@ -144,7 +144,21 @@ export class TechnocoreClient {
             timestamp: m.timestamp ?? m.ts ?? null,
             content: m.content ?? m.text ?? '',
             text: m.text ?? m.content ?? ''
-          }))
+          })),
+          /**
+           * The oldest seq the room still holds, which is how a reader learns it
+           * missed something.
+           *
+           * The manual is explicit: "If a reply reports first_seq greater than
+           * your since+1, you missed lines." A room is a ring — /r/lobby runs at
+           * ~2,900 messages a minute and drops history past ~10 MiB — so a
+           * cursor that falls behind during a restart or a lease standdown does
+           * not lag, it loses. Upstream also just fixed a reaped-and-recreated
+           * room restarting its seq at 1, which starved old cursors silently;
+           * this is the field that makes either case visible.
+           */
+          firstSeq: Number.isFinite(json?.first_seq) ? json.first_seq : null,
+          lastSeq: Number.isFinite(json?.last_seq) ? json.last_seq : null
         };
       }
 

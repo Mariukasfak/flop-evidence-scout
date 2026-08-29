@@ -1044,3 +1044,75 @@ describe('The chat archive', () => {
     assert.ok(seqs.includes(500), 'a dropped message can be re-archived after a trim');
   });
 });
+
+/**
+ * A room is a ring. /r/lobby runs at ~2,900 messages a minute and keeps only the
+ * last ~10 MiB, so a cursor left behind by a restart or a lease standdown does
+ * not fall behind — it falls off, and every read afterwards looks perfectly
+ * healthy. The manual is explicit about the tell: "If a reply reports first_seq
+ * greater than your since+1, you missed lines."
+ */
+describe('Missed messages are noticed', () => {
+  const roomClient = (body) => new TechnocoreClient({
+    baseUrl: 'https://example.invalid',
+    fetchFn: async () => ({
+      ok: true, status: 200,
+      headers: { get: () => 'application/json' },
+      json: async () => body
+    })
+  });
+
+  const scoutWith = (client, cursor) => {
+    const scout = new ScoutEngine({
+      identity: generateIdentity(), scribeIdentity: generateIdentity(),
+      client, guardrails: new Guardrails({ maxPerHour: 2, minCooldownMs: 0 })
+    });
+    scout.localState.roomCursors = { lobby: cursor };
+    return scout;
+  };
+
+  test('a ring that dropped unread history is reported, with the count', async () => {
+    // We last read seq 100; the room now starts at 151. Fifty are gone.
+    const client = roomClient({
+      first_seq: 151, last_seq: 152,
+      messages: [{ seq: 151, ts: 'x', from: 'did:key:z6MkA', text: 'hello' },
+        { seq: 152, ts: 'x', from: 'did:key:z6MkB', text: 'hi' }]
+    });
+    const { gap, maxSeq } = await scoutWith(client, 100).collectNewMessages('lobby');
+
+    assert.ok(gap, 'the gap must not be silent');
+    assert.equal(gap.missed, 50);
+    assert.equal(gap.from, 101);
+    assert.equal(gap.to, 150);
+    assert.equal(maxSeq, 152, 'the cursor still advances past the gap');
+  });
+
+  test('an unbroken read reports no gap', async () => {
+    const client = roomClient({
+      first_seq: 101, last_seq: 102,
+      messages: [{ seq: 101, ts: 'x', from: 'did:key:z6MkA', text: 'hello' },
+        { seq: 102, ts: 'x', from: 'did:key:z6MkB', text: 'hi' }]
+    });
+    const { gap } = await scoutWith(client, 100).collectNewMessages('lobby');
+    assert.equal(gap, null, 'first_seq exactly one past the cursor is continuous');
+  });
+
+  test('a first read has no cursor to have fallen behind', async () => {
+    const client = roomClient({
+      first_seq: 900000, last_seq: 900001,
+      messages: [{ seq: 900000, ts: 'x', from: 'did:key:z6MkA', text: 'hello' },
+        { seq: 900001, ts: 'x', from: 'did:key:z6MkB', text: 'hi' }]
+    });
+    // Cursor 0 means we have never read this room; joining mid-stream is normal.
+    const { gap } = await scoutWith(client, 0).collectNewMessages('lobby');
+    assert.equal(gap, null, 'starting fresh is not a loss');
+  });
+
+  test('a server that omits first_seq cannot fabricate a gap', async () => {
+    const client = roomClient({
+      messages: [{ seq: 200, ts: 'x', from: 'did:key:z6MkA', text: 'hello' }]
+    });
+    const { gap } = await scoutWith(client, 100).collectNewMessages('lobby');
+    assert.equal(gap, null, 'no evidence of loss is not evidence of loss');
+  });
+});
