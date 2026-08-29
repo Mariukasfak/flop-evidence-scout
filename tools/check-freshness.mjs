@@ -171,6 +171,18 @@ try {
   const { loadOrCreateIdentity } = await import('../src/identity.mjs');
   const { readActivity, summariseActivity } = await import('../src/shared-state.mjs');
 
+  /**
+   * Refuse to invent an identity here.
+   *
+   * loadOrCreateIdentity does what its name says, and on a runner with no secret
+   * that means generating a fresh key, reading that stranger's non-existent
+   * activity note, and finding nothing — which then reads as "the agent stopped"
+   * rather than "this check could not see". A missing credential and a missing
+   * agent are different findings and must not produce the same output.
+   */
+  if (!process.env.SCOUT_IDENTITY_JSON && !fs.existsSync('.secrets/scout-identity.json')) {
+    throw new Error('no Scout identity available — set SCOUT_IDENTITY_JSON to read the shared record');
+  }
   const identity = loadOrCreateIdentity('.secrets/scout-identity.json', 'SCOUT_IDENTITY_JSON');
   const client = new TechnocoreClient({ baseUrl: process.env.TECHNOCORE_URL || 'https://technocore.chat' });
   const { reachable, record } = await readActivity(client, identity.did);

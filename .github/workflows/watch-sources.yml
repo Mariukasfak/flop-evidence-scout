@@ -55,4 +55,12 @@ jobs:
         # stops is the failure this repository has hit twice, and a red run is
         # the only thing that makes it visible. The commit above has already
         # landed, so a red job here never costs data.
+        #
+        # The identity is required, not optional: the combined view lives in a
+        # note keyed by the Scout's DID. Without it this step generated a fresh
+        # random key, read that stranger's non-existent activity note, found
+        # nothing, and reported the agent as stopped — while it was running fine
+        # on the operator's machine.
+        env:
+          SCOUT_IDENTITY_JSON: ${{ secrets.SCOUT_IDENTITY_JSON }}
         run: node tools/check-freshness.mjs
