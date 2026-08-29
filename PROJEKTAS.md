@@ -1,0 +1,275 @@
+# FLOP Evidence Scout — pilna dokumentacija
+
+**Būklė:** 2026-08-29 · 242 testai · CI žalias · agentas veikia
+**Repo:** github.com/Mariukasfak/flop-evidence-scout (**viešas**)
+**Aplankas:** `C:\Users\mariu\TriAgent`
+
+Šis dokumentas — visa informacija vienoje vietoje: ko siekiam, kas veikia, ką reiškia
+kiekvienas failas, kaip skaityti logus ir kur ieškoti klaidų.
+
+---
+
+## 1. Ko siekiame
+
+Flop Network (Arthur Hayes) žada **airdrop'ą** už veiklą testnete. Agentų kohortai
+skiriama **iki 1,2 mlrd. $FLOP**, o dalis skaičiuojama nuo to, **kiek išleista
+inference užklausoms** per ~90 dienų testnetą.
+
+Testnet planuojamas **Q4 2026**, genesis blokas — **Q1 2027**.
+
+Mūsų statymas: paleisti agentą, kuris:
+
+1. **Veikia nenutrūkstamai** — kai testnetas atsidarys, būsime pasiruošę pirmą valandą
+2. **Daro tikrą inference** — ne imitaciją, o realų modelio darbą su pasirašytais kvitais
+3. **Elgiasi sąžiningai** — tikrina teiginius, o ne spamina „checking in for $FLOP"
+
+Trečias punktas yra ne moralė, o strategija. Tinkle **533 468 registruoti DID**, ir
+69–78% žinučių yra šablonai. Konkuruoti kiekiu neįmanoma. Konkuruoti tuo, ką galima
+patikrinti — įmanoma.
+
+### Sąžiningas rizikos vertinimas
+
+| Kelias | Vietų | Mūsų šansai |
+|---|---|---|
+| **Agentas** | neribota (533k+ DID) | Vardiklis auga greičiau nei bet kuris scenarijus |
+| **Validatorius** | **1 000** | Aritmetika, ne loterija — bet reikia serverio |
+| **Mineris** | neribota | GPU nuoma 4× brangesnė, o laukas neribotas |
+
+Skaičiai: `npm run airdrop-model` ir `npm run hardware-model`.
+
+**AGI čia niekas nepastatys.** Pasiekiamas ir matuojamas tikslas — pilnas agento
+kontūras: mato, atsimena, samprotauja, veikia, save stebi, bendradarbiauja. Visi šeši
+veikia.
+
+---
+
+## 2. Kas veikia dabar
+
+```
+1 417+ ciklų · 5 500+ tikrų inference kvitų · 1,1 mln. žetonų
+8,1 sesijos/min · 0 atmestų parašų · 0 sugadintų įrašų
+12 ready · 0 ours to fix · 2 waiting on Flop Labs
+```
+
+### Du agentai
+
+| | Scout | Scribe |
+|---|---|---|
+| **DID** | `z6MkvJAr…3Aks3zgn` | `z6Mkfdd1…DmCpELvW` |
+| **Darbas** | Skaito 6 kambarius, atsako į klausimus | Stebi `/r/events`, ieško faucet'o |
+| **Dėžutė** | `mb-p-scout-…` | `mb-p-scribe-…` |
+
+Stebimi kambariai: `lobby`, `technocore`, `inference-agents`, `flop-network`,
+`gpu-miners`, `validators`.
+
+**Abu agentai priklauso vienam operatoriui, ir tai skelbiama atvirai** — ne slepiama.
+
+### Modelis
+
+Ollama + `qwen2.5:3b` (1,9 GB, 4-bit) veikia lokaliai. Vidutiniškai **~2,9 s** viena
+sesija. Alternatyva — nemokamas API raktas (Groq), tada ir debesies ciklai daro tikrą
+inference.
+
+---
+
+## 3. Failai ir ką jie daro
+
+### Branduolys (`src/`)
+
+| Failas | Ką daro |
+|---|---|
+| `daemon.mjs` | Pagrindinis ciklas — surenka visus agentus, valdo laiką |
+| `scout-engine.mjs` | Skaito kambarius, renka kandidatus atsakymui |
+| `scribe-engine.mjs` | Stebi `/r/events`, faucet radaras |
+| `mailbox-service.mjs` | Atsako į tiesiogines žinutes |
+| `technocore-client.mjs` | Visas bendravimas su serveriu |
+| `identity.mjs` | Ed25519 raktai, parašai, did:key |
+| `guardrails.mjs` | Apsaugos: 2 žinutės/val., dedup, rakto nutekėjimo blokas |
+| `knowledge.mjs` | Ką atsakyti — fiksuota faktų lentelė |
+| `lease.mjs` | Nuoma: du kompiuteriai nerašo tuo pačiu raktu |
+
+### Inference
+
+| Failas | Ką daro |
+|---|---|
+| `inference.mjs` | Sesijos, pasirašyti kvitai, FLOP skaičiavimas |
+| `inference-backends.mjs` | Ollama / nemokama API / imitacija |
+| `workload.mjs` | 5 užduočių rūšys ir jų planavimas |
+| `workload-runner.mjs` | Biudžeto variklis — negali viršyti limito |
+| `inference-ledger.mjs` | Apskaitos knyga, parašų tikrinimas |
+| `seen-work.mjs` | Kas jau padaryta (išgyvena perkrovimą) |
+
+### Skaičiavimai
+
+| Failas | Ką daro |
+|---|---|
+| `tokenomics.mjs` | Teaser'is kaip duomenys + išvedimai |
+| `airdrop-model.mjs` | Agento dalis = M / N |
+| `validator-model.mjs` | Validatoriaus kaštai ir pajamos |
+| `miner-model.mjs` | Mineris prieš validatorių |
+| `flop-facts.mjs` | **37 faktai** su statusais ir šaltiniais |
+
+### Bendradarbiavimas ir viešinimas
+
+| Failas | Ką daro |
+|---|---|
+| `collaboration.mjs` | Pasirašyti mainai tarp dviejų agentų |
+| `shared-state.mjs` | Bendras įrašas, kur susideda abiejų mašinų darbas |
+| `telemetry-feed.mjs` | Skelbia į `/r/d-scout-telemetry` |
+| `publications.mjs` | Ką verta skelbti (5 tipai su pauzėmis) |
+| `dashboard.mjs` | Gyvas HTML puslapis |
+
+### Įrankiai (`tools/`)
+
+```bash
+npm run readiness        # ar pasiruošę faucet dienai
+npm run watch-sources    # ar pasikeitė oficialūs šaltiniai
+npm run freshness        # ar automatika tikrai sukasi
+npm run verify-collab    # patikrinti bendradarbiavimo įrašą
+npm run airdrop-model    # airdrop skaičiavimai
+npm run hardware-model   # mineris prieš validatorių
+npm test                 # 242 testai
+```
+
+---
+
+## 4. Duomenys ir logai
+
+### Kur kas rašoma
+
+| Failas | Kas viduje | Dydis |
+|---|---|---|
+| `data/local/scout-audit.jsonl` | **Kiekvienas veiksmas** — pagrindinis logas | ~2,4 MB |
+| `data/local/inference-receipts.jsonl` | Pasirašyti inference kvitai | ~5,6 MB |
+| `data/local/scout-heartbeat.json` | Dabartinė būsena | maža |
+| `data/local/seen-work.json` | Kas jau padaryta | ~0,1 MB |
+| `data/local/chats/` | Pokalbių archyvas mokymuisi | ribota 3 MB/kambariui |
+
+> `data/` **nepatenka į git** — ten gyvi duomenys. `.secrets/` irgi ne — ten raktai.
+
+### Ką reiškia logo eilutės
+
+| Eilutė | Reikšmė |
+|---|---|
+| `Action: monitoring_rooms` | Perskaitė, verto atsakymo nerado. **Normalu** |
+| `Action: answered_inquiry` | Atsakė nepažįstamam. Iki 2/val. |
+| `monitoring_pacing: Pasiektas valandinis limitas` | Rado, bet limitas neleido. **Normalu** |
+| `[Work] 8/20 sessions \| genuine: 8` | **Svarbiausia.** `genuine:` turi būti > 0 |
+| `[Lease] Standing down` | Kita mašina dirba. **Normalu** |
+| `coop_ack` | Pasirašė partnerio žinutę į viešą įrašą |
+| `[Ledger] Compacted` | Sutvarkė knygą. Tikri kvitai neišmetami |
+| `[Cycle] … falling behind` | Ciklas netelpa. Retkarčiais gerai, nuolat — sakykite |
+| `missed N message(s)` | Kambarys išmetė istoriją anksčiau nei perskaitėme |
+| `HTTP 503` | **Serverio bėda, ne mūsų.** Praeina |
+| `HTTP 400 text too long` | ⚠️ Būsena nustojo saugotis. Jau taisyta, bet sakykite jei kartosis |
+
+### Greita patikra
+
+```bash
+node -e "const{ledgerTotals}=await import('./src/inference-ledger.mjs');const t=ledgerTotals('data/local/inference-receipts.jsonl');console.log('tikri:',t.counted,'| atmesti:',t.signatureRejected)" --input-type=module
+```
+
+---
+
+## 5. Automatika GitHub'e
+
+| Darbas | Kada | Ką daro |
+|---|---|---|
+| `ci.yml` | kiekvienas push | 242 testai, rakto nutekėjimo patikra |
+| `watch-sources.yml` | kas valandą | Tikrina 10 šaltinių, matuoja tinklą, perstato gidą |
+| `flop-scout-daemon.yml` | kas ~6 val. | Agentas debesyje, kai kompiuteris išjungtas |
+| `claim-rehearsal.yml` | savaitinis | Ar parašai vis dar galioja su GitHub raktais |
+
+**Nuoma** užtikrina, kad debesis ir kompiuteris niekada nerašo vienu metu.
+
+Stebimi šaltiniai (10): `openapi`, `agent-json`, `config`, `manual`, `patterns`,
+`skill`, `flop-finance`, `flop-teaser`, `upstream-commits`, `upstream-releases`.
+
+---
+
+## 6. Faktų lenta
+
+**37 faktai**, kiekvienas su šaltiniu ir data:
+
+| Statusas | Kiek | Reikšmė |
+|---|---|---|
+| CONFIRMED | 22 | Patvirtinta pirminiame šaltinyje |
+| REPORTED | 6 | Perpasakota, bet nepatikrinta pirmine ranka |
+| UNKNOWN | 3 | Atvirai nežinoma |
+| REFUTED | 6 | **Paneigta** — plačiai kartojami mitai |
+
+Svarbiausi paneigimai:
+
+- `/r/faucet` kambarys **nėra** faucet — jį sukūrė nepažįstamasis
+- `/kv/faucet` erdvė **nėra** eilė — 58 agentai rašo į niekur, 74% net savo raktą įrašė klaidingai
+- DID registracija **negarantuoja** jokios alokacijos
+
+Lenta: `docs/flop-facts.md` · generuojama iš `src/flop-facts.mjs`, CI tikrina sutapimą.
+
+---
+
+## 7. Ką sąmoningai darome ir ko ne
+
+### Darome
+
+- Tikriname kiekvieną teiginį prieš skelbdami
+- Rašome, iš kur skaičius, ir kada matuota
+- Skelbiame ir tai, kas mums nepatogu (pvz. kad populiacija auga greičiau nei mūsų prognozės)
+- Laikome du agentus ir **atvirai sakome**, kad jie vieno operatoriaus
+
+### Nedarome
+
+- ❌ Nekeliame dirbtinės veiklos — spamas yra tai, prieš ką visas projektas
+- ❌ Nesirašome į `/kv/faucet` eilę
+- ❌ Neatiduodame raktų „delegate" servisams — kas laiko raktą, pasirašinėja jūsų vardu
+- ❌ Nekuriame daugiau agentų — visi iš vieno IP, o anti-Sybil taisyklės tam ir egzistuoja
+- ❌ Nenuomojame geležies, kol nėra ko ant jos paleisti
+- ❌ Neteigiame formose netiesos
+
+---
+
+## 8. Kas liko
+
+### Jūsų sprendimai
+
+1. **KOL forma** — nuoroda su užpildytais laukais paruošta; liko el. paštas, du klausimai ir varnelė
+2. **Validatoriaus paraiška** — jei nuspręsite: 75 €/mėn., lūžis 0,0029 €/FLOP, 1 000 vietų
+3. **Groq raktas į GitHub** — kad ir debesis darytų tikrą inference (neprivaloma)
+
+### Laukiam Flop Labs
+
+- Faucet / sesijos maršrutas (nėra tarp 26 dokumentuotų kelių)
+- Piniginės formatas (nepaskelbtas)
+- **Bendradarbiavimo mechanizmo taisyklės** — žadėtos rugpj. 31 – rugs. 4
+
+---
+
+## 9. Kaip paleisti
+
+```bash
+PARUOSTI-VISKA.bat     # viskas iš karto: kodas, raktas, paleidimas
+paleisti-nuolat.bat    # tik paleisti agentą
+```
+
+Sustabdyti — uždaryti langą. Per ~10 min GitHub perima darbą.
+
+---
+
+## 10. Kur ieškoti daugiau
+
+| Kur | Kas |
+|---|---|
+| `README.md` | Projekto pristatymas (anglų k.) |
+| `OPERATOR_PLAYBOOK.md` | Operatoriaus veiksmai |
+| `FAUCET-RUNBOOK.md` | Ką daryti faucet dieną |
+| `docs/flop-facts.md` | Faktų lenta |
+| `docs/field-guide.md` | Lauko vadovas apie tinklą |
+| `docs/guide.html` | Gidas su grafikais |
+| `docs/status.html` | Gyvas skydelis |
+
+Kiekvienas kodo taisymas turi paaiškinimą **šalia eilutės, kurią jis paaiškina** — ne
+tik commit'e. Jei kas neaišku, `git log` turi pilną istoriją su matavimais.
+
+---
+
+*Nesusiję su Flop Labs. Visi Teaser v0.1 skaičiai pažymėti kaip provisional ir gali keistis.*
