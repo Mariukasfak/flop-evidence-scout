@@ -13,10 +13,40 @@ import path from 'node:path';
 const BASE = process.env.TECHNOCORE_URL || 'https://technocore.chat';
 const OUT_DIR = path.resolve('docs/measurements');
 
-async function get(pathname) {
-  const res = await fetch(`${BASE}${pathname}`, { headers: { 'user-agent': 'FLOP-Scout-Measure/1.0' } });
-  if (!res.ok) throw new Error(`GET ${pathname} -> HTTP ${res.status}`);
-  return res.text();
+/**
+ * One reading takes about fifteen requests, so a single blip anywhere in the run
+ * used to lose the whole measurement — and with it the workflow it runs in.
+ * The agent's own logs recorded 54 server 503s in one night, which makes a blip
+ * the normal case rather than the exception.
+ *
+ * Retries only what is worth retrying: a 5xx or a transport failure is the
+ * server having a moment, while a 404 or a 400 is a question we asked wrong and
+ * will keep asking wrong.
+ */
+async function get(pathname, { attempts = 3 } = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const res = await fetch(`${BASE}${pathname}`, {
+        headers: { 'user-agent': 'FLOP-Scout-Measure/1.0' },
+        signal: AbortSignal.timeout(20_000)
+      });
+      if (res.ok) return res.text();
+      // A 4xx is a question we asked wrong and will keep asking wrong. Marked so
+      // the catch below can tell it apart from a server having a moment.
+      const err = new Error(`GET ${pathname} -> HTTP ${res.status}`);
+      err.ourFault = res.status < 500;
+      throw err;
+    } catch (err) {
+      if (err.ourFault) throw err;
+      lastError = err;
+    }
+    if (attempt < attempts) {
+      await new Promise((r) => setTimeout(r, attempt * 2000));
+    }
+  }
+  lastError.transient = true;
+  throw lastError;
 }
 
 /** Room reads are line-structured; the banner lines simply do not match. */
@@ -236,7 +266,28 @@ function appendToSeries(data) {
   console.log(`[measure] Appended reading to the series (${series.observations.length} total).`);
 }
 
+/**
+ * A missed reading must not bury an alert.
+ *
+ * This shares a workflow with the source watcher, whose entire output is a
+ * warning about Flop Labs changing something. When a transient server fault here
+ * failed the run, that warning arrived wearing the colour that means "ignore
+ * me" — twice in one night, and the capacity change earlier in the week had to
+ * be found by hand for exactly this reason.
+ *
+ * So a server that is briefly unwell is reported and skipped: the series simply
+ * has one fewer point, and the next hourly run fills it in. Anything else — a
+ * 4xx, a bug in this file — still fails loudly, because that is ours to fix and
+ * would otherwise go unnoticed forever.
+ */
 main().catch((err) => {
+  if (err.transient) {
+    console.warn(`[measure] Skipped this reading — ${err.message}. The next scheduled run will retry.`);
+    return;
+  }
   console.error('Measurement failed:', err.message);
-  process.exit(1);
+  // exitCode rather than exit(): a hard exit while an AbortSignal timer is still
+  // pending trips a libuv assertion on Windows, which buries the real message
+  // under a crash that looks like a different bug entirely.
+  process.exitCode = 1;
 });
