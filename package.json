@@ -22,7 +22,8 @@
     "readiness": "node tools/readiness.mjs",
     "freshness": "node tools/check-freshness.mjs",
     "hardware-model": "node tools/hardware-model.mjs",
-    "verify-collab": "node tools/verify-collab.mjs"
+    "verify-collab": "node tools/verify-collab.mjs",
+    "x-preview": "node tools/x-preview.mjs"
   },
   "keywords": [
     "flop-network",
