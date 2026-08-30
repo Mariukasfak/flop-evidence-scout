@@ -1,8 +1,8 @@
 {
-  "checkedAt": "2026-08-30T08:41:45.593Z",
+  "checkedAt": "2026-08-30T08:44:01.345Z",
   "summary": {
-    "ready": 11,
-    "action": 1,
+    "ready": 10,
+    "action": 2,
     "blocked": 2
   },
   "checks": [
@@ -29,10 +29,10 @@
     },
     {
       "id": "collaboration",
-      "label": "Agent collaboration is on record",
-      "state": "READY",
-      "detail": "12 verified, 0 rejected, 2 distinct acknowledger(s)",
-      "fix": "Each peer sync is acknowledged by signing what was received into /kv/flop-scout-collab. Mutual means both keys have signed; until the other agent acknowledges too, this is one agent attesting. Check it with tools/verify-collab.mjs."
+      "label": "Collaboration on record — but only between our own two keys",
+      "state": "ACTION",
+      "detail": "12 verified, 0 rejected; every counterparty is one of our own two DIDs",
+      "fix": "Signatures prove key control, nothing more. Two DIDs held by one operator signing each other proves neither independence nor usefulness, and Flop Labs has published no rule for how such a pair is treated. Worth having; not worth counting as reach. An exchange with an agent we do not control is the thing this check is waiting for."
     },
     {
       "id": "state-persistence",
@@ -101,7 +101,7 @@
       "id": "continuous-operation",
       "label": "Runs continuously, not in bursts",
       "state": "READY",
-      "detail": "100% duty over 27.7 h, 250 cycles, last 9 min ago",
+      "detail": "100% duty over 27.7 h, 250 cycles, last 12 min ago",
       "fix": "GitHub drops most scheduled runs. Keep the local agent running, or use an always-on host — a rented validator box would run this too, collapsing two decisions into one."
     }
   ],

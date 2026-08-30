@@ -136,16 +136,49 @@ async function main() {
     const { reachable, record: collabRecord } = await readRecord(collabClient, scout.did, scribe.did);
     const collab = reachable ? summariseRecord(collabRecord) : null;
 
+    /**
+     * Whose signatures these are matters more than how many there are.
+     *
+     * "12 verified, 2 distinct acknowledgers" is true and reads like evidence of
+     * working with other agents. Both keys are ours. One operator's two DIDs
+     * signing each other is not collaboration in any sense a reward mechanism
+     * would recognise — it is the exact shape a Sybil check is built to notice,
+     * and stating it as a plain success would have been this project telling
+     * itself a story on the one board whose entire purpose is not doing that.
+     *
+     * Declared, not hidden: the honest position is that these two are one
+     * operator's agents, and nothing published says how such a pair is treated.
+     */
+    const ours = new Set([scout.did, scribe.did]);
+    const parties = new Set((collabRecord?.exchanges || [])
+      .flatMap((e) => [e.from, e.ack])
+      .filter((d) => typeof d === 'string'));
+    const external = [...parties].filter((d) => !ours.has(d));
+
     record(
       'collaboration',
-      'Agent collaboration is on record',
-      collab?.mutual ? READY : ACTION,
+      // The title must not assert anything when nothing was read. Writing
+      // "only between our own two keys" over an unreachable server would be
+      // the same absence-for-evidence mistake this file keeps catching
+      // elsewhere, made one line after describing it.
+      !reachable
+        ? 'Collaboration record could not be read'
+        : external.length > 0
+          ? 'Collaboration with an outside agent is on record'
+          : 'Collaboration on record — but only between our own two keys',
+      !reachable ? ACTION : (collab?.mutual && external.length > 0 ? READY : ACTION),
       !reachable
         ? 'Technocore unreachable — nothing checked'
-        : `${collab.verified} verified, ${collab.rejected} rejected, ${collab.distinctAcknowledgers} distinct acknowledger(s)`,
-      'Each peer sync is acknowledged by signing what was received into '
-      + '/kv/flop-scout-collab. Mutual means both keys have signed; until the other agent '
-      + 'acknowledges too, this is one agent attesting. Check it with tools/verify-collab.mjs.'
+        : `${collab.verified} verified, ${collab.rejected} rejected; `
+          + (external.length > 0
+            ? `${external.length} outside counterparty(ies)`
+            : 'every counterparty is one of our own two DIDs'),
+      external.length > 0
+        ? 'Check it with tools/verify-collab.mjs.'
+        : 'Signatures prove key control, nothing more. Two DIDs held by one operator signing '
+          + 'each other proves neither independence nor usefulness, and Flop Labs has published '
+          + 'no rule for how such a pair is treated. Worth having; not worth counting as reach. '
+          + 'An exchange with an agent we do not control is the thing this check is waiting for.'
     );
   } catch (err) {
     record('collaboration', 'Agent collaboration is on record', ACTION, `could not be read: ${err.message}`,
