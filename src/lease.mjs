@@ -84,7 +84,7 @@ export function makeHolderId(label = 'local') {
  * not an error.
  */
 export class Lease {
-  constructor({ client, name, holder, ttlMs = DEFAULT_TTL_MS, ns = DEFAULT_LEASE_NS, now = () => Date.now() }) {
+  constructor({ client, name, holder, ttlMs = DEFAULT_TTL_MS, ns = DEFAULT_LEASE_NS, now = () => Date.now(), readAttempts = 3 }) {
     if (!client) throw new Error('a lease needs a Technocore client');
     if (!name) throw new Error('a lease needs a name');
     this.client = client;
@@ -93,6 +93,8 @@ export class Lease {
     this.holder = holder || makeHolderId();
     this.ttlMs = ttlMs;
     this.now = now;
+    /** How many times a read may be retried before an outage is believed. */
+    this.readAttempts = Math.max(1, readAttempts);
     /** The exact string we last wrote, which is what `if=` must be given. */
     this.currentValue = null;
     this.heldUntil = 0;
@@ -109,9 +111,25 @@ export class Lease {
    * racing. Describing an outage as contention sends the reader to the wrong
    * place entirely.
    */
-  async read() {
+  async read(attempts = this.readAttempts) {
     if (typeof this.client.readNote === 'function') {
-      const note = await this.client.readNote(this.ns, this.name);
+      /**
+       * Retried, because one attempt is not a measurement.
+       *
+       * The lease gates the entire cycle, so a single 503 on this one read
+       * stood the agent down for fifteen seconds — and Technocore returns 503s
+       * in bursts. Over one measured run that was 141 cycles out of 570: a
+       * quarter of the agent's working time spent waiting on a server that
+       * answered fine on the next request.
+       *
+       * Distinguishing an outage from an absent note was the earlier fix here,
+       * and it was correct. It was not enough on its own.
+       */
+      let note = await this.client.readNote(this.ns, this.name);
+      for (let attempt = 1; attempt < attempts && !note.reachable; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, attempt * 750));
+        note = await this.client.readNote(this.ns, this.name);
+      }
       if (!note.reachable) return { reachable: false, value: null, error: note.error };
       // A lease token never parses as JSON, so anything else here is somebody
       // else's data and is handled by the caller, not overwritten.

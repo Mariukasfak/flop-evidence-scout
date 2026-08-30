@@ -21,7 +21,19 @@ import { shouldRespond, isBoilerplate, hasStrongTerm, stripUrls } from './knowle
  *   too loose   -> boilerplate surviving the gate
  */
 
-const ARCHIVE_DIR = 'data/chats';
+/**
+ * Where the archives are, asked for rather than assumed.
+ *
+ * The daemon writes to its own dataDir; this file's default was a different
+ * directory, and for three days the two disagreed in silence — the learning
+ * pass reported a healthy 12,000-message corpus while reading a stale snapshot
+ * and the one room the agent deliberately ignores.
+ *
+ * The default stays put for callers that have always used it. Anyone who knows
+ * better passes --dir, and the daemon passes archiveDir directly.
+ */
+const dirArg = process.argv.find((a) => a.startsWith('--dir='));
+const ARCHIVE_DIR = dirArg ? dirArg.slice('--dir='.length) : 'data/chats';
 const OUTPUT_DIR = 'data/learning';
 
 /** Reasons that mean "correctly ignored". Anything else is worth a human look. */

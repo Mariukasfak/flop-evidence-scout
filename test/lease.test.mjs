@@ -306,3 +306,40 @@ test('a 5xx on the write is transient, a 409 is a genuine race', async () => {
   assert.equal(failed.acquired, false);
   assert.equal(failed.transient, true);
 });
+
+/**
+ * A single 503 used to cost a whole cycle.
+ *
+ * The lease gates everything the daemon does, and Technocore returns 503s in
+ * bursts. Measured over one run: 141 of 570 cycles stood down on an unreadable
+ * lease — a quarter of the agent's working time given up to a server that
+ * answered on the next request.
+ */
+test('one bad read does not stand the agent down', async () => {
+  const client = new FakeKv();
+  let reads = 0;
+  const realRead = client.readNote.bind(client);
+  client.readNote = async (...args) => {
+    reads += 1;
+    // Fails once, exactly the shape of the bursts seen in production.
+    if (reads === 1) return { reachable: false, found: null, value: null, status: 503, error: 'HTTP 503' };
+    return realRead(...args);
+  };
+
+  const lease = new Lease({ client, name: 'scout-cycle', holder: 'local-a1' });
+  const attempt = await lease.acquire();
+
+  assert.equal(attempt.acquired, true, 'the retry recovered the cycle');
+  assert.ok(reads >= 2, 'the read was actually retried');
+});
+
+test('a server that is genuinely down is still reported as down', async () => {
+  const client = new FakeKv();
+  client.down = true;
+  // readAttempts: 1 keeps the test fast; the retry itself is covered above.
+  const lease = new Lease({ client, name: 'scout-cycle', holder: 'local-a1', readAttempts: 1 });
+
+  const attempt = await lease.acquire();
+  assert.equal(attempt.acquired, false);
+  assert.equal(attempt.transient, true, 'an outage is transient, not contention');
+});

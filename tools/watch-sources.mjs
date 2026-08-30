@@ -293,15 +293,30 @@ async function main() {
         sources[source.id].body = normalised;
       }
     } catch (err) {
-      // A source being unreachable is not news; record it and move on.
+      /**
+       * One failure is not news. A week of them is.
+       *
+       * A source being unreachable was recorded and forgotten, which is right
+       * for a blip and wrong for a block: Substack answers this machine with a
+       * 200 and the GitHub Actions runner with a 403, so `hayes-substack` had
+       * been failing every hour while the project went on describing it as
+       * watched. Nothing anywhere said we had stopped looking.
+       *
+       * Counting the run gives the alert something to fire on, and gives the
+       * status page a way to say "watched" and "blind" as different words.
+       */
+      const prev = prevSources[source.id] || {};
+      const failures = (prev.error ? (prev.consecutiveFailures || 1) : 0) + 1;
       sources[source.id] = {
         url: source.url,
         error: err.message,
-        digest: prevSources[source.id]?.digest || null,
-        summary: prevSources[source.id]?.summary || null,
-        checkedAt: now
+        digest: prev.digest || null,
+        summary: prev.summary || null,
+        checkedAt: now,
+        consecutiveFailures: failures,
+        failingSince: prev.error ? (prev.failingSince || prev.checkedAt || now) : now
       };
-      console.warn(`[watch] ${source.id}: ${err.message}`);
+      console.warn(`[watch] ${source.id}: ${err.message} (${failures} in a row)`);
     }
   }
 

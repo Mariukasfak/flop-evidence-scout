@@ -323,7 +323,20 @@ export async function runScoutDaemon(options = {}) {
       const sinceAnalysis = Date.now() - lastAnalysisAt;
       if (sinceAnalysis > ANALYSIS_INTERVAL_MS) {
         lastAnalysisAt = Date.now();
-        analyzeChatArchives();
+        /**
+         * Told where the archives are, and whose messages are ours.
+         *
+         * Called bare, this read learning-engine's own default of data/chats
+         * while the six topical rooms had been archiving to dataDir/chats for
+         * three days. So the pass that decides "what should we have answered?"
+         * was studying the /r/events firehose — the one room the agent
+         * deliberately ignores — plus a frozen snapshot of everything else.
+         * It reported a healthy 12,032-message corpus throughout, which is why
+         * nothing looked wrong.
+         *
+         * Without selfDid it also counted our own posts as other people's.
+         */
+        analyzeChatArchives({ archiveDir: config.chatArchiveDir, selfDid: scoutIdentity.did });
       }
       await updateDashboardFile(config.docsDir || 'docs', config.serverUrl, config.dataDir);
     } catch {
@@ -440,8 +453,23 @@ export async function runScoutDaemon(options = {}) {
        */
       const cycleStartedAt = Date.now();
 
+      /**
+       * A stopwatch per step, because "everything else" is not a diagnosis.
+       *
+       * Splitting the cycle into inference and remainder answered "is the model
+       * the bottleneck?" — it was not — and then stopped being useful. Reading
+       * the six rooms in parallel was supposed to take seven seconds off the
+       * remainder and visibly did not, which means the remainder was never
+       * mostly room reads and one more guess would have been one too many.
+       */
+      const steps = {};
+      const timed = async (name, fn) => {
+        const at = Date.now();
+        try { return await fn(); } finally { steps[name] = Date.now() - at; }
+      };
+
       // Step A: Scout Agent Turn (/r/lobby)
-      const scoutResult = await scoutEngine.runTurn({ room: config.room });
+      const scoutResult = await timed('scout', () => scoutEngine.runTurn({ room: config.room }));
       console.log(`[Scout #${scoutResult.turns}] Action: ${scoutResult.action} | Seq: ${scoutResult.lastSeenSeq}`);
       appendAudit(config.auditLogPath, { agent: 'scout', ...scoutResult });
 
@@ -459,13 +487,13 @@ export async function runScoutDaemon(options = {}) {
             try { sourceChange = JSON.parse(fs.readFileSync(changePath, 'utf8')); } catch { /* ignore */ }
           }
 
-          const feedResult = await telemetryFeed.runTurn({
+          const feedResult = await timed('feed', () => telemetryFeed.runTurn({
             observations: series.observations,
             caps: series.caps,
             sourceChange,
             faucetHits: scribeEngine.localState.faucetHits || [],
             learningReport: getLatestLearningReport()
-          });
+          }));
           console.log(`[Feed] ${feedResult.action} | ${feedResult.details?.reason || ''}`);
           appendAudit(config.auditLogPath, feedResult);
         }
@@ -477,34 +505,50 @@ export async function runScoutDaemon(options = {}) {
       // Only lobby and events were being archived, so the learning pass could
       // only ever study the firehose the agent deliberately ignores — and never
       // the topical rooms where it does its work.
+      //
+      // Read together, written in order.
+      //
+      // These six reads are independent — nothing in one informs the next — but
+      // they ran one after another, and Technocore answers a room read in
+      // roughly a second. Measured: 9.5s serial against 2.4s in parallel, out of
+      // a 47s cycle. That time was not idle in a harmless way; the inference
+      // burst runs on whatever is left before the deadline, so it was coming
+      // straight out of the sessions that produce the evidence.
+      //
+      // The archiving stays sequential and in a fixed room order so the audit
+      // trail does not reshuffle itself run to run for no reason.
       const recentMessages = [];
-      for (const archiveRoom of new Set([config.room, ...scoutEngine.watchRooms])) {
-        try {
-          const data = await client.readRoom(archiveRoom, { limit: 25 });
-          if (data.messages) {
-            archiveRoomMessages(archiveRoom, data.messages, config.chatArchiveDir);
-            // Collected as they are archived rather than re-fetched. The
-            // inference workload wants exactly the messages this cycle just
-            // read, and reading them again would spend read budget to learn
-            // nothing new.
-            for (const m of data.messages) {
-              const text = m?.content || m?.text;
-              if (text) recentMessages.push({ room: archiveRoom, text });
-            }
-          }
-        } catch { /* a room that cannot be read is not worth failing the cycle */ }
+      const archiveRooms = [...new Set([config.room, ...scoutEngine.watchRooms])];
+      const reads = await timed('rooms', () => Promise.all(archiveRooms.map((archiveRoom) =>
+        // A room that cannot be read is not worth failing the cycle over, and
+        // one failure must not cancel the other five reads — hence a resolved
+        // null rather than a rejection.
+        client.readRoom(archiveRoom, { limit: 25 }).catch(() => null))));
+
+      for (const [i, data] of reads.entries()) {
+        const archiveRoom = archiveRooms[i];
+        if (!data?.messages) continue;
+        archiveRoomMessages(archiveRoom, data.messages, config.chatArchiveDir);
+        // Collected as they are archived rather than re-fetched. The
+        // inference workload wants exactly the messages this cycle just
+        // read, and reading them again would spend read budget to learn
+        // nothing new.
+        for (const m of data.messages) {
+          const text = m?.content || m?.text;
+          if (text) recentMessages.push({ room: archiveRoom, text });
+        }
       }
 
       // Stagger 2s between agents to ensure clean separation
       await new Promise((r) => setTimeout(r, 2000));
 
       // Step B: Scribe Agent Turn (/r/events & Co-op Mesh)
-      const scribeResult = await scribeEngine.runTurn();
+      const scribeResult = await timed('scribe', () => scribeEngine.runTurn());
       console.log(`[Scribe #${scribeResult.turns}] Action: ${scribeResult.action} | EventsSeq: ${scribeResult.lastEventsSeq}`);
       appendAudit(config.auditLogPath, { agent: 'scribe', ...scribeResult });
 
       // Step C: answer anything a stranger sent to our mailbox.
-      const mailboxResult = await mailboxService.runTurn();
+      const mailboxResult = await timed('mailbox', () => mailboxService.runTurn());
       // Questions a stranger actually asked, for the workload to draft answers to.
       const pendingQuestions = Array.isArray(mailboxResult.questions) ? mailboxResult.questions : [];
       console.log(`[Mailbox #${mailboxResult.turns}] Action: ${mailboxResult.action} | Inbound: ${mailboxResult.details?.inbound ?? 0}`);
@@ -512,8 +556,11 @@ export async function runScoutDaemon(options = {}) {
 
       // Archive events messages if any
       try {
-        const eventsData = await client.readRoom('events', { limit: 25 });
-        if (eventsData.messages) archiveRoomMessages('events', eventsData.messages);
+        const eventsData = await timed('events', () => client.readRoom('events', { limit: 25 }));
+        // The archive directory is not optional here. Left to its default this
+        // one call wrote events into data/chats while every other room went to
+        // dataDir/chats, splitting the corpus in two.
+        if (eventsData.messages) archiveRoomMessages('events', eventsData.messages, config.chatArchiveDir);
       } catch {}
 
       // A faucet room appearing is the one event worth waking a human for, so it
@@ -647,7 +694,8 @@ export async function runScoutDaemon(options = {}) {
         otherMs: cycleMs - (work.elapsedMs ?? 0),
         sessions: work.completed ?? 0,
         planned: work.planned ?? 0,
-        intervalMs: config.intervalMs
+        intervalMs: config.intervalMs,
+        steps
       });
 
       await writeHeartbeat('active', scoutResult);
