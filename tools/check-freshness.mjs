@@ -80,12 +80,26 @@ const ARTEFACTS = [
     id: 'feed',
     label: 'Telemetry feed',
     file: 'docs/feed.json',
-    // The feed only gains an item when there is something new to say, so it is
-    // checked for staleness far more loosely and never for duty cycle. Silence
-    // here is a design goal, not a fault.
+    /**
+     * Reported, never failed.
+     *
+     * Two separate reasons this artefact goes stale without anything being
+     * wrong. The feed only gains an item when there is something worth saying,
+     * and silence is the design goal — a 48-hour tolerance was always going to
+     * trip on a quiet week and call it a fault. And docs/feed.json is the
+     * COMMITTED copy, written by cloud runs; while the operator's machine holds
+     * the lease the local daemon writes to its own docs directory and this file
+     * ages by design, exactly as the daemon artefact does.
+     *
+     * It went stale at 55.6 hours while the feed had in fact published that
+     * morning. Age is still printed, because a feed that has said nothing for a
+     * month is worth noticing — but noticing is a human's job here, not a red
+     * build's.
+     */
     cadenceMin: 240,
     toleranceMin: 60 * 48,
     dutyCycle: false,
+    informational: true,
     series: (j) => (j.items || []).map((i) => i.date_published || i.id?.split(':').slice(1).join(':')).filter(Boolean)
   }
 ];
@@ -150,7 +164,9 @@ for (const artefact of ARTEFACTS) {
   const newest = Math.max(...timestamps.map((t) => Date.parse(t)).filter(Number.isFinite));
   const ageMin = (Date.now() - newest) / MINUTE;
   const isStale = ageMin > artefact.toleranceMin;
-  if (isStale) stale++;
+  // An informational artefact is still measured and printed; it just cannot
+  // turn a quiet week into a red build.
+  if (isStale && !artefact.informational) stale++;
 
   results.push({
     id: artefact.id,
@@ -160,7 +176,7 @@ for (const artefact of ARTEFACTS) {
     toleranceMin: artefact.toleranceMin,
     newest: new Date(newest).toISOString(),
     ageMin,
-    state: isStale ? 'STALE' : 'FRESH',
+    state: isStale ? (artefact.informational ? 'QUIET' : 'STALE') : 'FRESH',
     duty: artefact.dutyCycle === false ? null : dutyCycle(timestamps, artefact.cadenceMin)
   });
 }
@@ -184,8 +200,27 @@ try {
     throw new Error('no Scout identity available — set SCOUT_IDENTITY_JSON to read the shared record');
   }
   const identity = loadOrCreateIdentity('.secrets/scout-identity.json', 'SCOUT_IDENTITY_JSON');
+
+  /**
+   * Retry the one read this whole check depends on.
+   *
+   * A single 503 leaves `combined` null, and null means "a standdown and a
+   * stoppage look identical from here" — so one blip blinds the monitor for an
+   * hour. The agent's own logs recorded 67 server 503s in a night, so that blip
+   * is the normal case. Three attempts with a rising pause; if the server is
+   * genuinely down the honest answer is still "could not see".
+   */
+  const readWithRetry = async (client, did) => {
+    let last = { reachable: false, record: null, error: 'not attempted' };
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      last = await readActivity(client, did);
+      if (last.reachable) return last;
+      if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 2000));
+    }
+    return last;
+  };
   const client = new TechnocoreClient({ baseUrl: process.env.TECHNOCORE_URL || 'https://technocore.chat' });
-  const { reachable, record } = await readActivity(client, identity.did);
+  const { reachable, record } = await readWithRetry(client, identity.did);
 
   if (reachable) {
     combined = summariseActivity(record, { cadenceMin: 15 });
@@ -271,7 +306,8 @@ if (!quiet) {
     // Three states, not two: standing down for a lease is neither fresh nor broken.
     const tag = r.state === 'FRESH' ? ' OK '
       : r.state === 'STANDING DOWN' ? 'IDLE'
-        : r.state === 'UNVERIFIED' ? ' ?? ' : 'STALE';
+        : r.state === 'UNVERIFIED' ? ' ?? '
+          : r.state === 'QUIET' ? 'QUIET' : 'STALE';
     console.log(`  [${tag}] ${r.label.padEnd(w)}  ${age.padEnd(10)} ${r.detail || ''}`);
   }
 

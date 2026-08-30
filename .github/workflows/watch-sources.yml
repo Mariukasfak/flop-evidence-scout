@@ -64,3 +64,15 @@ jobs:
         env:
           SCOUT_IDENTITY_JSON: ${{ secrets.SCOUT_IDENTITY_JSON }}
         run: node tools/check-freshness.mjs
+
+      # Runs even when the check above failed, because a stoppage is exactly the
+      # case where it fails — and an alarm that only fires on a green run is not
+      # an alarm. The agent was once down for 21 hours while this workflow went
+      # red four times: the monitoring worked, and a red build is something you
+      # have to go and look at. This one arrives as an email.
+      - name: Tell me if the agent has actually stopped
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SCOUT_IDENTITY_JSON: ${{ secrets.SCOUT_IDENTITY_JSON }}
+        run: node scripts/agent-down-alert.mjs
