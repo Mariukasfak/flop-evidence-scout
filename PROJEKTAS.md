@@ -255,6 +255,26 @@ Lenta: `docs/flop-facts.md` · generuojama iš `src/flop-facts.mjs`, CI tikrina 
 
 ---
 
+## 7b. 2026-08-30 auditas: kas buvo rasta
+
+Nepriklausomas auditas prieš šią repozitoriją rado dalykų, kurių pati
+sistema nematė. Kiekvienas patikrintas iš pirminio šaltinio prieš taisant.
+
+| Rasta | Ar pasitvirtino | Ką padarėme |
+|---|---|---|
+| **Debesies atsarga niekada neveikė.** `flop-scout-daemon.yml` leido `--dry-run`, o tai reiškia „nieko nerašyti" | ✅ Taip, tiksliai | `--once` režimas; **išjungtas**, kol `CLOUD_WRITES=true` |
+| Agentas viešai skelbė nepagrįstą anti-Sybil teiginį | ✅ Taip, `knowledge.mjs:7` | Pakeista tuo, ką iš tikrųjų sako `/auth.md` |
+| „12 bendradarbiavimo parašų" — visi tarp mūsų pačių dviejų raktų | ✅ Taip, 0 išorinių | Lenta dabar tai pasako atvirai |
+| 8 633 kvitai iš 8 640 — ta pati `classify-message` užduotis | ✅ Taip | Pripažinta; įvairovė – atskiras darbas |
+| Dokumentuose 242 / 45 / 12 testų, tikrovėje 270 | ✅ Taip | Skaičiai iš teksto pašalinti |
+| `data/chats` keliai pasenę | ✅ Taip | Ištaisyta |
+| `getKv` negrąžina skirtumo tarp 404 ir 503 | ⚠️ Iš dalies | Veikiančiam procesui žalos nedaro (būsena tiesiog nesinchronizuojama); šaltam startui – taip |
+
+**Ko auditas neįvertino:** tuo pat metu vyko darbas, todėl jo matytas
+testų skaičius (265) ir readiness (12 ready) buvo trumpam pasenę.
+
+---
+
 ## 8. Kas liko
 
 ### Jūsų sprendimai
