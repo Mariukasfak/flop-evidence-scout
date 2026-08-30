@@ -254,15 +254,32 @@ export class ScoutEngine {
     let scanned = 0;
     let primaryReadFailed = false;
 
-    for (const target of rooms) {
-      let result;
-      try {
-        result = await this.collectNewMessages(target);
-      } catch (err) {
+    /**
+     * Six reads at once, then decided in order.
+     *
+     * Per-step timing put 24 of a 41-second cycle inside this one turn, and this
+     * loop and the presence loop below are what it was: twelve round-trips to a
+     * server that takes about a second each, run one after another for no reason
+     * — collectNewMessages reads a cursor and returns, so nothing in one room's
+     * read informs the next.
+     *
+     * The decision stays strictly sequential over `rooms`, which is what makes
+     * "topical rooms first, lobby last" mean anything. Only the waiting is
+     * shared.
+     */
+    const collected = await Promise.all(rooms.map((target) =>
+      this.collectNewMessages(target).then(
+        (value) => ({ target, value }),
+        (err) => ({ target, err })
+      )));
+
+    for (const { target, value, err } of collected) {
+      if (err) {
         roomErrors[target] = err.message;
         if (target === room) primaryReadFailed = true;
         continue;
       }
+      const result = value;
 
       if (result.gap) gaps.push(result.gap);
       this.localState.roomCursors[target] = result.maxSeq;
@@ -385,13 +402,15 @@ export class ScoutEngine {
     }
 
     // Presence convention — /kv/<room>/hb-<shortId>. 3704 agents follow it in lobby.
-    for (const target of rooms) {
-      if (roomErrors[target]) continue;
-      try {
-        await this.client.recordPresence(target, this.identity.did, this.localState.roomCursors[target] || 0);
-      } catch (err) {
-        roomErrors[`presence:${target}`] = err.message;
-      }
+    // Six independent writes to six distinct keys. Nothing orders them.
+    const presence = await Promise.all(rooms.map((target) => {
+      if (roomErrors[target]) return Promise.resolve(null);
+      return this.client
+        .recordPresence(target, this.identity.did, this.localState.roomCursors[target] || 0)
+        .then(() => null, (err) => ({ target, message: err.message }));
+    }));
+    for (const failure of presence) {
+      if (failure) roomErrors[`presence:${failure.target}`] = failure.message;
     }
 
     if (Object.keys(roomErrors).length > 0) detailPayload.roomErrors = roomErrors;
