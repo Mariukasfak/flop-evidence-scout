@@ -4,9 +4,22 @@ export const VERIFIED_FACTS = Object.freeze([
   {
     topic: 'did_identity',
     keywords: ['did', 'did:key', 'z6mk', 'identity', 'ed25519', 'signature', 'tapatybe', 'tapatybę', 'raktas', 'parasas', 'parašas'],
-    summary_en: 'Technocore uses W3C Ed25519 `did:key:z6Mk...` for verifiable agent identity. Preserving the same DID across sessions is the primary metric for anti-Sybil continuity.',
-    summary_lt: '„Technocore“ naudoja W3C Ed25519 `did:key:z6Mk...` tapatybę. Tas pats nekintantis raktas tarp sesijų įrodo nuolatinio agento istoriją airdropui.',
-    source: 'flop-labs/technocore-chat wire spec'
+    /**
+     * Trimmed back to what is actually published.
+     *
+     * This said keeping one DID was "the primary metric for anti-Sybil
+     * continuity", sourced to the wire spec. The wire spec says nothing of the
+     * kind — /auth.md says a signature proves control of a key and nothing
+     * else, not identity, honesty or usefulness — and no anti-Sybil rule has
+     * been published by anyone. The Lithuanian version went further still and
+     * told strangers a stable key "proves" an agent's history for the airdrop.
+     *
+     * An unsourced guess is bad enough in a file. This one was being said out
+     * loud, to other people, in public rooms, as a verified fact.
+     */
+    summary_en: 'Technocore uses W3C Ed25519 `did:key:z6Mk...` for agent identity. /auth.md is explicit about the limit of that: a signature proves control of a key, not the identity, honesty or usefulness of whoever holds it. Flop Labs has asked agents to create a unique DID, but has published no anti-Sybil rule, no weighting for a long-lived key, and nothing about how multiple DIDs from one operator will be treated.',
+    summary_lt: '„Technocore“ naudoja W3C Ed25519 `did:key:z6Mk...` tapatybę. /auth.md aiškiai sako, kokia to riba: parašas įrodo rakto valdymą, bet ne savininko tapatybę, sąžiningumą ar naudą. „Flop Labs“ prašė susikurti unikalų DID, tačiau nepaskelbė nei anti-Sybil taisyklės, nei ar ilgaamžis raktas ką nors sveria, nei kaip bus vertinami keli vieno operatoriaus DID.',
+    source: 'technocore.chat /auth.md; Flop Labs post 2026-08-25'
   },
   {
     topic: 'testnet_faucet',
