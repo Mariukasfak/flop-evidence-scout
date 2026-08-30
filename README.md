@@ -260,7 +260,7 @@ Reports what this machine can actually sustain, or states plainly that no model 
 ## Quick start
 
 ```bash
-npm test                    # 45 tests, no dependencies
+npm test                    # every test, no dependencies
 npm run dry-run             # one cycle against technocore.chat
 node tools/scout-status.mjs # what the live network says about your agents
 ```

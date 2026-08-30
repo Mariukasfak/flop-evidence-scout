@@ -43,10 +43,23 @@ export function deriveFrom(o) {
   };
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const options = {
     intervalMs: 60_000,
     dryRun: false,
+    /**
+     * One real cycle, then exit. This is what a scheduled cloud run needs.
+     *
+     * The cloud workflow ran `--dry-run`, and dryRun implies readOnly, so every
+     * scheduled run did exactly zero writes: it could not take the lease, could
+     * not post, could not record a cycle. The failover the launcher and the
+     * documentation both promised had never once happened, which is the whole
+     * explanation for a 21-hour outage that no second machine covered.
+     *
+     * `--dry-run` keeps its meaning — a rehearsal that writes nothing. `--once`
+     * is the opposite: a genuine cycle that happens to be the only one.
+     */
+    once: false,
     identityPath: path.resolve('.secrets/scout-identity.json'),
     scribeIdentityPath: path.resolve('.secrets/scribe-identity.json'),
     serverUrl: process.env.TECHNOCORE_URL || 'https://technocore.chat',
@@ -61,6 +74,7 @@ function parseArgs(argv) {
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--dry-run') options.dryRun = true;
+    else if (arg === '--once') options.once = true;
     else if (arg.startsWith('--interval-ms=')) options.intervalMs = Number(arg.slice(14)) || options.intervalMs;
     else if (arg === '--no-lease') options.lease = false;
     else if (arg.startsWith('--lease-name=')) options.leaseName = arg.slice(13);
@@ -436,7 +450,10 @@ export async function runScoutDaemon(options = {}) {
             reason: attempt.reason,
             heldBy: attempt.heldBy ?? null
           });
-          if (config.dryRun || !running) break;
+          // A scheduled run that does not get the lease has nothing to do:
+          // the holder is working. Waiting out an interval would just burn
+          // runner minutes to arrive at the same answer.
+          if (config.dryRun || config.once || !running) break;
           const wait = attempt.transient ? Math.min(15_000, config.intervalMs) : config.intervalMs;
           await new Promise((resolve) => setTimeout(resolve, wait));
           continue;
@@ -705,7 +722,7 @@ export async function runScoutDaemon(options = {}) {
       await writeHeartbeat('error', { action: `error: ${err.message}` });
     }
 
-    if (config.dryRun || !running) break;
+    if (config.dryRun || config.once || !running) break;
 
     /**
      * Sleep the REMAINDER of the interval, not the whole of it.
@@ -734,11 +751,11 @@ export async function runScoutDaemon(options = {}) {
   // A scheduled tick is one process that starts and exits, so "shutdown" on every
   // cloud run read like a crash in the audit trail. Name the two cases apart.
   appendAudit(config.auditLogPath, {
-    event: config.dryRun ? 'cycle_complete' : 'shutdown',
+    event: (config.dryRun || config.once) ? 'cycle_complete' : 'shutdown',
     did: scoutIdentity.did
   });
-  await writeHeartbeat(config.dryRun ? 'cycle_complete' : 'stopped');
-  console.log(config.dryRun ? '[Dual Agent Mesh] Cycle complete.' : '[Dual Agent Mesh] Stopped.');
+  await writeHeartbeat((config.dryRun || config.once) ? 'cycle_complete' : 'stopped');
+  console.log((config.dryRun || config.once) ? '[Dual Agent Mesh] Cycle complete.' : '[Dual Agent Mesh] Stopped.');
 }
 
 const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);

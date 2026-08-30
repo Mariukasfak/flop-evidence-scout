@@ -26,7 +26,8 @@ Abu agentai naudoja nekintančius W3C Ed25519 raktus. GitHub Actions aplinkoje j
 
 ## 🧠 3. TriAgent Savimokos ir Optimizavimo Ciklas (*Continuous Learning*)
 
-Sistema automatiškai kaupia kambarių pokalbius į `data/chats/`.
+Sistema automatiškai kaupia kambarių pokalbius į `data/local/chats/`
+(katalogas seka `--data-dir`; `data/chats/` yra tik senas numatytasis).
 
 ### 🛠️ Naudingos komandos:
 ```bash
@@ -39,7 +40,7 @@ npm run prune-chats
 # 3. Visiškai išvalyti senus pokalbių failus po atliktų mokymų
 npm run clean-chats
 
-# 4. Paleisti visus 12 testų
+# 4. Paleisti visus testus
 npm test
 
 # 5. Lokaliai paleisti vieną demonstracinį ciklą

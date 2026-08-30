@@ -1,6 +1,8 @@
 # FLOP Evidence Scout — pilna dokumentacija
 
-**Būklė:** 2026-08-29 · 242 testai · CI žalias · agentas veikia
+**Būklė:** 2026-08-30 · 270 testai · CI žalias · agentas veikia
+
+> Testų skaičius čia sensta. Tikras skaičius visada: `npm test`.
 **Repo:** github.com/Mariukasfak/flop-evidence-scout (**viešas**)
 **Aplankas:** `C:\Users\mariu\TriAgent`
 
@@ -128,7 +130,7 @@ npm run freshness        # ar automatika tikrai sukasi
 npm run verify-collab    # patikrinti bendradarbiavimo įrašą
 npm run airdrop-model    # airdrop skaičiavimai
 npm run hardware-model   # mineris prieš validatorių
-npm test                 # 242 testai
+npm test                 # visi testai (2026-08-30: 270)
 ```
 
 ---
@@ -162,6 +164,31 @@ npm test                 # 242 testai
 | `missed N message(s)` | Kambarys išmetė istoriją anksčiau nei perskaitėme |
 | `HTTP 503` | **Serverio bėda, ne mūsų.** Praeina |
 | `HTTP 400 text too long` | ⚠️ Būsena nustojo saugotis. Jau taisyta, bet sakykite jei kartosis |
+| `steps: scout:… scribe:…` | Kiek sekundžių suvalgė kiekvienas žingsnis |
+| `N in a row` (watch) | Šaltinis nepasiekiamas jau N kartų iš eilės |
+
+### Kiek laiko ką užima (ciklo skaidymas)
+
+Nuo 2026-08-30 kiekvienas ciklas rašo `steps` — kiek milisekundžių truko
+kiekvienas žingsnis. Tai atsirado todėl, kad *spėjimas buvo klaidingas*:
+kambarių skaitymą pagreitinome nuo 9,5 s iki 0,24 s, o bendras laikas
+nepajudėjo. Išmatavus paaiškėjo, kad 24 s iš 41 s sėdėjo viename žingsnyje
+(`scout`) — dvylika kreipimųsi į serverį, laukiančių vienas kito be reikalo.
+
+| Žingsnis | Ką daro |
+|---|---|
+| `scout` | 6 kambarių skaitymas + 6 „esu čia" įrašai |
+| `scribe` | `/r/events` ir partnerių tinklas |
+| `mailbox` | Atsakymai į laiškus nepažįstamiems |
+| `rooms` | Pokalbių archyvavimas mokymuisi |
+| `events` | `/r/events` archyvas |
+
+Patikrinti:
+
+```bash
+node -e "const l=require('fs').readFileSync('data/local/scout-audit.jsonl','utf8').trim().split('
+').filter(x=>x.includes('"steps"')).slice(-3);for(const x of l){const r=JSON.parse(x);console.log(r.timestamp.slice(11,19),'ciklas',r.cycleMs,'|',Object.entries(r.steps).map(([k,v])=>k+':'+v).join(' '))}"
+```
 
 ### Greita patikra
 
@@ -175,9 +202,9 @@ node -e "const{ledgerTotals}=await import('./src/inference-ledger.mjs');const t=
 
 | Darbas | Kada | Ką daro |
 |---|---|---|
-| `ci.yml` | kiekvienas push | 242 testai, rakto nutekėjimo patikra |
-| `watch-sources.yml` | kas valandą | Tikrina 10 šaltinių, matuoja tinklą, perstato gidą |
-| `flop-scout-daemon.yml` | kas ~6 val. | Agentas debesyje, kai kompiuteris išjungtas |
+| `ci.yml` | kiekvienas push | visi testai, rakto nutekėjimo patikra |
+| `watch-sources.yml` | kas valandą | Tikrina 11 šaltinių, matuoja tinklą, perstato gidą, praneša jei agentas stovi |
+| `flop-scout-daemon.yml` | kas ~6 val. | **Repeticija, nieko nerašo** — kol neįjungtas `CLOUD_WRITES` (žr. žemiau) |
 | `claim-rehearsal.yml` | savaitinis | Ar parašai vis dar galioja su GitHub raktais |
 
 **Nuoma** užtikrina, kad debesis ir kompiuteris niekada nerašo vienu metu.
@@ -251,7 +278,20 @@ PARUOSTI-VISKA.bat     # viskas iš karto: kodas, raktas, paleidimas
 paleisti-nuolat.bat    # tik paleisti agentą
 ```
 
-Sustabdyti — uždaryti langą. Per ~10 min GitHub perima darbą.
+Sustabdyti — uždaryti langą.
+
+> ⚠️ **GitHub kol kas darbo NEPERIMA.** Iki 2026-08-30 debesies darbas buvo
+> paleidžiamas su `--dry-run`, o `--dry-run` reiškia „nieko nerašyti". Tad
+> planinis darbas niekada nepaėmė nuomos, nieko nepaskelbė ir neįrašė nė vieno
+> ciklo — nors ir šis dokumentas, ir paleidiklio langas tvirtino priešingai.
+> Būtent todėl rugpjūčio 30 d. 21 valandos prastova liko niekuo neuždengta.
+>
+> Kodas jau paruoštas (`--once` = vienas tikras ciklas), bet **išjungtas**.
+> Įjungus, repozitorija pati pradės skelbti viešai pagal tvarkaraštį, o tai
+> jūsų sprendimas, ne klaidos taisymo šalutinis poveikis.
+>
+> Įjungti: GitHub → Settings → Secrets and variables → Actions → Variables →
+> New variable → `CLOUD_WRITES` = `true`.
 
 ---
 

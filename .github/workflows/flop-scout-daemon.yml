@@ -47,8 +47,31 @@ jobs:
           # identity. The daemon also infers "github" from CI=true; this is
           # explicit rather than inferred.
           LEASE_HOLDER: github
+          # Off by default, one setting away from on.
+          #
+          # Until 2026-08-30 this step ran `--dry-run`, and dryRun implies
+          # readOnly, so every scheduled run wrote nothing at all: no lease, no
+          # post, no recorded cycle. The failover the launcher window and
+          # PROJEKTAS.md both promised had never once happened, and a 21-hour
+          # outage went uncovered because there was nothing there to cover it.
+          #
+          # `--once` is the fix: one real cycle, lease respected, then exit. It
+          # is left switched OFF because turning it on means this repository
+          # starts posting in public on a schedule, and that is the operator's
+          # decision to make, not a side effect of a bug fix.
+          #
+          # To turn on:  Settings -> Secrets and variables -> Actions ->
+          #              Variables -> New variable -> CLOUD_WRITES = true
+          CLOUD_WRITES: ${{ vars.CLOUD_WRITES }}
         run: |
-          node src/daemon.mjs --dry-run --url=https://technocore.chat
+          if [ "$CLOUD_WRITES" = "true" ]; then
+            echo "Cloud writes ON — one real cycle, lease permitting."
+            node src/daemon.mjs --once --url=https://technocore.chat
+          else
+            echo "Cloud writes OFF — rehearsal only, nothing is written."
+            echo "Set the CLOUD_WRITES repository variable to true to enable failover."
+            node src/daemon.mjs --dry-run --url=https://technocore.chat
+          fi
           node tools/build-index.mjs
 
       - name: Raise a GitHub issue if the faucet radar fired

@@ -24,7 +24,7 @@ import {
 
 import { Guardrails } from '../src/guardrails.mjs';
 import { TechnocoreClient } from '../src/technocore-client.mjs';
-import { archiveRoomMessages, trimArchive, resetArchiveIndex } from '../src/daemon.mjs';
+import { archiveRoomMessages, trimArchive, resetArchiveIndex, parseArgs } from '../src/daemon.mjs';
 import { ScoutEngine } from '../src/scout-engine.mjs';
 
 describe('FLOP Scout Identity & Cryptography', () => {
@@ -1114,5 +1114,36 @@ describe('Missed messages are noticed', () => {
     });
     const { gap } = await scoutWith(client, 100).collectNewMessages('lobby');
     assert.equal(gap, null, 'no evidence of loss is not evidence of loss');
+  });
+});
+
+/**
+ * The cloud half of the failover, which had never once run.
+ *
+ * The scheduled workflow invoked the daemon with --dry-run, and dryRun implies
+ * readOnly, so every cloud run did zero writes: no lease, no post, no recorded
+ * cycle. Both the launcher window and PROJEKTAS.md told the operator that
+ * GitHub takes over when the PC is off. It never had, and a 21-hour outage went
+ * uncovered because there was nothing there to cover it.
+ *
+ * These two flags must stay opposites, so this is asserted rather than trusted.
+ */
+describe('--once and --dry-run are not the same thing', () => {
+  test('--dry-run is a rehearsal: one cycle, no writes', () => {
+    const o = parseArgs(['node', 'daemon', '--dry-run']);
+    assert.equal(o.dryRun, true);
+    assert.notEqual(o.once, true, 'a rehearsal is not a real cycle');
+  });
+
+  test('--once is a real cycle that happens to be the only one', () => {
+    const o = parseArgs(['node', 'daemon', '--once']);
+    assert.equal(o.once, true);
+    assert.notEqual(o.dryRun, true, '--once must never imply readOnly');
+  });
+
+  test('the default is neither: run until stopped', () => {
+    const o = parseArgs(['node', 'daemon']);
+    assert.notEqual(o.once, true);
+    assert.notEqual(o.dryRun, true);
   });
 });
