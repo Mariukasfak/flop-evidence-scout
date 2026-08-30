@@ -1,16 +1,16 @@
 {
-  "checkedAt": "2026-08-30T07:48:16.367Z",
+  "checkedAt": "2026-08-30T08:31:20.189Z",
   "summary": {
-    "ready": 12,
-    "action": 0,
+    "ready": 10,
+    "action": 2,
     "blocked": 2
   },
   "checks": [
     {
       "id": "did-scout",
       "label": "Scout identity published",
-      "state": "READY",
-      "detail": "/kv/did-85/2d0b660964458e resolves",
+      "state": "ACTION",
+      "detail": "/kv/did-85/2d0b660964458e → 503",
       "fix": "Run the daemon once so it republishes its DID note."
     },
     {
@@ -38,7 +38,7 @@
       "id": "state-persistence",
       "label": "State survives restarts",
       "state": "READY",
-      "detail": "1546 turns recorded on the server",
+      "detail": "1568 turns recorded on the server",
       "fix": "The daemon must complete at least two turns and write state to /kv/."
     },
     {
@@ -66,15 +66,15 @@
       "id": "ledger",
       "label": "Spend ledger is intact",
       "state": "READY",
-      "detail": "8060 receipts across 2 ledger(s), 7547 counted, 512 simulated, 0 rejected, 0 malformed",
+      "detail": "8612 receipts across 2 ledger(s), 8099 counted, 512 simulated, 0 rejected, 0 malformed",
       "fix": "Investigate rejected or malformed receipts before trusting the total."
     },
     {
       "id": "source-watch",
       "label": "Source watcher baseline is readable",
-      "state": "READY",
-      "detail": "11 sources baselined",
-      "fix": "A corrupt baseline makes every run report \"first run\" and detect nothing. Delete it and re-run."
+      "state": "ACTION",
+      "detail": "11 baselined, 1 blind: hayes-substack (HTTP 403)",
+      "fix": "A blind source keeps its last digest, so it can never report a change. Check whether the block is on the runner IP; if it is, the source cannot be watched from CI at all and should be moved or dropped rather than left looking watched."
     },
     {
       "id": "faucet-route",
@@ -101,7 +101,7 @@
       "id": "continuous-operation",
       "label": "Runs continuously, not in bursts",
       "state": "READY",
-      "detail": "100% duty over 27.2 h, 250 cycles, last 2 min ago",
+      "detail": "100% duty over 27.5 h, 250 cycles, last 11 min ago",
       "fix": "GitHub drops most scheduled runs. Keep the local agent running, or use an always-on host — a rented validator box would run this too, collapsing two decisions into one."
     }
   ],

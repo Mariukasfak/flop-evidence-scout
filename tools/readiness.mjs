@@ -258,12 +258,39 @@ async function main() {
   }
   const watchedIds = watchState ? Object.keys(watchState.sources || {}) : [];
   const watchOk = watchState && watchedIds.includes('flop-teaser') && watchedIds.includes('openapi');
+
+  /**
+   * A source we cannot read is not a source we are watching.
+   *
+   * This line said "11 sources baselined" while one of them had been answering
+   * the hourly runner with a 403 for days. The count was true and the sentence
+   * was not, which is the more expensive kind of wrong: nothing to investigate,
+   * because nothing looked broken.
+   */
+  const blind = watchState
+    ? Object.entries(watchState.sources || {})
+      // Two ways to be blind. Six failures in a row is a source that used to
+      // work; no digest at all is one that never has — it has nothing to
+      // compare against, so it could not report a change even in principle,
+      // and waiting six hours to say so would only delay the truth.
+      .filter(([, v]) => v.error && ((v.consecutiveFailures || 0) >= 6 || !v.digest))
+      .map(([id, v]) => `${id} (${v.error})`)
+    : [];
+
+  const watchDetail = watchError
+    ? `UNREADABLE: ${watchError}`
+    : blind.length
+      ? `${watchedIds.length} baselined, ${blind.length} blind: ${blind.join(', ')}`
+      : `${watchedIds.length} sources baselined`;
+
   record(
     'source-watch',
     'Source watcher baseline is readable',
-    watchOk ? READY : ACTION,
-    watchError ? `UNREADABLE: ${watchError}` : `${watchedIds.length} sources baselined`,
-    'A corrupt baseline makes every run report "first run" and detect nothing. Delete it and re-run.'
+    watchOk && blind.length === 0 ? READY : ACTION,
+    watchDetail,
+    blind.length
+      ? 'A blind source keeps its last digest, so it can never report a change. Check whether the block is on the runner IP; if it is, the source cannot be watched from CI at all and should be moved or dropped rather than left looking watched.'
+      : 'A corrupt baseline makes every run report "first run" and detect nothing. Delete it and re-run.'
   );
 
   // ------------------------------------------------------- not ours to fix
