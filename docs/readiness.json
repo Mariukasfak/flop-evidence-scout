@@ -1,16 +1,16 @@
 {
-  "checkedAt": "2026-08-30T08:31:20.189Z",
+  "checkedAt": "2026-08-30T08:41:45.593Z",
   "summary": {
-    "ready": 10,
-    "action": 2,
+    "ready": 11,
+    "action": 1,
     "blocked": 2
   },
   "checks": [
     {
       "id": "did-scout",
       "label": "Scout identity published",
-      "state": "ACTION",
-      "detail": "/kv/did-85/2d0b660964458e → 503",
+      "state": "READY",
+      "detail": "/kv/did-85/2d0b660964458e resolves",
       "fix": "Run the daemon once so it republishes its DID note."
     },
     {
@@ -31,14 +31,14 @@
       "id": "collaboration",
       "label": "Agent collaboration is on record",
       "state": "READY",
-      "detail": "6 verified, 0 rejected, 2 distinct acknowledger(s)",
+      "detail": "12 verified, 0 rejected, 2 distinct acknowledger(s)",
       "fix": "Each peer sync is acknowledged by signing what was received into /kv/flop-scout-collab. Mutual means both keys have signed; until the other agent acknowledges too, this is one agent attesting. Check it with tools/verify-collab.mjs."
     },
     {
       "id": "state-persistence",
       "label": "State survives restarts",
       "state": "READY",
-      "detail": "1568 turns recorded on the server",
+      "detail": "1572 turns recorded on the server",
       "fix": "The daemon must complete at least two turns and write state to /kv/."
     },
     {
@@ -66,7 +66,7 @@
       "id": "ledger",
       "label": "Spend ledger is intact",
       "state": "READY",
-      "detail": "8612 receipts across 2 ledger(s), 8099 counted, 512 simulated, 0 rejected, 0 malformed",
+      "detail": "8689 receipts across 2 ledger(s), 8176 counted, 512 simulated, 0 rejected, 0 malformed — official FLOP spent: 0 (no paid endpoint exists yet)",
       "fix": "Investigate rejected or malformed receipts before trusting the total."
     },
     {
@@ -101,7 +101,7 @@
       "id": "continuous-operation",
       "label": "Runs continuously, not in bursts",
       "state": "READY",
-      "detail": "100% duty over 27.5 h, 250 cycles, last 11 min ago",
+      "detail": "100% duty over 27.7 h, 250 cycles, last 9 min ago",
       "fix": "GitHub drops most scheduled runs. Keep the local agent running, or use an always-on host — a rented validator box would run this too, collapsing two decisions into one."
     }
   ],

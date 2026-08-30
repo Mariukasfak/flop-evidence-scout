@@ -231,17 +231,29 @@ async function main() {
       counted: sum.counted + t.counted,
       simulated: sum.simulated + t.simulated,
       signatureRejected: sum.signatureRejected + t.signatureRejected,
-      malformedLines: sum.malformedLines + t.malformedLines
+      malformedLines: sum.malformedLines + t.malformedLines,
+      spendFlop: sum.spendFlop + (t.spendFlop || 0)
     };
-  }, { receiptsOnDisk: 0, counted: 0, simulated: 0, signatureRejected: 0, malformedLines: 0 });
+  }, { receiptsOnDisk: 0, counted: 0, simulated: 0, signatureRejected: 0, malformedLines: 0, spendFlop: 0 });
 
   const ledgerHealthy = ledger.malformedLines === 0 && ledger.signatureRejected === 0;
   record(
     'ledger',
     'Spend ledger is intact',
     ledger.receiptsOnDisk === 0 ? ACTION : (ledgerHealthy ? READY : ACTION),
+    /**
+     * The spend figure belongs on the same line as the receipt count.
+     *
+     * Eight thousand signed receipts reads like progress, and on its own it
+     * invites exactly the wrong conclusion. Every one of them was paid for with
+     * electricity on the operator's own machine: feeFlop is 0, because there is
+     * no official inference endpoint to charge anything, and the airdrop is
+     * scored on official testnet spend. Separating the two numbers by a screen
+     * is how a rehearsal starts getting counted as the performance.
+     */
     `${ledger.receiptsOnDisk} receipts across ${ledgerPaths.length} ledger(s), ${ledger.counted} counted, `
-    + `${ledger.simulated} simulated, ${ledger.signatureRejected} rejected, ${ledger.malformedLines} malformed`,
+    + `${ledger.simulated} simulated, ${ledger.signatureRejected} rejected, ${ledger.malformedLines} malformed`
+    + ` — official FLOP spent: ${ledger.spendFlop} (no paid endpoint exists yet)`,
     ledger.receiptsOnDisk === 0
       ? 'Run the agent, or tools/inference-bench.mjs, to start the ledger.'
       : 'Investigate rejected or malformed receipts before trusting the total.'
