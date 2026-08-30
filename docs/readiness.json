@@ -1,52 +1,52 @@
 {
-  "checkedAt": "2026-08-30T08:44:01.345Z",
+  "checkedAt": "2026-08-30T17:33:08.139Z",
   "summary": {
-    "ready": 10,
-    "action": 2,
-    "blocked": 2
+    "ready": 1,
+    "action": 10,
+    "blocked": 3
   },
   "checks": [
     {
       "id": "did-scout",
       "label": "Scout identity published",
-      "state": "READY",
-      "detail": "/kv/did-85/2d0b660964458e resolves",
+      "state": "ACTION",
+      "detail": "/kv/did-b9/8cb3e39b46997b → 503",
       "fix": "Run the daemon once so it republishes its DID note."
     },
     {
       "id": "did-scribe",
       "label": "Scribe identity published",
-      "state": "READY",
-      "detail": "/kv/did-e0/dd0e551624140a resolves",
+      "state": "ACTION",
+      "detail": "/kv/did-57/2b6a1af94548d7 → 503",
       "fix": "Run the daemon once so it republishes its DID note."
     },
     {
       "id": "state-size",
       "label": "State note fits the server limit",
-      "state": "READY",
-      "detail": "406 of 8192 characters",
+      "state": "ACTION",
+      "detail": "no state note readable",
       "fix": "answeredAuthors is pruned by cooldown age on every save. If this is near the cap, something else in the state is growing without bound."
     },
     {
       "id": "collaboration",
       "label": "Collaboration on record — but only between our own two keys",
       "state": "ACTION",
-      "detail": "12 verified, 0 rejected; every counterparty is one of our own two DIDs",
+      "detail": "0 verified, 0 rejected; every counterparty is one of our own two DIDs",
       "fix": "Signatures prove key control, nothing more. Two DIDs held by one operator signing each other proves neither independence nor usefulness, and Flop Labs has published no rule for how such a pair is treated. Worth having; not worth counting as reach. An exchange with an agent we do not control is the thing this check is waiting for."
     },
     {
       "id": "state-persistence",
       "label": "State survives restarts",
-      "state": "READY",
-      "detail": "1572 turns recorded on the server",
+      "state": "ACTION",
+      "detail": "no readable state note yet",
       "fix": "The daemon must complete at least two turns and write state to /kv/."
     },
     {
       "id": "room-d-flop-facts",
       "label": "Room /r/d-flop-facts",
-      "state": "READY",
-      "detail": "claimed, exists",
-      "fix": "Room creation is refused while the service-wide room cap is full; the daemon retries."
+      "state": "BLOCKED",
+      "detail": "claimed, existence not checked — server returned 503",
+      "fix": "Technocore was unreachable. Re-run when it answers; nothing here is ours to fix."
     },
     {
       "id": "room-d-scout-telemetry",
@@ -58,16 +58,16 @@
     {
       "id": "inference-backend",
       "label": "A real model is reachable",
-      "state": "READY",
-      "detail": "backend: ollama (qwen2.5:3b)",
+      "state": "ACTION",
+      "detail": "backend: simulated",
       "fix": "Two ways, either works. Free API: put a key from console.groq.com into .secrets/inference-api.json (and the same key into the INFERENCE_API_KEY repo secret so cloud runs use it too). Local: install Ollama and pull qwen2.5:3b. Rehearsal either way — real latency, real tokens, real failures, zero $FLOP earned yet."
     },
     {
       "id": "ledger",
       "label": "Spend ledger is intact",
-      "state": "READY",
-      "detail": "8689 receipts across 2 ledger(s), 8176 counted, 512 simulated, 0 rejected, 0 malformed — official FLOP spent: 0 (no paid endpoint exists yet)",
-      "fix": "Investigate rejected or malformed receipts before trusting the total."
+      "state": "ACTION",
+      "detail": "0 receipts across 0 ledger(s), 0 counted, 0 simulated, 0 rejected, 0 malformed — official FLOP spent: 0 (no paid endpoint exists yet)",
+      "fix": "Run the agent, or tools/inference-bench.mjs, to start the ledger."
     },
     {
       "id": "source-watch",
@@ -93,15 +93,15 @@
     {
       "id": "identity-backup",
       "label": "Identity vault backed up",
-      "state": "READY",
-      "detail": "C:\\Users\\mariu\\flop-scout-identity-vault.json",
+      "state": "ACTION",
+      "detail": "no vault found",
       "fix": "Run tools/backup-identity.mjs. Losing these keys loses every DID, every claimed room, and every signed receipt — there is no recovery."
     },
     {
       "id": "continuous-operation",
       "label": "Runs continuously, not in bursts",
-      "state": "READY",
-      "detail": "100% duty over 27.7 h, 250 cycles, last 12 min ago",
+      "state": "ACTION",
+      "detail": "0 cycle(s) recorded — not enough for a rate yet",
       "fix": "GitHub drops most scheduled runs. Keep the local agent running, or use an always-on host — a rented validator box would run this too, collapsing two decisions into one."
     }
   ],
