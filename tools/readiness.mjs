@@ -33,18 +33,37 @@ const READY = 'READY';
 const ACTION = 'ACTION';
 const BLOCKED = 'BLOCKED';
 
-async function get(pathname) {
-  try {
-    const res = await fetch(`${BASE}${pathname}`, {
-      headers: { 'user-agent': 'FLOP-Scout-Readiness/1.0 (+github.com/Mariukasfak/flop-evidence-scout)' },
-      signal: AbortSignal.timeout(15_000)
-    });
-    const text = await res.text();
-    // Strip the untrusted-content banner; it is framing, not content.
-    return { ok: res.ok, status: res.status, text: text.replace(/^!!.*$/m, '').trim() };
-  } catch (err) {
-    return { ok: false, status: 0, text: err.message };
+/**
+ * Retry what is worth retrying, because this report is read as a verdict.
+ *
+ * A single 503 turned "Scout identity published" into a TODO, "the telemetry
+ * room" into "does not exist yet", and the whole board from 12 ready into 8 —
+ * while every one of those things was fine. The agent's own logs recorded 67
+ * server 503s in one night, so a one-shot read makes this report mostly a
+ * measure of the server's mood.
+ *
+ * A 5xx or a transport fault is the server having a moment; a 404 is an answer
+ * and is returned immediately, because "this route does not exist" is exactly
+ * what several of these checks are asking.
+ */
+async function get(pathname, { attempts = 3 } = {}) {
+  let last = { ok: false, status: 0, text: 'not attempted' };
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const res = await fetch(`${BASE}${pathname}`, {
+        headers: { 'user-agent': 'FLOP-Scout-Readiness/1.0 (+github.com/Mariukasfak/flop-evidence-scout)' },
+        signal: AbortSignal.timeout(15_000)
+      });
+      const text = await res.text();
+      // Strip the untrusted-content banner; it is framing, not content.
+      last = { ok: res.ok, status: res.status, text: text.replace(/^!!.*$/m, '').trim() };
+      if (res.ok || res.status < 500) return last;
+    } catch (err) {
+      last = { ok: false, status: 0, text: err.message };
+    }
+    if (attempt < attempts) await new Promise((r) => setTimeout(r, attempt * 1500));
   }
+  return last;
 }
 
 const checks = [];
@@ -147,12 +166,28 @@ async function main() {
     const live = await get(`/r/${room}?limit=1`);
     const claimed = owner.ok && owner.text.includes('did:');
     const exists = live.ok && live.text.includes('# room');
+
+    /**
+     * A server that will not answer is not a room that is not there.
+     *
+     * After three retries this still reported "does not exist yet" on a 503,
+     * while the room held 41 messages. Absence of evidence and evidence of
+     * absence read identically in that sentence, which is the mistake this
+     * project has now made in four separate checks.
+     */
+    const unreachable = !live.ok && (live.status === 0 || live.status >= 500);
+    const detail = unreachable
+      ? `${claimed ? 'claimed' : 'ownership unreadable'}, existence not checked — server returned ${live.status || 'no response'}`
+      : `${claimed ? 'claimed' : 'not claimed'}, ${exists ? 'exists' : 'does not exist yet'}`;
+
     record(
       `room-${room}`,
       `Room /r/${room}`,
-      exists && claimed ? READY : ACTION,
-      `${claimed ? 'claimed' : 'not claimed'}, ${exists ? 'exists' : 'does not exist yet'}`,
-      'Room creation is refused while the service-wide room cap is full; the daemon retries.'
+      exists && claimed ? READY : (unreachable ? BLOCKED : ACTION),
+      detail,
+      unreachable
+        ? 'Technocore was unreachable. Re-run when it answers; nothing here is ours to fix.'
+        : 'Room creation is refused while the service-wide room cap is full; the daemon retries.'
     );
   }
 
@@ -288,11 +323,21 @@ async function main() {
    */
   const { readActivity, summariseActivity } = await import('../src/shared-state.mjs');
   const { TechnocoreClient } = await import('../src/technocore-client.mjs');
-  const activity = await readActivity(new TechnocoreClient({ baseUrl: BASE }), scout.did);
+  const activityClient = new TechnocoreClient({ baseUrl: BASE });
+  let activity = { reachable: false, record: null };
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    activity = await readActivity(activityClient, scout.did);
+    if (activity.reachable) break;
+    if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 1500));
+  }
   const combined = activity.reachable ? summariseActivity(activity.record, { cadenceMin: 15 }) : null;
 
-  let continuousState = ACTION;
-  let continuousDetail = 'no cycles recorded yet';
+  // Unreachable is not idle. The note is the only evidence either way, so
+  // without it this reports BLOCKED rather than accusing the agent of stopping.
+  let continuousState = activity.reachable ? ACTION : BLOCKED;
+  let continuousDetail = activity.reachable
+    ? 'no cycles recorded yet'
+    : 'Technocore unreachable — the shared record could not be read';
   if (combined?.dutyCycle != null) {
     const pct = Math.round(combined.dutyCycle * 100);
     const fresh = combined.ageMin != null && combined.ageMin < 30;
