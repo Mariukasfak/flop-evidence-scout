@@ -217,15 +217,30 @@ export class MailboxService {
       // out of answering is still a question worth drafting an answer to.
       questions.push({ text, topics: verdict.topics.map((t) => t.topic) });
 
-      const target = await this.resolveReplyRoom(senderDid);
       const answer = formatKnowledgeResponse(text);
       const outgoing = singleLineSweep(`[FLOP Scout -> ${senderDid || 'sender'}]: ${answer}`);
 
+      /**
+       * Ask permission before asking where to send.
+       *
+       * resolveReplyRoom reads the sender's DID note — one round-trip to a
+       * server that answers in about a second — and it used to run before the
+       * guardrail. The guardrail refuses almost everything by design: the send
+       * ceiling is two an hour, so a batch of twenty inbound messages spent
+       * twenty network reads working out where to deliver replies that were
+       * never going to be sent.
+       *
+       * Per-step timing caught it at 49,906 ms in one cycle, against a 60,000 ms
+       * interval — the mailbox alone was overrunning the loop. Nothing about the
+       * outcome changes; only the reads that no longer happen.
+       */
       const check = this.guardrails.canSendMessage(outgoing, { isPriorityInquiry: true });
       if (!check.allowed) {
         skipped.push({ from: senderDid, reason: check.reason });
         continue;
       }
+
+      const target = await this.resolveReplyRoom(senderDid);
 
       try {
         await this.client.postMessage(target.room, outgoing, this.identity);
