@@ -429,6 +429,48 @@ export class KibbleEngine {
    * Only the score-bearing half is counted: a `not` subtracts 3 and a peer
    * `useful` adds 6, so this is what says whether volume is paying or costing.
    */
+  /**
+   * Fetch the whole retained ring, occasionally, because the window is blind.
+   *
+   * reviewOwnDeliveries was reading the same 200-message board the rest of the
+   * cycle uses, and measured against the live room that finds nothing: of 27
+   * jobs we had delivered, 0 were still inside the window. Verdicts arrive
+   * minutes to hours after a delivery, by which point the job scrolled out. So
+   * the feedback loop built to decide whether our work is worth anything was
+   * silently reporting zero of everything — the same shape of fault as a status
+   * tool reading a tail and calling it a total.
+   *
+   * /export carries the whole ring, about 20,000 lines and 10 MB covering some
+   * hours. Far too heavy for a 60-second cycle, which is why this runs on its
+   * own timer and is allowed to fail quietly: it is a slow correction, not a
+   * step the cycle depends on.
+   */
+  async fetchVerdictBoard({ now = () => Date.now(), ttlMs = 20 * 60_000 } = {}) {
+    if (now() - (this.localState.verdictsCheckedAt || 0) < ttlMs) return null;
+    this.localState.verdictsCheckedAt = now();
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 45_000);
+    try {
+      const response = await this.fetchFn(`${this.client.baseUrl}/r/${this.room}/export`,
+        { signal: controller.signal });
+      if (!response.ok) return null;
+      const text = await response.text();
+      const messages = [];
+      for (const line of text.split('\n')) {
+        if (!line) continue;
+        // Only the lines that can carry a verdict; the ring is mostly claims.
+        if (!/"text":"(ATTEST|RESULT|DELIVER|JOB) v1/.test(line)) continue;
+        try { messages.push(JSON.parse(line)); } catch { /* a torn line is not fatal */ }
+      }
+      return reconstructBoard(messages);
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   reviewOwnDeliveries(jobs) {
     const mine = new Set(this.localState.deliveredJobIds || []);
     if (!mine.size) return null;
@@ -437,9 +479,35 @@ export class KibbleEngine {
     for (const jobId of mine) {
       const job = jobs.get(jobId);
       if (!job) continue;
+
+      /**
+       * Only verdicts about OUR delivery, not every verdict on the job.
+       *
+       * Jobs on this board routinely carry several deliveries, and an
+       * attestation judges one of them. Counting all of them as ours made our
+       * work look far worse than it is: 4 useful against 14 not, where the same
+       * export actually holds 10 useful and 5 not across twelve attestors. The
+       * engine had already halved its own rate on the strength of that.
+       *
+       * `rh:` is exactly the disambiguator — it binds an attestation to the
+       * text it judged. Where an attestation carries one, it counts only if it
+       * matches the hash of our own delivery. Where it carries none, it counts
+       * only if ours was the sole delivery on that job, so there is nothing
+       * else it could have been about.
+       */
+      const ourResult = job.results.find((r) => sameDid(r.from, this.workerIdentity.did));
+      if (!ourResult) continue;
+      const ourHash = resultHashFor(ourResult.summary);
+      const soleDelivery = job.results.length === 1;
+
       for (const attest of job.attests) {
         if (sameDid(attest.from, this.workerIdentity.did)) continue;      // never our own
         if (sameDid(attest.from, this.validatorIdentity.did)) continue;   // nor our other key
+        if (attest.resultHash) {
+          if (!ourHash.startsWith(attest.resultHash) && attest.resultHash !== ourHash) continue;
+        } else if (!soleDelivery) {
+          continue;                    // unbound, and it could have meant somebody else
+        }
         if (attest.verdict === 'useful') useful += 1;
         else if (attest.verdict === 'not') not += 1;
       }
@@ -549,10 +617,16 @@ export class KibbleEngine {
       return { action: 'read_failed', error: err.message };
     }
 
-    // What did the room make of what we already sent? Free — this board was
-    // read a line ago — and it is the only signal that says whether volume is
-    // paying or costing.
-    this.reviewOwnDeliveries(jobs);
+    // What did the room make of what we already sent? Not from `jobs` — that
+    // window never contains our older deliveries, which is why this read zero
+    // of everything until it was measured. The whole ring, on its own timer.
+    const verdictBoard = await this.fetchVerdictBoard();
+    if (verdictBoard) {
+      const seen = this.reviewOwnDeliveries(verdictBoard);
+      if (seen && (seen.useful || seen.not)) {
+        console.log(`[Kibble] The room judged our work: ${seen.useful} useful, ${seen.not} not.`);
+      }
+    }
 
     // Only jobs we already hold a claim on. Picking a fresh one here is what
     // guaranteed we arrived second; runFastLane does the picking now.
