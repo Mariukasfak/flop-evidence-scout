@@ -354,6 +354,41 @@ export async function runScoutDaemon(options = {}) {
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
 
+  /**
+   * Stand down when the code on disk is no longer the code we are running.
+   *
+   * Every fix in this repository needed a human to notice and press restart,
+   * because a daemon loads its modules once and then runs the version it
+   * started with. Half a day of this session's improvements sat committed and
+   * inert for exactly that reason, and the operator was told to press [14]
+   * after nearly every one of them.
+   *
+   * So the daemon watches the commit it was launched from and exits cleanly
+   * when the working tree has moved past it. paleisti-nuolat.bat restarts after
+   * 30 seconds, on the new code, having released the lease properly on the way
+   * out — which is the difference between this and being killed.
+   *
+   * Deliberately not a git pull. Fetching and merging on a machine that another
+   * agent is editing is a way to lose someone's uncommitted work; noticing that
+   * HEAD moved is not.
+   */
+  const headNow = () => {
+    try {
+      return fs.readFileSync(path.resolve('.git/HEAD'), 'utf8').trim().startsWith('ref:')
+        ? fs.readFileSync(path.resolve('.git',
+            fs.readFileSync(path.resolve('.git/HEAD'), 'utf8').trim().slice(5).trim()), 'utf8').trim()
+        : fs.readFileSync(path.resolve('.git/HEAD'), 'utf8').trim();
+    } catch {
+      return null;                       // not a checkout, or mid-write: never a reason to stop
+    }
+  };
+  const startedFrom = headNow();
+  const codeChanged = () => {
+    if (!startedFrom) return false;
+    const now = headNow();
+    return Boolean(now) && now !== startedFrom;
+  };
+
   // Configurable for the same reason auditLogPath and faucetAlertPath are: a test
   // run that writes into data/ leaves residue the published pages then report as
   // fact. That is exactly how a stale "faucet radar: HIT" reached the front page.
@@ -1025,6 +1060,16 @@ export async function runScoutDaemon(options = {}) {
         console.log('[Outage] Technocore is answering again.');
         appendAudit(config.auditLogPath, { event: 'outage_over' });
       }
+    }
+
+    // New code on disk: finish this gap, then stand down so the launcher can
+    // bring us back on it. Checked here rather than mid-cycle so nothing is
+    // ever abandoned half-done.
+    if (codeChanged()) {
+      console.log('[Update] The repository moved past the commit this process started from. '
+        + 'Standing down so the launcher restarts on the new code.');
+      appendAudit(config.auditLogPath, { event: 'restart_for_update', from: startedFrom });
+      stop();
     }
 
     await new Promise((resolve) => setTimeout(resolve, gapMs));
