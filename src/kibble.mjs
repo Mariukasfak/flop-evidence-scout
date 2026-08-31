@@ -55,8 +55,25 @@ import crypto from 'node:crypto';
 /** Job ids are `k` + 10 lowercase hex; anything else is not a job id. */
 const JOB_ID = /^k[0-9a-f]{10}$/;
 
-/** The categories the spec defines. A line naming any other is malformed. */
+/**
+ * The categories the spec defines — the set we would ever WRITE.
+ *
+ * Deliberately not the set we accept on read. Strict in what we send, liberal
+ * in what we take: refusing an unfamiliar category made us blind rather than
+ * safe. Measured on a 2,480-job export, 163 jobs (6.6%) carry a category the
+ * spec never lists — `inference`, `oracle`, `zk`, `franchise`, `verify` — and
+ * the board treats them exactly like any other: 100% claimed, 100% delivered.
+ * They are also the more neglected half, attested 9% of the time against 25%
+ * for spec categories, which makes them the last work we should be dropping
+ * given judgement is where this room is short-handed.
+ *
+ * A category is only ever context in a prompt here, so accepting an unfamiliar
+ * one costs nothing; the answer still has to pass the same validator.
+ */
 export const CATEGORIES = ['explain', 'research', 'review', 'build', 'coordinate'];
+
+/** What a category may look like at all: one lowercase token, as names are. */
+const CATEGORY_SHAPE = /^[a-z][a-z0-9_-]{0,23}$/;
 
 /**
  * Deliveries that say a job is done without doing it.
@@ -103,8 +120,14 @@ export function parseKibbleLine(text, { from = null, seq = null, ts = null } = {
     const parts = splitFields(rest, 4);
     if (!parts || !JOB_ID.test(parts[0])) return null;
     const category = parts[1].trim().toLowerCase();
-    if (!CATEGORIES.includes(category)) return null;
-    return { kind, jobId: parts[0], category, title: parts[2].trim(), body: parts[3].trim(), from, seq, ts };
+    if (!CATEGORY_SHAPE.test(category)) return null;
+    return {
+      kind, jobId: parts[0], category,
+      // Whether the spec knows this category. Kept rather than enforced, so a
+      // caller that cares can tell, and one that does not is not made blind.
+      offSpec: !CATEGORIES.includes(category),
+      title: parts[2].trim(), body: parts[3].trim(), from, seq, ts
+    };
   }
 
   if (kind === 'CLAIM') {

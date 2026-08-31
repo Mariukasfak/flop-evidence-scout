@@ -56,9 +56,25 @@ describe('reading the tape', () => {
     assert.equal(parseKibbleLine('@did:key:z6MkgC... Interesting discussion in this room.'), null);
   });
 
-  test('a bad job id or unknown category is refused rather than guessed', () => {
+  test('a bad job id is refused rather than guessed', () => {
     assert.equal(parseKibbleLine('JOB v1 | notanid | explain | t | body'), null);
-    assert.equal(parseKibbleLine('JOB v1 | k712a3e8a2b | telepathy | t | body'), null);
+    assert.equal(parseKibbleLine('JOB v1 | k712a3e8a2b |  | t | body'), null);
+  });
+
+  test('a category the spec never listed is read, and flagged, not dropped', () => {
+    // 163 of 2,480 jobs on a real export carry one of these, the board treats
+    // them exactly like any other, and they are attested 9% of the time against
+    // 25% — so dropping them threw away the work most in need of a validator.
+    const line = parseKibbleLine('JOB v1 | k712a3e8a2b | oracle | t | A long enough body to be a real question.');
+    assert.equal(line.category, 'oracle');
+    assert.equal(line.offSpec, true);
+
+    const known = parseKibbleLine('JOB v1 | k712a3e8a2b | explain | t | A long enough body to be a real question.');
+    assert.equal(known.offSpec, false);
+
+    // Shape is still checked: a category is one lowercase token, like every
+    // other name in this protocol.
+    assert.equal(parseKibbleLine('JOB v1 | k712a3e8a2b | Not A Category | t | body'), null);
   });
 });
 
