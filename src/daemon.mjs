@@ -7,6 +7,7 @@ import { TechnocoreClient, READ_WINDOW } from './technocore-client.mjs';
 import { Guardrails } from './guardrails.mjs';
 import { ScoutEngine } from './scout-engine.mjs';
 import { ScribeEngine } from './scribe-engine.mjs';
+import { KibbleEngine } from './kibble-engine.mjs';
 import { MailboxService } from './mailbox-service.mjs';
 import { Lease, makeHolderId, DEFAULT_TTL_MS } from './lease.mjs';
 import { recordCycle } from './shared-state.mjs';
@@ -259,6 +260,11 @@ export async function runScoutDaemon(options = {}) {
   });
   const scribeEngine = new ScribeEngine({ identity: scribeIdentity, scoutIdentity, client, guardrails: scribeGuardrails });
 
+  // Scout claims and delivers; Scribe validates. The spec requires poster, worker
+  // and validator to be three different parties, so this is never one identity
+  // doing both jobs. See src/kibble-engine.mjs for why.
+  const kibbleEngine = new KibbleEngine({ workerIdentity: scoutIdentity, validatorIdentity: scribeIdentity, client });
+
   // The DID note has advertised a mailbox from the start; this is what finally
   // reads it. Its own guardrails budget, so an inbound question cannot eat the
   // Scout's room budget and vice versa.
@@ -321,6 +327,8 @@ export async function runScoutDaemon(options = {}) {
         watchRooms: scoutEngine.watchRooms,
         faucetDiscovered: Boolean(scribeEngine.localState.faucetDiscovered),
         faucetHits: scribeEngine.localState.faucetHits || [],
+        kibbleResultsDelivered: kibbleEngine.localState.resultsDelivered || 0,
+        kibbleAttestsPosted: kibbleEngine.localState.attestsPosted || 0,
         stateOk: !scoutEngine.lastStateError && !scribeEngine.lastStateError,
         stateError: scoutEngine.lastStateError || scribeEngine.lastStateError || null
       }, null, 2), 'utf8');
@@ -684,6 +692,30 @@ export async function runScoutDaemon(options = {}) {
               + 'Start Ollama, or set an inference API key.');
           lastBackendWasReal = real;
         }
+
+        // Step D0: the kibble board. Scout answers one job for real (never on
+        // the simulator) and Scribe hygiene-attests one thin delivery — the two
+        // roles the spec requires to stay separate DIDs. Best-effort: a public
+        // board being slow or unreachable must not cost the rest of the cycle.
+        try {
+          const kibbleWorker = await timed('kibbleWorker', () => kibbleEngine.runWorkerTurn({ backend, real, ledgerPath }));
+          if (kibbleWorker.action !== 'no_job') {
+            console.log(`[Kibble/Worker] ${kibbleWorker.action}${kibbleWorker.jobId ? ` — ${kibbleWorker.jobId}` : ''}`);
+          }
+          appendAudit(config.auditLogPath, { agent: 'kibble-worker', ...kibbleWorker });
+        } catch (err) {
+          console.log(`[Kibble/Worker] Skipped — ${err.message}`);
+        }
+        try {
+          const kibbleValidator = await timed('kibbleValidator', () => kibbleEngine.runValidatorTurn());
+          if (kibbleValidator.action !== 'no_target') {
+            console.log(`[Kibble/Validator] ${kibbleValidator.action}${kibbleValidator.jobId ? ` — ${kibbleValidator.jobId}` : ''}`);
+          }
+          appendAudit(config.auditLogPath, { agent: 'kibble-validator', ...kibbleValidator });
+        } catch (err) {
+          console.log(`[Kibble/Validator] Skipped — ${err.message}`);
+        }
+
         work = await runBurst({
           /**
            * All four sources of work, not just the one.

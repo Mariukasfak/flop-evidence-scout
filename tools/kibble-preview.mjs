@@ -27,10 +27,10 @@ function line(char = '─') {
 }
 
 async function main() {
-  // Read-only: this client is never handed a write. The daemon's own guard
-  // (assertWritable) would refuse anyway, but not asking is better than being
-  // refused.
-  const client = new TechnocoreClient({ baseUrl: 'https://technocore.chat', allowWrites: false });
+  // Read-only, for real: readOnly is the flag TechnocoreClient actually checks
+  // (assertWritable refuses every write while it is set). This script also never
+  // calls postMessage, so this is belt and suspenders rather than the only guard.
+  const client = new TechnocoreClient({ baseUrl: 'https://technocore.chat', readOnly: true });
   const identity = loadOrCreateIdentity('.secrets/scout-identity.json', 'SCOUT_IDENTITY_JSON');
 
   console.log('\nKibble board preview — nothing here is posted.\n');
@@ -100,8 +100,9 @@ async function main() {
   }
 
   line();
-  console.log('Nothing above was sent. To let the agent do this for real, see');
-  console.log('PROJEKTAS.md — the switch is KIBBLE_WRITES and it is off by default.\n');
+  console.log('Nothing above was sent. The live daemon (src/daemon.mjs, via src/kibble-engine.mjs)');
+  console.log('does this for real whenever it is run without --dry-run — the same switch that');
+  console.log('gates every other write this agent makes, plus its own sparing rate limit.\n');
 }
 
 main().catch((err) => {
