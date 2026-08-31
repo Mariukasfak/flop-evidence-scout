@@ -388,8 +388,24 @@ export async function runScoutDaemon(options = {}) {
    * longer existed — a graceful shutdown releases the lease, but a killed window
    * cannot. Three cycles is enough slack to survive a slow cycle or a blip, and
    * it makes a dead holder clear in minutes instead of tens of them.
+   *
+   * Three was too few once the server started refusing writes. The TTL is also
+   * the grace window: while the server is unreachable we keep working on a lease
+   * we already hold, and we stop a third of the way from expiry rather than risk
+   * two writers. At three cycles that is barely two minutes of cover, and the
+   * audit log showed it running out mid-outage — the renewal could not land
+   * either, so the clock simply ran down. Eight cycles gives roughly five
+   * minutes of cover against measured outage bursts of about forty-five
+   * seconds.
+   *
+   * The cost is what it always was, and it is small: if this process is killed
+   * rather than stopped, the next writer waits out the remainder. Nothing else
+   * competes for this lease today — cloud writes are switched off — and even
+   * when they are on, a few extra minutes before a takeover is worth less than
+   * the cycles this was throwing away.
    */
-  const leaseTtl = Math.min(10 * 60_000, Math.max(2 * 60_000, config.intervalMs * 3));
+  const LEASE_CYCLES = 8;
+  const leaseTtl = Math.min(10 * 60_000, Math.max(2 * 60_000, config.intervalMs * LEASE_CYCLES));
 
   /**
    * Work already done, so a cycle does not redo the previous one's.

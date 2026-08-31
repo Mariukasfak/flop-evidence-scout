@@ -250,7 +250,12 @@ export class Lease {
             reason: `renewal did not reach the server (${err.message}), but ours runs for another ${Math.ceil(remainingMs / 1000)}s`
           };
         }
-        return { acquired: false, transient: true, reason: `takeover did not reach the server (${err.message})` };
+        // Name the verb correctly. A renewal that failed and a takeover that
+        // failed are different events, and reading "takeover did not reach the
+        // server" while we already held the lease sent the first reader of this
+        // log looking for a competitor that was not there.
+        const verb = isMine ? 'renewal' : 'takeover';
+        return { acquired: false, transient: true, reason: `${verb} did not reach the server (${err.message})` };
       }
       return { acquired: false, reason: 'lost the race; the value changed under us' };
     }
