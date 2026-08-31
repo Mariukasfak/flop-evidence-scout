@@ -62,6 +62,47 @@ if (!Number.isFinite(ageMin)) {
   process.exit(0);
 }
 
+/**
+ * A record that is old because writes are failing is not a stopped agent.
+ *
+ * The earlier guard covers the record being unreadable. It does not cover the
+ * case that actually happens: the record reads fine and is simply old, because
+ * every attempt to update it was refused. On 2026-08-31 Technocore answered 43
+ * of 69 probes with a 503 — during a morning like that the shared record can be
+ * hours behind while the agent is running normally and recording every cycle it
+ * can.
+ *
+ * So before blaming the agent, ask whether the place it writes to is accepting
+ * anything. This is the fourth distinct shape of the same mistake in this
+ * repository, and each time the fix is the same sentence: not being able to see
+ * something is not the same as seeing that it is gone.
+ */
+async function serverIsAnswering(probes = 5) {
+  let ok = 0;
+  for (let i = 0; i < probes; i++) {
+    try {
+      const res = await fetch('https://technocore.chat/r/lobby?limit=1', {
+        headers: { 'user-agent': 'FLOP-Scout-DownAlert/1.0' },
+        signal: AbortSignal.timeout(10_000)
+      });
+      if (res.ok) ok++;
+    } catch { /* a failed probe is a failed probe */ }
+    if (i < probes - 1) await new Promise((r) => setTimeout(r, 1500));
+  }
+  return { ok, probes };
+}
+
+if (ageMin > SILENT_MINUTES) {
+  const health = await serverIsAnswering();
+  // A server this unwell explains an old record on its own. Half the probes is
+  // a deliberately generous bar: we are ruling an explanation IN, not out.
+  if (health.ok < health.probes / 2) {
+    console.log(`Record is ${Math.round(ageMin)} min old, but Technocore answered only `
+      + `${health.ok}/${health.probes} probes — the server explains this. Nothing filed.`);
+    process.exit(0);
+  }
+}
+
 const existing = gh(['issue', 'list', '--label', TRACKER_LABEL, '--state', 'all',
   '--limit', '1', '--json', 'number,state'], { allowFailure: true });
 let tracker = null;
