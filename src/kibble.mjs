@@ -490,3 +490,21 @@ export function pickRealDelivery(jobs, { selfDid, excludeDids = [], skipJobIds =
   }
   return null;
 }
+
+/**
+ * Is this job asking about the Flop Network itself?
+ *
+ * The trigger for grounding an answer in our status board rather than the
+ * model's own knowledge. Deliberately generous: a false positive costs an
+ * INSUFFICIENT EVIDENCE and one unclaimed job, while a false negative is how a
+ * fabricated token allocation reached a public tape under our signature.
+ */
+export function isAboutFlop(title, body) {
+  const text = `${title ?? ''} ${body ?? ''}`.toLowerCase();
+  // Two plain alternations, no word boundaries: an earlier version carried
+  // literal backspace bytes where its \b escapes should have been, so the
+  // guard never once fired and would have looked like working code forever.
+  const NAMES = /flop|technocore|kibble/;
+  const SUBJECTS = /airdrop|token|supply|allocat|tokenomic|genesis|snapshot|faucet|testnet|reward|distribut|unlock|vest|stake|staking|eligib/;
+  return NAMES.test(text) && SUBJECTS.test(text);
+}

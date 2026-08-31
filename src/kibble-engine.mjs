@@ -40,8 +40,9 @@ import { sayOnce } from './log-once.mjs';
 import {
   reconstructBoard, pickJob, pickThinDelivery, pickRealDelivery, sameDid,
   claimLine, resultLine, attestNotLine, attestUsefulLine, resultHashFor,
-  thinDeliveryReason
+  thinDeliveryReason, isAboutFlop
 } from './kibble.mjs';
+import { FACTS } from './flop-facts.mjs';
 import { nextQuestion, jobLine, jobIdFor } from './kibble-jobs.mjs';
 
 /** How many refused job ids to remember, so a bad answer is not regenerated forever. */
@@ -655,7 +656,12 @@ export class KibbleEngine {
       return { action: 'skipped_no_real_model', jobId: job.jobId };
     }
 
-    const task = buildTask('kibble-answer', { category: job.category, title: job.title, body: job.body });
+    // A question about FLOP is answered from our status board or not at all.
+    // The alternative, measured, is inventing a token allocation in public.
+    const facts = isAboutFlop(job.title, job.body) ? FACTS : [];
+    const task = buildTask('kibble-answer', {
+      category: job.category, title: job.title, body: job.body, facts
+    });
     const { receipt, completion } = await runSession(task, { backend, identity: this.workerIdentity });
     try { appendReceipt(receipt, ledgerPath); } catch { /* a ledger write must never lose the run */ }
 
