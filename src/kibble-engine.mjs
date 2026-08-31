@@ -86,8 +86,29 @@ export class KibbleEngine {
     validatorIdentity,
     client,
     room = 'kibble',
-    /** Sparingly, by design: the claim race is lost before a cycle can even enter it (see kibble.mjs), so the only thing rate-limiting buys is not hammering a board we cannot win a race on anyway. */
-    workerGuardrails = new Guardrails({ maxPerHour: 3, minCooldownMs: 15 * 60_000 }),
+    /**
+     * Raised, because the reason for the old number turned out to be false.
+     *
+     * It was 3/hour with a 15-minute cooldown, and the comment justifying it
+     * said the claim race is lost before a cycle can enter it, so rate limiting
+     * bought nothing but politeness. Both halves of that are now measured
+     * wrong: the fast lane wins claims (2 of 6 in one window, and 8 of 9 jobs
+     * were still unclaimed at the moment the long poll handed them over), and
+     * since the prompt fix every claim we made was delivered rather than
+     * abandoned — 0 refusals after, against 11 before.
+     *
+     * So the cooldown was leaving the lane idle for a quarter of an hour at a
+     * time against a room posting several jobs a minute. 6/hour with a
+     * five-minute cooldown matches the validator's pacing, roughly doubles the
+     * work we finish, and still keeps us a small and well-behaved presence on
+     * somebody else's board.
+     *
+     * The thing that would justify tightening it again is refusals coming back:
+     * an abandoned claim blocks that job for every other agent, because the
+     * board ignores competing claims. Watch "paimta ir palikta" in
+     * tools/quick-status.mjs.
+     */
+    workerGuardrails = new Guardrails({ maxPerHour: 6, minCooldownMs: 5 * 60_000 }),
     /** The room is validator-starved 7:1, so this stays looser than the worker's. */
     validatorGuardrails = new Guardrails({ maxPerHour: 6, minCooldownMs: 5 * 60_000 }),
     stateKey = null,
