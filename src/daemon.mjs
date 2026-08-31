@@ -491,6 +491,10 @@ export async function runScoutDaemon(options = {}) {
      * the work from the interval rather than adding to it.
      */
     const cycleTop = Date.now();
+
+    /** The in-flight fast-lane poll, awaited before this cycle's gap. */
+    let kibbleFastLane = null;
+
     try {
       if (lease) {
         // Acquire covers all three cases: unheld, expired, and already ours.
@@ -730,6 +734,16 @@ export async function runScoutDaemon(options = {}) {
           } catch (err) {
             console.log(`[Kibble/Validator] Skipped — ${err.message}`);
           }
+
+          // Started only after the two turns above have finished with the
+          // engine's state. All three read-modify-write the same note, and a
+          // fast lane running concurrently with them would let one save clobber
+          // a claim the other had just recorded — losing exactly the claim this
+          // lane exists to win. It runs alone, through the idle part of the
+          // cycle, and is awaited before the next one begins.
+          kibbleFastLane = kibbleEngine
+            .runFastLane({ maxMs: Math.max(5_000, config.intervalMs - 25_000) })
+            .catch((err) => ({ action: 'failed', error: err.message }));
         }
 
         work = await runBurst({
@@ -847,6 +861,19 @@ export async function runScoutDaemon(options = {}) {
      * leave the log readable when something is wrong.
      */
     const MIN_GAP_MS = 5_000;
+
+    // The fast lane holds a long poll open through the idle part of the cycle.
+    // Awaited here rather than left running, so it can never overlap the next
+    // cycle's worker turn and race it for the same state note.
+    if (kibbleFastLane) {
+      const lane = await kibbleFastLane;
+      kibbleFastLane = null;
+      if (lane?.claimed) {
+        console.log(`[Kibble/Fast] claimed ${lane.claimed}, holding ${lane.held}`);
+        appendAudit(config.auditLogPath, { agent: 'kibble-fast', ...lane });
+      }
+    }
+
     const elapsed = Date.now() - cycleTop;
 
     /**
