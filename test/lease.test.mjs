@@ -394,3 +394,41 @@ describe('a lease we already hold, while the server is unreachable', () => {
     assert.equal(attempt.acquired, false, 'no prior claim means no lease to fall back on');
   });
 });
+
+/**
+ * The renewal path, which is the one that actually runs.
+ *
+ * The lease is claimed once and renewed every cycle, so a failed renewal is far
+ * more common than a failed claim. Measured after the read-path fix shipped:
+ * five standdowns from the read, four from the renewal write.
+ */
+describe('a renewal that does not reach the server', () => {
+  test('keeps the lease we already hold', async () => {
+    const client = new FakeKv();
+    const lease = new Lease({ client, name: 'scout-cycle', holder: 'local-a1', ttlMs: 60_000, readAttempts: 1 });
+    assert.equal((await lease.acquire()).acquired, true);
+
+    // Reads fine, writes fail: exactly the shape of a 503 on the write lane.
+    client.setKv = async () => { throw new Error('Technocore note write failed: HTTP 503 Service Unavailable'); };
+
+    const during = await lease.acquire();
+    assert.equal(during.acquired, true, 'a failed extension is not a lost lease');
+    assert.equal(during.degraded, true);
+  });
+
+  test('does not let us take over somebody else on a failed write', async () => {
+    const client = new FakeKv();
+    const other = new Lease({ client, name: 'scout-cycle', holder: 'other-x1', ttlMs: 60_000, readAttempts: 1 });
+    assert.equal((await other.acquire()).acquired, true);
+
+    // Expire theirs so the takeover path is the one under test.
+    const us = new Lease({
+      client, name: 'scout-cycle', holder: 'local-a1',
+      ttlMs: 60_000, readAttempts: 1, now: () => Date.now() + 120_000
+    });
+    client.setKv = async () => { throw new Error('Technocore note write failed: HTTP 503 Service Unavailable'); };
+
+    const attempt = await us.acquire();
+    assert.equal(attempt.acquired, false, 'a takeover that never landed is not a takeover');
+  });
+});

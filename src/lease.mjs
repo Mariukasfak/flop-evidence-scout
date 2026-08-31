@@ -226,6 +226,30 @@ export class Lease {
       return { acquired: true, reason: isMine ? 'renewed our own' : `took over from ${current.holder}, expired` };
     } catch (err) {
       if (isTransientWriteFailure(err)) {
+        /**
+         * The other half of the same argument.
+         *
+         * A read that fails no longer stands us down when the lease is already
+         * ours. A failed RENEWAL was still doing exactly that — and it is the
+         * more common case, because the renewal happens every cycle while the
+         * lease only needs claiming once. In the four cycles after that fix
+         * shipped, five standdowns came from the read path and four from this
+         * one.
+         *
+         * The reasoning does not change with the verb. We wrote the note, the
+         * server told us when it expires, and nobody may take it before then.
+         * A renewal that did not arrive means we failed to EXTEND the lease, not
+         * that we lost it — so we keep the cycle and try again next time, while
+         * the clock still says it is ours.
+         */
+        const remainingMs = current.expiresAt - now;
+        if (isMine && remainingMs > this.ttlMs / 3) {
+          return {
+            acquired: true,
+            degraded: true,
+            reason: `renewal did not reach the server (${err.message}), but ours runs for another ${Math.ceil(remainingMs / 1000)}s`
+          };
+        }
         return { acquired: false, transient: true, reason: `takeover did not reach the server (${err.message})` };
       }
       return { acquired: false, reason: 'lost the race; the value changed under us' };
