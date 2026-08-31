@@ -7,6 +7,7 @@ import path from 'node:path';
 import { generateIdentity } from '../src/identity.mjs';
 import { KibbleEngine, didCardUrl } from '../src/kibble-engine.mjs';
 import { reconstructBoard } from '../src/kibble.mjs';
+import { QUESTION_BANK } from '../src/kibble-jobs.mjs';
 
 const OTHER = 'did:key:z6MknDn3CH7vumHw5rXREhdQaBcDeFgHiJkLmNoPqRsTuVwX';
 
@@ -420,6 +421,53 @@ describe('KibbleEngine reads back what the room made of its work', () => {
     const b = boardOfVerdicts(workerIdentity.did, ['useful'], workerIdentity.did);
     engine.localState.deliveredJobIds = b.ids;
     assert.equal(engine.reviewOwnDeliveries(b.jobs).useful, 0);
+  });
+});
+
+describe('KibbleEngine asks only questions it actually has', () => {
+  // jobs_posted is worth x2 with no race, which is exactly why it is the
+  // easiest thing here to abuse — the board says it ignores job farming. The
+  // bank is finite and hand-written, so running out is the correct end state.
+  const engineFor = (client) => new KibbleEngine({
+    workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client
+  });
+
+  test('posts a real question, signed by the worker key', async () => {
+    const client = makeClient();
+    const engine = engineFor(client);
+
+    const result = await engine.runPosterTurn();
+    assert.equal(result.action, 'job_posted');
+    assert.equal(client.posts.length, 1);
+    assert.match(client.posts[0].text, /^JOB v1 \| k[0-9a-f]{10} \| \w+ \| /);
+    assert.match(client.posts[0].text, /Success:/, 'a job with no bar cannot be attested honestly');
+    assert.equal(client.posts[0].did, engine.workerIdentity.did);
+  });
+
+  test('never asks the same question twice', async () => {
+    const client = makeClient();
+    const engine = engineFor(client);
+    engine.localState.postedQuestionKeys = QUESTION_BANK.map((q) => q.key);
+
+    const result = await engine.runPosterTurn();
+    assert.equal(result.action, 'no_questions_left');
+    assert.equal(client.posts.length, 0, 'reposting a spent question is the farming this avoids');
+  });
+
+  test('stops rather than inventing filler when the bank empties', async () => {
+    const client = makeClient();
+    const engine = engineFor(client);
+    engine.localState.postedQuestionKeys = QUESTION_BANK.map((q) => q.key);
+    await engine.runPosterTurn();
+    await engine.runPosterTurn();
+    assert.equal(client.posts.length, 0);
+  });
+
+  test('every banked question states a checkable success condition', () => {
+    for (const q of QUESTION_BANK) {
+      assert.match(q.body, /Success:/, `${q.key} has no success condition`);
+      assert.ok(q.body.length > 120, `${q.key} is too thin to answer`);
+    }
   });
 });
 

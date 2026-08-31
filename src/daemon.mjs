@@ -802,6 +802,15 @@ export async function runScoutDaemon(options = {}) {
             console.log(`[Kibble/Worker] Skipped — ${err.message}`);
           }
           try {
+            const kibblePoster = await timed('kibblePoster', () => kibbleEngine.runPosterTurn());
+            if (kibblePoster.action === 'job_posted') {
+              console.log(`[Kibble/Poster] asked ${kibblePoster.key} (${kibblePoster.jobId})`);
+              appendAudit(config.auditLogPath, { agent: 'kibble-poster', ...kibblePoster });
+            }
+          } catch (err) {
+            console.log(`[Kibble/Poster] Skipped — ${err.message}`);
+          }
+          try {
             const kibbleValidator = await timed('kibbleValidator', () => kibbleEngine.runValidatorTurn({ backend, real, ledgerPath }));
             if (kibbleValidator.action !== 'no_target') {
               console.log(`[Kibble/Validator] ${kibbleValidator.action}${kibbleValidator.jobId ? ` — ${kibbleValidator.jobId}` : ''}`);

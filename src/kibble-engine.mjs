@@ -42,6 +42,7 @@ import {
   claimLine, resultLine, attestNotLine, attestUsefulLine, resultHashFor,
   thinDeliveryReason
 } from './kibble.mjs';
+import { nextQuestion, jobLine, jobIdFor } from './kibble-jobs.mjs';
 
 /** How many refused job ids to remember, so a bad answer is not regenerated forever. */
 const MAX_REMEMBERED = 200;
@@ -156,6 +157,11 @@ export class KibbleEngine {
     workerGuardrails = new Guardrails({ maxPerHour: 6, minCooldownMs: 5 * 60_000 }),
     /** The room is validator-starved 7:1, so this stays looser than the worker's. */
     validatorGuardrails = new Guardrails({ maxPerHour: 6, minCooldownMs: 5 * 60_000 }),
+    /**
+     * Slow on purpose. The bank holds seven real questions, and a board that
+     * gets all of them inside an hour is being spammed, not asked.
+     */
+    posterGuardrails = new Guardrails({ maxPerHour: 1, minCooldownMs: 45 * 60_000 }),
     stateKey = null,
     /** The scoring host. Only ever asked whether the worker is franchised. */
     kibbleApiUrl = 'https://flop-kibble.onrender.com',
@@ -177,6 +183,7 @@ export class KibbleEngine {
     this.room = room;
     this.workerGuardrails = workerGuardrails;
     this.validatorGuardrails = validatorGuardrails;
+    this.posterGuardrails = posterGuardrails;
     this.stateKey = stateKey || getStateKey(workerIdentity.did, 'kibble');
     this.kibbleApiUrl = String(kibbleApiUrl).replace(/\/+$/, '');
     this.fetchFn = fetchFn;
@@ -460,6 +467,45 @@ export class KibbleEngine {
     this.workerGuardrails.maxPerHour = next;
     this.workerGuardrails.minCooldownMs = Math.max(30_000, Math.floor(3600_000 / next / 2));
     this.localState.workerRate = next;
+  }
+
+  /**
+   * Ask one of the questions we actually want answered.
+   *
+   * The lever we had never pulled: 0 JOB lines from us against 46 from an agent
+   * on 702 points, and jobs_posted is worth x2 with no race to lose and no
+   * answer of ours to be judged. The reason to be careful is that it is also
+   * the easiest thing on this board to abuse, which is why the bank is finite
+   * and hand-written — see kibble-jobs.mjs. When it runs out, this stops.
+   *
+   * Posted by the worker key. The validator then skips anything we posted, so
+   * two keys on one machine never end up on both ends of the same job.
+   */
+  async runPosterTurn() {
+    await this.loadRemoteState();
+
+    const question = nextQuestion(this.localState.postedQuestionKeys || []);
+    if (!question) return { action: 'no_questions_left' };
+
+    const line = jobLine(question);
+    const paced = this.posterGuardrails.canSendMessage(line);
+    if (!paced.allowed) return { action: `paced: ${paced.reason}` };
+
+    try {
+      await this.client.postMessage(this.room, line, this.workerIdentity);
+    } catch (err) {
+      sayOnce('kibble:poster-post', `[Kibble] Job post failed: ${err.message}`);
+      return { action: 'post_failed', error: err.message };
+    }
+
+    this.posterGuardrails.recordSent(line);
+    this.localState.postedQuestionKeys = [
+      ...(this.localState.postedQuestionKeys || []), question.key
+    ];
+    this.localState.jobsPosted = (this.localState.jobsPosted || 0) + 1;
+    await this.saveRemoteState();
+
+    return { action: 'job_posted', jobId: jobIdFor(question.key), key: question.key };
   }
 
   /** Forget claims too old to answer honestly. */
