@@ -3,3 +3,7 @@ data/
 *.log
 .secrets/
 *.bat
+
+# Vietiniai nustatymai (meniu.bat juos rasa). Niekada i git.
+.env.local
+.env.tmp

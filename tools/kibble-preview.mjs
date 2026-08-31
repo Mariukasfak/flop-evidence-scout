@@ -100,9 +100,13 @@ async function main() {
   }
 
   line();
-  console.log('Nothing above was sent. The live daemon (src/daemon.mjs, via src/kibble-engine.mjs)');
-  console.log('does this for real whenever it is run without --dry-run — the same switch that');
-  console.log('gates every other write this agent makes, plus its own sparing rate limit.\n');
+  const live = /^(1|true|yes|on)$/i.test(process.env.KIBBLE_WRITES || '');
+  console.log('Nothing above was sent.');
+  console.log(`Board writes are currently ${live ? 'ON' : 'OFF'} (KIBBLE_WRITES).`);
+  console.log(live
+    ? 'The daemon does this for real, worker 3/h and validator 6/h at most.'
+    : 'Turn them on from meniu.bat, option 8, then restart the agent.');
+  console.log('');
 }
 
 main().catch((err) => {
