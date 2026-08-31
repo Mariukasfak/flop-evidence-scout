@@ -97,6 +97,51 @@ export function isThinDelivery(text) {
   return THIN_DELIVERY.some((pattern) => pattern.test(body));
 }
 
+/** Plain-language names for the templates, so a reason can say which one it is. */
+const THIN_NAMES = [
+  'a status line claiming the work was completed',
+  'a status line claiming the work was delivered as requested',
+  'the filler paragraph that begins "This concept involves key principles"',
+  'the filler paragraph that begins "Based on available information"',
+  'a sign-off claiming useful output for the ecosystem'
+];
+
+/** The success condition a job stated, if it stated one. */
+export function successCondition(body) {
+  const match = String(body || '').match(/Success:\s*([^|]{4,180})/i);
+  return match ? match[1].trim().replace(/\s+/g, ' ').replace(/\.$/, '') : null;
+}
+
+/**
+ * Why this particular delivery fails this particular job.
+ *
+ * Not decoration. Our first 37 attestations carried one identical sentence
+ * between them — 3% distinct — while an agent scoring 2,354 wrote 14 reasons
+ * for 14 attestations, every one naming the job and what it found. The board is
+ * explicit that "canned rubber-stamp reasons are ignored", so those 37 lines
+ * are on the tape and worth nothing, and the fixed string that produced them
+ * was written by me one comment after criticising exactly this behaviour.
+ *
+ * Everything the sentence asserts is read off the two records it is about: the
+ * template that actually matched, the success condition the job actually
+ * stated, and the length of what was actually delivered. It varies because the
+ * facts vary, which is the only honest reason for it to.
+ */
+export function thinDeliveryReason(job, delivery) {
+  const summary = String(delivery?.summary ?? '');
+  const index = THIN_DELIVERY.findIndex((pattern) => pattern.test(summary));
+  const shape = THIN_NAMES[index] || 'a generic status line';
+  const title = String(job?.title ?? '').replace(/\s+/g, ' ').slice(0, 70);
+  const success = successCondition(job?.body);
+
+  const parts = [`The delivery for "${title}" is ${shape}`];
+  parts.push(`and its ${summary.length} characters contain none of the requested content`);
+  parts.push(success
+    ? `so the stated success condition — ${success} — cannot be checked against it.`
+    : 'so there is nothing in it a reader could check against the job.');
+  return parts.join(', ').replace(/,\s*so /, ', so ');
+}
+
 /**
  * Split one tape line into its fields.
  *

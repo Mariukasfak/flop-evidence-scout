@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import {
   parseKibbleLine, reconstructBoard, pickJob, pickThinDelivery, pickRealDelivery,
   isThinDelivery, sameDid, claimLine, resultLine, attestNotLine,
-  attestUsefulLine, resultHashFor
+  attestUsefulLine, resultHashFor, thinDeliveryReason, successCondition
 } from '../src/kibble.mjs';
 
 /**
@@ -310,5 +310,49 @@ describe('two keys, one machine', () => {
   test('a delivery from an outsider is still judged normally', () => {
     const jobs = boardWith(OUTSIDER, realAnswer);
     assert.ok(pickRealDelivery(jobs, { selfDid: SELF, excludeDids: [WORKER] }));
+  });
+});
+
+
+describe('an attestation has to say something about the delivery it is about', () => {
+  // Our first 37 attestations shared one identical sentence between them — 3%
+  // distinct — and scored nothing, because the board ignores canned reasons.
+  // An agent on 2,354 points wrote 14 reasons for 14 attestations, each naming
+  // the job and what it found. This is that difference, tested.
+  const jobs = [
+    { title: 'List 3 real-world uses of GraphQL', body: 'Name three. Success: three distinct uses, each with a domain.' },
+    { title: 'Why quorum reads beat single-node reads', body: 'Explain it. Success: names one concrete consequence.' },
+    { title: 'Cost analysis of storing 1TB', body: 'Cover the unit economics of it.' }
+  ];
+  const deliveries = [
+    { summary: "Completed work on 'List 3 real-world uses of GraphQL' successfully." },
+    { summary: 'This concept involves key principles that can be understood through practical examples.' },
+    { summary: 'Work delivered for X: completed as requested, providing useful output for the ecosystem.' }
+  ];
+
+  test('different jobs produce different reasons', () => {
+    const reasons = jobs.map((job, i) => thinDeliveryReason(job, deliveries[i]));
+    assert.equal(new Set(reasons).size, reasons.length, 'a fixed string is what scored zero');
+  });
+
+  test('the reason names the job, the template and the success condition', () => {
+    const reason = thinDeliveryReason(jobs[0], deliveries[0]);
+    assert.match(reason, /List 3 real-world uses of GraphQL/);
+    assert.match(reason, /status line claiming the work was completed/);
+    assert.match(reason, /three distinct uses, each with a domain/);
+    // Everything it asserts is read off the two records, including the length.
+    assert.match(reason, new RegExp(`${deliveries[0].summary.length} characters`));
+  });
+
+  test('a job with no stated success condition still gets a true sentence', () => {
+    const reason = thinDeliveryReason(jobs[2], deliveries[2]);
+    assert.doesNotMatch(reason, /success condition/);
+    assert.match(reason, /nothing in it a reader could check/);
+  });
+
+  test('the success condition is read from the job, not invented', () => {
+    assert.equal(successCondition('Do a thing. Success: one sentence, under 40 words.'),
+      'one sentence, under 40 words');
+    assert.equal(successCondition('Do a thing with no stated bar.'), null);
   });
 });

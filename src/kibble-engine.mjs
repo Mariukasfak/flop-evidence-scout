@@ -39,7 +39,8 @@ import { appendReceipt } from './inference-ledger.mjs';
 import { sayOnce } from './log-once.mjs';
 import {
   reconstructBoard, pickJob, pickThinDelivery, pickRealDelivery, sameDid,
-  claimLine, resultLine, attestNotLine, attestUsefulLine, resultHashFor
+  claimLine, resultLine, attestNotLine, attestUsefulLine, resultHashFor,
+  thinDeliveryReason
 } from './kibble.mjs';
 
 /** How many refused job ids to remember, so a bad answer is not regenerated forever. */
@@ -732,9 +733,11 @@ export class KibbleEngine {
     const paced = this.validatorGuardrails.canSendMessage(`kibble-attest-probe-${found.job.jobId}`);
     if (!paced.allowed) return { action: `paced: ${paced.reason}`, jobId: found.job.jobId };
 
-    const reason = 'The delivery is a status line restating the title and contains none of the '
-      + 'specific content the job asked for, so nothing in it can be checked against the success '
-      + `condition. Verified by: ${didCardUrl(this.client, this.validatorIdentity)}`;
+    // Written from this job and this delivery, never a fixed string. Our first
+    // 37 attestations shared one sentence between them and scored nothing,
+    // because the board ignores canned reasons — and it is right to.
+    const reason = `${thinDeliveryReason(found.job, found.delivery)} `
+      + `Verified by: ${didCardUrl(this.client, this.validatorIdentity)}`;
     const line = attestNotLine(found.job.jobId, reason);
 
     const finalCheck = this.validatorGuardrails.canSendMessage(line);
