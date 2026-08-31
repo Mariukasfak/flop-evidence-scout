@@ -18,6 +18,7 @@ import { TelemetryFeed } from './telemetry-feed.mjs';
 import { FACTS } from './flop-facts.mjs';
 import { updateDashboardFile } from './dashboard.mjs';
 import { analyzeChatArchives, getLatestLearningReport } from './learning-engine.mjs';
+import { sayOnce, clearOnce } from './log-once.mjs';
 
 /**
  * Every writable path the daemon owns, derived from one base directory.
@@ -746,9 +747,9 @@ export async function runScoutDaemon(options = {}) {
           sessions: work.genuineSessions,
           spendFlop: work.genuineSpend
         });
-        if (!recorded.recorded) console.log(`[Activity] Not recorded — ${recorded.reason}`);
+        if (!recorded.recorded) sayOnce('activity', `[Activity] Not recorded — ${recorded.reason}`);
       } catch (err) {
-        console.log(`[Activity] Not recorded — ${err.message}`);
+        sayOnce('activity', `[Activity] Not recorded — ${err.message}`);
       }
 
       const cycleMs = Date.now() - cycleStartedAt;
@@ -842,10 +843,24 @@ export async function runScoutDaemon(options = {}) {
           + 'The agent is fine; there is nothing here to fix.');
         appendAudit(config.auditLogPath, { event: 'outage', downMin: mins, gapMs });
       }
-    } else if (outageAnnouncedAt && client.consecutiveFailures === 0) {
-      outageAnnouncedAt = null;
-      console.log('[Outage] Technocore is answering again.');
-      appendAudit(config.auditLogPath, { event: 'outage_over' });
+    } else if (client.consecutiveFailures === 0) {
+      /**
+       * Say that it stopped, not just stop saying it.
+       *
+       * A stream of failures that simply goes quiet is indistinguishable from a
+       * process that died — which is the confusion this whole log is trying to
+       * end. Each recovered condition reports how long it lasted and how many
+       * times it happened while it was being summarised.
+       */
+      for (const key of ['scout:state-write', 'scout:post', 'scribe:state-write',
+        'scribe:post', 'mailbox:state-write', 'activity']) {
+        clearOnce(key);
+      }
+      if (outageAnnouncedAt) {
+        outageAnnouncedAt = null;
+        console.log('[Outage] Technocore is answering again.');
+        appendAudit(config.auditLogPath, { event: 'outage_over' });
+      }
     }
 
     await new Promise((resolve) => setTimeout(resolve, gapMs));

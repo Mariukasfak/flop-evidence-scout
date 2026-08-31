@@ -3,6 +3,7 @@ import { messageSkeleton } from './learning-engine.mjs';
 import { Guardrails } from './guardrails.mjs';
 import { getDidShardedPath, getStateKey } from './identity.mjs';
 import { READ_WINDOW } from './technocore-client.mjs';
+import { sayOnce } from './log-once.mjs';
 
 /**
  * Topical rooms carry real conversation; /r/lobby is a firehose that has run
@@ -167,7 +168,7 @@ export class ScoutEngine {
     } catch (err) {
       // Surfaced in the turn result and the audit log — never swallowed.
       this.lastStateError = err.message;
-      console.warn('[Scout] /kv/ state write failed:', err.message);
+      sayOnce('scout:state-write', `[Scout] /kv/ state write failed: ${err.message}`);
       return false;
     }
   }
@@ -447,7 +448,7 @@ export class ScoutEngine {
           }
         } catch (err) {
           actionTaken = `send_failed: ${err.message}`;
-          console.warn('[Scout] Failed to post message:', err.message);
+          sayOnce('scout:post', `[Scout] Failed to post message: ${err.message}`);
         }
       } else {
         actionTaken = `monitoring_pacing: ${check.reason}`;

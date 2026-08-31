@@ -2,6 +2,7 @@ import { getDidShardedPath, getStateKey, singleLineSweep } from './identity.mjs'
 import { Guardrails } from './guardrails.mjs';
 import { signExchange, recordExchange } from './collaboration.mjs';
 import { READ_WINDOW } from './technocore-client.mjs';
+import { sayOnce } from './log-once.mjs';
 
 /** What a testnet faucet room would plausibly be called when it appears. */
 export const FAUCET_PATTERNS = [/faucet/i, /testnet/i, /\bdrip\b/i, /\btap\b/i];
@@ -72,7 +73,7 @@ export class ScribeEngine {
       return true;
     } catch (err) {
       this.lastStateError = err.message;
-      console.warn('[Scribe] /kv/ state write failed:', err.message);
+      sayOnce('scribe:state-write', `[Scribe] /kv/ state write failed: ${err.message}`);
       return false;
     }
   }
@@ -231,7 +232,7 @@ export class ScribeEngine {
           this.guardrails.recordSent(outgoingMessage);
         } catch (err) {
           actionTaken = `send_failed: ${err.message}`;
-          console.warn('[Scribe] Failed to post message:', err.message);
+          sayOnce('scribe:post', `[Scribe] Failed to post message: ${err.message}`);
         }
       } else {
         actionTaken = `monitoring_pacing: ${check.reason}`;

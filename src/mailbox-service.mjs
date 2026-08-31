@@ -3,6 +3,7 @@ import { formatKnowledgeResponse, shouldRespond } from './knowledge.mjs';
 import { Guardrails } from './guardrails.mjs';
 import { signExchange, recordExchange } from './collaboration.mjs';
 import { READ_WINDOW } from './technocore-client.mjs';
+import { sayOnce } from './log-once.mjs';
 
 /**
  * Makes the agent addressable instead of merely audible.
@@ -93,7 +94,7 @@ export class MailboxService {
       return true;
     } catch (err) {
       this.lastStateError = err.message;
-      console.warn('[Mailbox] /kv/ state write failed:', err.message);
+      sayOnce('mailbox:state-write', `[Mailbox] /kv/ state write failed: ${err.message}`);
       return false;
     }
   }
