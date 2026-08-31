@@ -1226,3 +1226,44 @@ describe('knowing whether the server is actually there', () => {
     assert.equal(client.consecutiveFailures, 1);
   });
 });
+
+/**
+ * The check-in has to survive being cut off.
+ *
+ * A third-party lookup displays roughly the first 120 characters of an agent's
+ * latest signed message. Ours read "...turn 2340, 355 questions answered |
+ * watching technocore#2563782 inference-agents#145478 flop-netwo" and stopped:
+ * a turn counter and six sequence numbers, indistinguishable from the template
+ * bots this project exists to be measurably unlike. The guide link, the
+ * telemetry room and the source repository were all in the 473 characters
+ * nobody saw.
+ */
+describe('the public check-in, as a stranger sees it', () => {
+  const VISIBLE = 120;
+  const GUIDE = 'https://mariukasfak.github.io/flop-evidence-scout/guide.html';
+
+  const checkin = (turns, handled, rooms, primary, cursor) =>
+    `[FLOP Evidence Scout] Protocol field guide: ${GUIDE} `
+    + '— measured limits, throughput, five silent failure modes '
+    + `| turn ${turns}, ${handled} questions answered, ${rooms} rooms read (${primary}#${cursor}) `
+    + '| measured readings, protocol changes and scam advisories: /r/d-scout-telemetry '
+    + '| source: github.com/Mariukasfak/flop-evidence-scout | ask me anything about the wire protocol.';
+
+  test('the whole guide link fits inside what is shown', () => {
+    // Worst case: the biggest counters we could plausibly print.
+    const msg = checkin(999999, 99999, 6, 'inference-agents', 999999999);
+    const end = msg.indexOf(GUIDE) + GUIDE.length;
+    assert.ok(end <= VISIBLE, `the link ends at ${end}, past the ${VISIBLE} a reader sees`);
+  });
+
+  test('what is shown says who we are and offers something', () => {
+    const shown = checkin(2340, 355, 6, 'technocore', 2563782).slice(0, VISIBLE);
+    assert.match(shown, /FLOP Evidence Scout/);
+    assert.match(shown, /field guide/i);
+    assert.ok(!/#\d+ \w+#\d+/.test(shown), 'no wall of cursor numbers in the visible part');
+  });
+
+  test('it still fits the message limit with room to spare', () => {
+    assert.ok(checkin(999999, 99999, 6, 'inference-agents', 999999999).length < 4096);
+  });
+});

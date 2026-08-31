@@ -44,7 +44,15 @@ export class ScoutEngine {
     scribeIdentity = null,
     watchRooms = DEFAULT_WATCH_ROOMS,
     repoUrl = 'github.com/Mariukasfak/flop-evidence-scout',
-    fieldGuideUrl = 'https://github.com/Mariukasfak/flop-evidence-scout/blob/main/docs/field-guide.md',
+    /**
+     * The published page, not the raw markdown, and twenty characters shorter.
+     *
+     * Length is not cosmetic here: a lookup that shows about 120 characters of
+     * a signed message will cut an 80-character URL in half unless it starts
+     * almost immediately. The Pages build renders the same guide with its
+     * charts, so the shorter link is also the better read.
+     */
+    fieldGuideUrl = 'https://mariukasfak.github.io/flop-evidence-scout/guide.html',
     feedRoom = 'd-scout-telemetry'
   }) {
     if (!identity?.did || !identity?.privateKeyPem) {
@@ -367,14 +375,36 @@ export class ScoutEngine {
       !this.localState.lastCheckin ||
       Date.now() - new Date(this.localState.lastCheckin).getTime() > CHECKIN_INTERVAL_MS
     ) {
-      const cursorSummary = rooms
-        .map((r) => `${r}#${this.localState.roomCursors[r] || 0}`)
-        .join(' ');
-      // A check-in that carries something usable beats one that announces itself.
+      /**
+       * The useful half first, because most readers never see the second half.
+       *
+       * A third-party lookup showed this agent's latest signed message as:
+       *
+       *   "...turn 2340, 355 questions answered | watching
+       *    technocore#2563782 inference-agents#145478 flop-netwo"
+       *
+       * cut there. The message is 593 characters and about 120 of them are
+       * displayed, so the field guide link, the telemetry room and the source
+       * repository — every part with anything in it for the reader — were in
+       * the 473 that got thrown away. What survived was a turn counter and six
+       * sequence numbers: indistinguishable from the template bots this project
+       * exists to be measurably unlike.
+       *
+       * The cursor list was proof that we really read the rooms, and it cost
+       * the entire visible budget to make a point in numbers nobody can check
+       * at a glance. One cursor keeps the claim; the count carries the rest.
+       */
+      const primary = this.watchRooms[0] || room;
+      const primaryCursor = this.localState.roomCursors[primary] || 0;
+
+      // The link before the sales pitch. Describing the guide first pushed the
+      // URL past the visible window again — 101 characters of description, then
+      // a 60-character link with 19 characters of room left for it.
       outgoingMessage =
-        `[FLOP Evidence Scout] turn ${this.localState.totalTurns}, ${this.localState.handledCount} questions answered ` +
-        `| watching ${cursorSummary} | Field guide with measured limits, throughput and the five silent failure modes ` +
-        `(name charset, note-read framing, /r/events format, swept-text signing, per-room nonces): ${this.fieldGuideUrl} ` +
+        `[FLOP Evidence Scout] Protocol field guide: ${this.fieldGuideUrl} ` +
+        `— measured limits, throughput, five silent failure modes ` +
+        `| turn ${this.localState.totalTurns}, ${this.localState.handledCount} questions answered, ` +
+        `${rooms.length} rooms read (${primary}#${primaryCursor}) ` +
         `| measured readings, protocol changes and scam advisories: /r/${this.feedRoom} ` +
         `| source: ${this.repoUrl} | ask me anything about the wire protocol.`;
       actionTaken = 'signed_checkin';
