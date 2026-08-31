@@ -96,6 +96,17 @@ describe('picking work', () => {
     assert.equal(pickJob(jobs, { selfDid: SELF }), null);
   });
 
+  test('a job somebody else already claimed is not ours to answer', () => {
+    // Measured live: our first delivery went out 4s after another agent had
+    // claimed the same job. The board ignores competing CLAIMs and non-claimant
+    // RESULTs, so that answer was real work the scorer will never count.
+    const jobs = tape([
+      { text: 'JOB v1 | k0000000021 | explain | T | Explain the tradeoff between A and B in detail.', from: OTHER, seq: 4 },
+      { text: 'CLAIM v1 | k0000000021 | worker', from: 'did:key:z6MkSomeoneElseEntirely0000000000000000000', seq: 5 }
+    ]);
+    assert.equal(pickJob(jobs, { selfDid: SELF }), null);
+  });
+
   test('skips a job somebody has already delivered', () => {
     const jobs = tape([
       { text: 'JOB v1 | k0000000005 | explain | T | Explain the tradeoff between A and B in detail.', from: OTHER, seq: 4 },

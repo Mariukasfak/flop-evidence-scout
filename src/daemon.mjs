@@ -697,23 +697,39 @@ export async function runScoutDaemon(options = {}) {
         // the simulator) and Scribe hygiene-attests one thin delivery — the two
         // roles the spec requires to stay separate DIDs. Best-effort: a public
         // board being slow or unreachable must not cost the rest of the cycle.
-        try {
-          const kibbleWorker = await timed('kibbleWorker', () => kibbleEngine.runWorkerTurn({ backend, real, ledgerPath }));
-          if (kibbleWorker.action !== 'no_job') {
-            console.log(`[Kibble/Worker] ${kibbleWorker.action}${kibbleWorker.jobId ? ` — ${kibbleWorker.jobId}` : ''}`);
+        //
+        // Behind its own switch, unlike the rest of the writes in this cycle.
+        // Everything else here posts as this agent has always posted; kibble is
+        // a standing entry in someone else's permanent scoring ledger, where a
+        // rejected line costs -3 forever and the operator's key is the one
+        // signing it. That is a decision for the operator, not a default, and
+        // it stayed a default for one cycle before this landed — long enough to
+        // put a CLAIM, a RESULT and an ATTEST on the public tape under both
+        // keys. Off unless KIBBLE_WRITES says otherwise.
+        const kibbleWrites = /^(1|true|yes|on)$/i.test(process.env.KIBBLE_WRITES || '');
+        if (!kibbleWrites) {
+          sayOnce('kibble:off',
+            '[Kibble] Board writes are OFF — npm run kibble-preview shows what they would be. '
+            + 'Set KIBBLE_WRITES=true to take part.');
+        } else {
+          try {
+            const kibbleWorker = await timed('kibbleWorker', () => kibbleEngine.runWorkerTurn({ backend, real, ledgerPath }));
+            if (kibbleWorker.action !== 'no_job') {
+              console.log(`[Kibble/Worker] ${kibbleWorker.action}${kibbleWorker.jobId ? ` — ${kibbleWorker.jobId}` : ''}`);
+            }
+            appendAudit(config.auditLogPath, { agent: 'kibble-worker', ...kibbleWorker });
+          } catch (err) {
+            console.log(`[Kibble/Worker] Skipped — ${err.message}`);
           }
-          appendAudit(config.auditLogPath, { agent: 'kibble-worker', ...kibbleWorker });
-        } catch (err) {
-          console.log(`[Kibble/Worker] Skipped — ${err.message}`);
-        }
-        try {
-          const kibbleValidator = await timed('kibbleValidator', () => kibbleEngine.runValidatorTurn());
-          if (kibbleValidator.action !== 'no_target') {
-            console.log(`[Kibble/Validator] ${kibbleValidator.action}${kibbleValidator.jobId ? ` — ${kibbleValidator.jobId}` : ''}`);
+          try {
+            const kibbleValidator = await timed('kibbleValidator', () => kibbleEngine.runValidatorTurn());
+            if (kibbleValidator.action !== 'no_target') {
+              console.log(`[Kibble/Validator] ${kibbleValidator.action}${kibbleValidator.jobId ? ` — ${kibbleValidator.jobId}` : ''}`);
+            }
+            appendAudit(config.auditLogPath, { agent: 'kibble-validator', ...kibbleValidator });
+          } catch (err) {
+            console.log(`[Kibble/Validator] Skipped — ${err.message}`);
           }
-          appendAudit(config.auditLogPath, { agent: 'kibble-validator', ...kibbleValidator });
-        } catch (err) {
-          console.log(`[Kibble/Validator] Skipped — ${err.message}`);
         }
 
         work = await runBurst({

@@ -229,9 +229,14 @@ export function reconstructBoard(messages = []) {
  *   - we must have seen the JOB line, because we cannot answer a question we
  *     have not read, and half a window's job ids arrive with no body
  *   - not ours to claim (spec: poster, worker and validator are three parties)
- *   - not already claimed by us, and not already delivered by us — the board
- *     ignores competing CLAIMs, so a second claim is not merely rude, it scores
- *     nothing and pollutes `policy_events`
+ *   - not already claimed by ANYONE. The board ignores competing CLAIMs and
+ *     non-claimant RESULTs, so arriving second means the answer is dropped by
+ *     the scorer no matter how good it is. Measured the hard way: our first live
+ *     delivery went out 4 seconds after another agent had already claimed the
+ *     same job, which makes it a real answer nobody will ever count. Against a
+ *     100%-claimed-in-1s board this filter rejects nearly everything, and that
+ *     is the correct behaviour — posting nothing beats posting into a line the
+ *     scorer discards, and the validator lane is where the room is short-handed
  *   - already delivered by someone else is skipped even when the delivery is
  *     slop: the spec ignores competing claims, so racing a delivered job burns a
  *     session for a line that will be dropped
@@ -248,7 +253,7 @@ export function pickJob(jobs, { selfDid, skipJobIds = new Set(), minBodyChars = 
     if (skipJobIds.has(job.jobId)) continue;
     if (job.poster && selfDid && sameDid(job.poster, selfDid)) continue;
     if (job.results.length > 0) continue;
-    if (job.claims.some((c) => sameDid(c.from, selfDid))) continue;
+    if (job.claims.length > 0) continue;
     if (!job.body || job.body.length < minBodyChars) continue;
     candidates.push(job);
   }
