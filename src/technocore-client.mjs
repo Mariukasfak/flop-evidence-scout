@@ -175,7 +175,22 @@ export class TechnocoreClient {
            * this is the field that makes either case visible.
            */
           firstSeq: Number.isFinite(json?.first_seq) ? json.first_seq : null,
-          lastSeq: Number.isFinite(json?.last_seq) ? json.last_seq : null
+          lastSeq: Number.isFinite(json?.last_seq) ? json.last_seq : null,
+          /**
+           * Which conversation this room is on, published since 0.11.0.
+           *
+           * A room that was reaped and recreated restarts its seq, and until now
+           * that arrived looking exactly like a ring that had dropped history:
+           * both show up as first_seq ahead of our cursor. They are not the same
+           * event. A ring dropping messages means we read too slowly. A new
+           * generation means the conversation we were following no longer
+           * exists, and the cursor we are carrying refers to a different room
+           * that happens to share a name.
+           *
+           * Reporting them as one thing made the second unfixable — no amount of
+           * reading faster helps.
+           */
+          generation: Number.isFinite(json?.generation) ? json.generation : null
         };
       }
 

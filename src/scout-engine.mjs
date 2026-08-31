@@ -211,7 +211,30 @@ export class ScoutEngine {
      * are genuinely gone, and the honest thing is to say how many.
      */
     let gap = null;
-    if (cursor > 0 && Number.isFinite(data?.firstSeq) && data.firstSeq > cursor + 1) {
+
+    /**
+     * A new generation is a different event, and 0.11.0 finally lets us say so.
+     *
+     * A reaped-and-recreated room restarts its seq, which arrives looking
+     * exactly like a ring that dropped history: first_seq ahead of our cursor,
+     * in both cases. They are not the same finding. Dropped history means we
+     * read too slowly and could read faster. A new generation means the
+     * conversation we were following is gone and our cursor belongs to a room
+     * that only shares its name — no amount of reading faster helps, and
+     * counting it as "messages missed" invents a number for messages that were
+     * never ours to read.
+     */
+    const generation = data?.generation ?? null;
+    const knownGeneration = this.localState.roomGenerations?.[room] ?? null;
+    if (generation !== null) {
+      this.localState.roomGenerations = this.localState.roomGenerations || {};
+      this.localState.roomGenerations[room] = generation;
+    }
+
+    if (knownGeneration !== null && generation !== null && generation !== knownGeneration) {
+      gap = { room, reason: 'room_recreated', wasGeneration: knownGeneration, nowGeneration: generation };
+      console.warn(`[Scout] /r/${room}: new generation ${knownGeneration} -> ${generation} — this is a different conversation, not lost messages.`);
+    } else if (cursor > 0 && Number.isFinite(data?.firstSeq) && data.firstSeq > cursor + 1) {
       gap = { room, from: cursor + 1, to: data.firstSeq - 1, missed: data.firstSeq - cursor - 1 };
       console.warn(`[Scout] /r/${room}: missed ${gap.missed} message(s) — the room dropped them before we read them.`);
     }
