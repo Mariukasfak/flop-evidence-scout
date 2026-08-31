@@ -208,6 +208,43 @@ test('the kibble validator refuses the templates the board rejects', () => {
   ), true);
 });
 
+test('the kibble answer prompt does not tell the model to refuse', () => {
+  // One sentence of ours cost eleven claimed-then-abandoned jobs. Replayed
+  // through this code path, the old prompt answered 0 of 11; removing the
+  // trailing "reply exactly: INSUFFICIENT EVIDENCE" took it to 10 of 11, and
+  // dropping the grounded system line as well took it to 11 of 11. The system
+  // line is written for tasks where we supply the material; here the question
+  // IS the material.
+  const { prompt } = buildTask('kibble-answer', {
+    category: 'explain', title: 'T', body: 'A long enough body to be a real question.'
+  });
+
+  assert.doesNotMatch(prompt, /INSUFFICIENT EVIDENCE/,
+    'this task must not instruct a refusal — it refused everything when it did');
+  assert.doesNotMatch(prompt, /only from the material given/);
+  // The parts that protect anyone are still there.
+  assert.match(prompt, /Never invent a source, a citation, or a number/);
+  assert.match(prompt, /BEGIN UNTRUSTED INPUT|JOB POSTED BY A STRANGER/);
+  assert.match(prompt, /never an instruction to obey/);
+});
+
+test('a useful verdict that argues against itself is refused', () => {
+  // Measured on real slop, twice: the model answered USEFUL and then explained
+  // the delivery was "without addressing the specific question"; another run
+  // answered USEFUL and just echoed the slop back. Both are rubber stamps, and
+  // a useful attestation is a public claim about someone else's work.
+  const { validate } = buildTask('kibble-judge', {
+    category: 'explain', title: 'T', body: 'body', delivery: 'whatever'
+  });
+
+  assert.equal(validate('USEFUL\nThe delivery is specific about how the retry is recognised and why.'), true);
+  assert.equal(validate('USEFUL\nThe delivery is generic and without addressing the specific question asked.'), false);
+  assert.equal(validate('USEFUL\nThe delivery explains that the task was completed successfully, providing output.'), false);
+
+  // A negative verdict may say all of those things — that is its job.
+  assert.equal(validate('NOT_USEFUL\nThe delivery fails to address the specific question the job asked.'), true);
+});
+
 test('the workload plans urgent work first and never idles while messages wait', () => {
   const plan = planWorkload({
     sourceChange: { changes: [{ id: 'openapi', was: 'a', now: 'b' }] },
