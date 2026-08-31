@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import { generateIdentity } from '../src/identity.mjs';
 import { KibbleEngine, didCardUrl } from '../src/kibble-engine.mjs';
+import { reconstructBoard } from '../src/kibble.mjs';
 
 const OTHER = 'did:key:z6MknDn3CH7vumHw5rXREhdQaBcDeFgHiJkLmNoPqRsTuVwX';
 
@@ -285,7 +286,9 @@ describe('KibbleEngine claim rate follows the finishing rate', () => {
     assert.ok(engine.workerGuardrails.maxPerHour > start);
 
     for (let i = 0; i < 200; i++) engine.recordClaimOutcome(true);
-    assert.equal(engine.workerGuardrails.maxPerHour, 20, 'we stay a guest on somebody else\'s server');
+    // 60/hour is the structural limit — one settled claim per 60s cycle — not
+    // a number chosen out of caution. The server allows 18,000 writes an hour.
+    assert.equal(engine.workerGuardrails.maxPerHour, 60);
   });
 
   test('abandoning claims backs off fast, and it stops at the floor', () => {
@@ -332,6 +335,91 @@ describe('KibbleEngine claim rate follows the finishing rate', () => {
       assert.equal(second.workerGuardrails.maxPerHour, learned,
         'an hour of evidence is not re-learned from scratch on every restart');
     });
+  });
+});
+
+const OUTSIDER = 'did:key:z6MkOutsiderDDDDDDDDDDDDDDDDDDDDDDDDDDDDD';
+
+/** A board where each of our deliveries carries one verdict from a stranger. */
+function boardOfVerdicts(workerDid, verdicts, attestor = OUTSIDER) {
+  const ids = [];
+  const lines = [];
+  verdicts.forEach((verdict, i) => {
+    const id = 'k00000000' + String(i).padStart(2, '0');
+    ids.push(id);
+    lines.push(
+      { text: 'JOB v1 | ' + id + ' | explain | T | A long enough body to be a real question here.', from: OUTSIDER, seq: i * 3 + 1 },
+      { text: 'RESULT v1 | ' + id + ' | a real answer of some substance', from: workerDid, seq: i * 3 + 2 },
+      { text: 'ATTEST v1 | ' + id + ' | ' + verdict + ' | a reason of adequate length here', from: attestor, seq: i * 3 + 3 }
+    );
+  });
+  return { jobs: reconstructBoard(lines), ids };
+}
+
+/**
+ * Until this existed the worker counted deliveries and stopped there, with no
+ * idea whether any of it was any good — the same blindness as counting claims
+ * and never checking they landed. A not-useful verdict is the only thing on
+ * this board that actively subtracts, so it decides whether volume pays.
+ */
+describe('KibbleEngine reads back what the room made of its work', () => {
+  test('counts the verdicts strangers left on our deliveries', () => {
+    const workerIdentity = generateIdentity();
+    const engine = new KibbleEngine({
+      workerIdentity, validatorIdentity: generateIdentity(), client: makeClient()
+    });
+    const { jobs, ids } = boardOfVerdicts(workerIdentity.did, ['useful', 'not', 'useful']);
+    engine.localState.deliveredJobIds = ids;
+
+    const seen = engine.reviewOwnDeliveries(jobs);
+    assert.equal(seen.useful, 2);
+    assert.equal(seen.not, 1);
+    assert.equal(seen.acted, false, 'three verdicts is not yet a sample');
+  });
+
+  test('backs off when most of our work is judged not useful', () => {
+    // Break-even is 1 + useful*6 - not*3, so a high not-rate is the point where
+    // delivering more stops paying. This is arithmetic, not manners.
+    const workerIdentity = generateIdentity();
+    const engine = new KibbleEngine({
+      workerIdentity, validatorIdentity: generateIdentity(), client: makeClient()
+    });
+    const { jobs, ids } = boardOfVerdicts(workerIdentity.did, ['not', 'not', 'not', 'not', 'useful']);
+    engine.localState.deliveredJobIds = ids;
+
+    const before = engine.workerGuardrails.maxPerHour;
+    const seen = engine.reviewOwnDeliveries(jobs);
+    assert.equal(seen.acted, true);
+    assert.ok(engine.workerGuardrails.maxPerHour < before);
+  });
+
+  test('a good verdict rate is left alone rather than treated as a reason to slow', () => {
+    const workerIdentity = generateIdentity();
+    const engine = new KibbleEngine({
+      workerIdentity, validatorIdentity: generateIdentity(), client: makeClient()
+    });
+    const { jobs, ids } = boardOfVerdicts(workerIdentity.did, ['useful', 'useful', 'useful', 'not', 'useful']);
+    engine.localState.deliveredJobIds = ids;
+
+    const before = engine.workerGuardrails.maxPerHour;
+    engine.reviewOwnDeliveries(jobs);
+    assert.equal(engine.workerGuardrails.maxPerHour, before);
+  });
+
+  test('neither of our own keys counts as the room judging us', () => {
+    // Scribe praising Scout would otherwise let the agent grade its own work
+    // and then speed up on the strength of it.
+    const workerIdentity = generateIdentity();
+    const validatorIdentity = generateIdentity();
+    const engine = new KibbleEngine({ workerIdentity, validatorIdentity, client: makeClient() });
+
+    const a = boardOfVerdicts(workerIdentity.did, ['useful'], validatorIdentity.did);
+    engine.localState.deliveredJobIds = a.ids;
+    assert.equal(engine.reviewOwnDeliveries(a.jobs).useful, 0);
+
+    const b = boardOfVerdicts(workerIdentity.did, ['useful'], workerIdentity.did);
+    engine.localState.deliveredJobIds = b.ids;
+    assert.equal(engine.reviewOwnDeliveries(b.jobs).useful, 0);
   });
 });
 

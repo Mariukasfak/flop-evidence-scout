@@ -78,19 +78,35 @@ const HELD_TTL_MS = 10 * 60_000;
  * the right one — if more genuine work is worth more, why is there a ceiling at
  * all?
  *
- * Because there is exactly one real cost, and it is not ours: a claim we take
- * and abandon blocks that job for every other agent, since the board ignores
- * competing claims. So the ceiling should be set by whether we are finishing
- * what we take, and that is measurable. It now is: the rate rises while claims
- * turn into deliveries and falls when they stop, between a floor that keeps us
- * present and a ceiling that keeps us a guest on somebody else's server.
+ * The honest reason is not consideration for the room, which is not our job.
+ * It is that an abandoned claim pays us exactly nothing and burns a claim slot
+ * we could have spent on work we would have finished. So the rate follows the
+ * only thing that decides whether claiming harder pays: how much of what we
+ * take we actually finish, and what the room makes of it once we have.
  *
  * The failure mode this guards against is the one that already happened. A
  * single sentence in a prompt turned 11 of 17 claims into abandonments, and a
  * fixed rate would have kept taking jobs at full speed throughout.
  */
 const WORKER_RATE_FLOOR = 3;
-const WORKER_RATE_CEILING = 20;
+
+/**
+ * 60/hour, because that is the structural limit rather than a chosen one.
+ *
+ * The previous 20 was caution wearing the costume of a measurement, and the
+ * operator was right to push on it. The actual constraints, all measured:
+ * Technocore allows 300 writes a minute per IP (18,000/hour, four orders of
+ * magnitude away), the model answers in 1.2s, and the worker settles one held
+ * claim per cycle — so at a 60-second interval, sixty an hour is simply the
+ * most this shape of daemon can finish.
+ *
+ * What makes more genuinely better is the arithmetic, now that the first real
+ * feedback exists. Our first six deliveries drew four attestations: two useful,
+ * two not. A delivery is worth 1 for the RESULT, 6 for a peer useful, -3 for a
+ * not — so at that split each one nets about +2.5. Positive means more is
+ * better, and the ceiling should be the machine's, not the author's nerves.
+ */
+const WORKER_RATE_CEILING = 60;
 
 /** Outcomes considered when adjusting; small enough to react within an hour. */
 const RATE_WINDOW = 8;
@@ -98,6 +114,20 @@ const RATE_WINDOW = 8;
 /** Above this share of abandoned claims, back off. Below it, open up. */
 const ABANDON_BACKOFF = 0.25;
 const ABANDON_HEADROOM = 0.10;
+
+/**
+ * The share of not-useful verdicts at which delivering stops paying.
+ *
+ * Break-even is `1 + useful*6 - not*3 = 0`. With everything attested and none
+ * of it useful that is 1 - 3 = -2, so the point where volume turns into a
+ * liability sits near a 70% not-rate. Backing off at 60% leaves margin for a
+ * small sample, and this is self-interest rather than manners: a not-useful
+ * verdict is the only thing on this board that actively subtracts.
+ */
+const NOT_USEFUL_BACKOFF = 0.60;
+
+/** Judged deliveries needed before that share means anything. */
+const VERDICT_MIN_SAMPLE = 5;
 
 /**
  * The URL a reader can click straight from the public tape to the DID note that
@@ -373,15 +403,62 @@ export class KibbleEngine {
     else if (abandoned <= ABANDON_HEADROOM) next = Math.min(WORKER_RATE_CEILING, current + 2);
 
     if (next !== current) {
-      this.workerGuardrails.maxPerHour = next;
-      // Spread the allowance across the hour rather than letting it burst, and
-      // never faster than a minute apart.
-      this.workerGuardrails.minCooldownMs = Math.max(60_000, Math.floor(3600_000 / next / 2));
-      this.localState.workerRate = next;
+      this.#setRate(next);
       console.log(`[Kibble] Claim rate ${current} -> ${next}/h `
         + `(${Math.round(abandoned * 100)}% of the last ${window.length} claims abandoned).`);
     }
     return next;
+  }
+
+  /**
+   * Read back what the room thought of our own deliveries.
+   *
+   * Until now the worker had no idea whether anything it posted was any good —
+   * it counted deliveries and stopped there, which is the same blindness as
+   * counting claims and never checking whether they landed. The verdicts are on
+   * the tape we already read every cycle, so this costs nothing but the looking.
+   *
+   * Only the score-bearing half is counted: a `not` subtracts 3 and a peer
+   * `useful` adds 6, so this is what says whether volume is paying or costing.
+   */
+  reviewOwnDeliveries(jobs) {
+    const mine = new Set(this.localState.deliveredJobIds || []);
+    if (!mine.size) return null;
+
+    let useful = 0, not = 0;
+    for (const jobId of mine) {
+      const job = jobs.get(jobId);
+      if (!job) continue;
+      for (const attest of job.attests) {
+        if (sameDid(attest.from, this.workerIdentity.did)) continue;      // never our own
+        if (sameDid(attest.from, this.validatorIdentity.did)) continue;   // nor our other key
+        if (attest.verdict === 'useful') useful += 1;
+        else if (attest.verdict === 'not') not += 1;
+      }
+    }
+
+    const judged = useful + not;
+    this.localState.verdictsUseful = useful;
+    this.localState.verdictsNot = not;
+    if (judged < VERDICT_MIN_SAMPLE) return { useful, not, judged, acted: false };
+
+    const notShare = not / judged;
+    const current = this.workerGuardrails.maxPerHour;
+    if (notShare >= NOT_USEFUL_BACKOFF && current > WORKER_RATE_FLOOR) {
+      const next = Math.max(WORKER_RATE_FLOOR, Math.floor(current / 2));
+      this.#setRate(next);
+      console.log(`[Kibble] Claim rate ${current} -> ${next}/h — `
+        + `${not} of ${judged} of our deliveries were judged not useful, which stops paying.`);
+      return { useful, not, judged, acted: true };
+    }
+    return { useful, not, judged, acted: false };
+  }
+
+  /** Apply a rate and keep the cooldown spread across the hour with it. */
+  #setRate(next) {
+    this.workerGuardrails.maxPerHour = next;
+    this.workerGuardrails.minCooldownMs = Math.max(30_000, Math.floor(3600_000 / next / 2));
+    this.localState.workerRate = next;
   }
 
   /** Forget claims too old to answer honestly. */
@@ -424,6 +501,11 @@ export class KibbleEngine {
     } catch (err) {
       return { action: 'read_failed', error: err.message };
     }
+
+    // What did the room make of what we already sent? Free — this board was
+    // read a line ago — and it is the only signal that says whether volume is
+    // paying or costing.
+    this.reviewOwnDeliveries(jobs);
 
     // Only jobs we already hold a claim on. Picking a fresh one here is what
     // guaranteed we arrived second; runFastLane does the picking now.
@@ -495,6 +577,10 @@ export class KibbleEngine {
     this.recordClaimOutcome(true);
     this.localState.resultsDelivered += 1;
     this.localState.claimsWon = (this.localState.claimsWon || 0) + 1;
+    // Kept so reviewOwnDeliveries can find the verdicts on them later.
+    this.localState.deliveredJobIds = [
+      ...(this.localState.deliveredJobIds || []), job.jobId
+    ].slice(-MAX_REMEMBERED);
     this.localState.lastResultJobId = job.jobId;
     this.localState.lastResultAt = new Date().toISOString();
     await this.saveRemoteState();
