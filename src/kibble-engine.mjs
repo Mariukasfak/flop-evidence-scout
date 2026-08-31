@@ -779,11 +779,23 @@ export class KibbleEngine {
     const paced = this.validatorGuardrails.canSendMessage(`kibble-attest-probe-${found.job.jobId}`);
     if (!paced.allowed) return { action: `paced: ${paced.reason}`, jobId: found.job.jobId };
 
-    // Written from this job and this delivery, never a fixed string. Our first
-    // 37 attestations shared one sentence between them and scored nothing,
-    // because the board ignores canned reasons — and it is right to.
-    const reason = `${thinDeliveryReason(found.job, found.delivery)} `
-      + `Verified by: ${didCardUrl(this.client, this.validatorIdentity)}`;
+    // Written by the model about this delivery, because a skeleton with slots
+    // filled in is still one sentence wearing different clothes. The composed
+    // version stays as the fallback: a validator that cannot phrase its
+    // objection should still register it, and a factual sentence beats silence.
+    let why = thinDeliveryReason(found.job, found.delivery);
+    if (real && backend) {
+      try {
+        const task = buildTask('kibble-reason', {
+          title: found.job.title, body: found.job.body, delivery: found.delivery.summary
+        });
+        const { receipt, completion } = await runSession(task, { backend, identity: this.validatorIdentity });
+        try { appendReceipt(receipt, ledgerPath); } catch { /* never lose the run over a ledger write */ }
+        const written = String(completion || '').trim().replace(/\s+/g, ' ');
+        if (task.validate(written)) why = written;
+      } catch { /* fall back to the composed sentence */ }
+    }
+    const reason = `${why} Verified by: ${didCardUrl(this.client, this.validatorIdentity)}`;
     const line = attestNotLine(found.job.jobId, reason);
 
     const finalCheck = this.validatorGuardrails.canSendMessage(line);
