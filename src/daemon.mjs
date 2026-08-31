@@ -457,6 +457,9 @@ export async function runScoutDaemon(options = {}) {
   /** When the current outage was last announced, so it is said once, not every minute. */
   let outageAnnouncedAt = null;
 
+  /** Fallback for "since when has it been quiet" before anything has answered. */
+  const startedAt = Date.now();
+
   /** Tracks the backend across cycles so a downgrade is announced once, not endlessly. */
   let lastBackendWasReal = null;
   const seenWorkPath = path.join(config.dataDir, 'seen-work.json');
@@ -816,16 +819,24 @@ export async function runScoutDaemon(options = {}) {
      * Capped below the lease TTL on purpose: backing off past our own renewal
      * window would hand the lease away while we sat quiet.
      */
-    const OUTAGE_CYCLES = 3;
+    /**
+     * Measured in time, not in failed requests. My first version of this counted
+     * three consecutive failures and fired within seconds, then announced
+     * "answered nothing for 0 min" — a backoff triggered by one bad moment,
+     * describing an outage that had not happened. A cycle makes about twenty
+     * requests, so three in a row is a blink; what matters is how long it has
+     * been since anything at all got through.
+     */
+    const OUTAGE_QUIET_MS = 2 * 60_000;
     const OUTAGE_MAX_GAP_MS = 5 * 60_000;
     let gapMs = Math.max(MIN_GAP_MS, config.intervalMs - elapsed);
 
-    const downFor = client.lastOkAt ? Date.now() - client.lastOkAt : null;
-    if (client.consecutiveFailures >= OUTAGE_CYCLES && downFor !== null) {
+    const downFor = Date.now() - (client.lastOkAt ?? startedAt);
+    if (client.consecutiveFailures > 0 && downFor >= OUTAGE_QUIET_MS) {
       gapMs = Math.min(OUTAGE_MAX_GAP_MS, Math.max(gapMs, config.intervalMs * 3));
       if (!outageAnnouncedAt || Date.now() - outageAnnouncedAt > 10 * 60_000) {
         outageAnnouncedAt = Date.now();
-        const mins = Math.round(downFor / 60_000);
+        const mins = Math.max(1, Math.round(downFor / 60_000));
         console.log(`[Outage] Technocore has answered nothing for ${mins} min. `
           + `Backing off to ${Math.round(gapMs / 1000)}s between cycles. `
           + 'The agent is fine; there is nothing here to fix.');
