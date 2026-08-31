@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
@@ -342,4 +342,55 @@ test('a server that is genuinely down is still reported as down', async () => {
   const attempt = await lease.acquire();
   assert.equal(attempt.acquired, false);
   assert.equal(attempt.transient, true, 'an outage is transient, not contention');
+});
+
+/**
+ * Working through an outage on a lease we already hold.
+ *
+ * Measured 2026-08-31: 43 of 69 probes two seconds apart returned 503, with
+ * failures in runs of up to 45 seconds. Overnight that cost 224 of 579 cycles.
+ * An unreadable note is not evidence that our lease ended — we wrote it, and
+ * nobody else may take it before it expires.
+ *
+ * The margin is the whole safety argument, so it is tested from both sides.
+ */
+describe('a lease we already hold, while the server is unreachable', () => {
+  test('keeps working while a comfortable slice of the TTL remains', async () => {
+    const client = new FakeKv();
+    const lease = new Lease({ client, name: 'scout-cycle', holder: 'local-a1', ttlMs: 60_000, readAttempts: 1 });
+
+    assert.equal((await lease.acquire()).acquired, true, 'held it first');
+    client.down = true;
+
+    const during = await lease.acquire();
+    assert.equal(during.acquired, true, 'still ours until it expires');
+    assert.equal(during.degraded, true, 'and says it is running on trust');
+  });
+
+  test('stands down near expiry, when we no longer know', async () => {
+    let clock = 1_000_000;
+    const client = new FakeKv();
+    const lease = new Lease({
+      client, name: 'scout-cycle', holder: 'local-a1',
+      ttlMs: 60_000, readAttempts: 1, now: () => clock
+    });
+
+    assert.equal((await lease.acquire()).acquired, true);
+    client.down = true;
+    // Past the one-third margin: two writers is the risk, so guessing is not on.
+    clock += 55_000;
+
+    const late = await lease.acquire();
+    assert.equal(late.acquired, false, 'near expiry we stand down rather than guess');
+    assert.equal(late.transient, true);
+  });
+
+  test('a process that never held it does not invent one', async () => {
+    const client = new FakeKv();
+    client.down = true;
+    const lease = new Lease({ client, name: 'scout-cycle', holder: 'local-b2', readAttempts: 1 });
+
+    const attempt = await lease.acquire();
+    assert.equal(attempt.acquired, false, 'no prior claim means no lease to fall back on');
+  });
 });

@@ -44,16 +44,34 @@ const ARTEFACTS = [
     id: 'measurements',
     label: 'Network measurements',
     file: 'docs/measurements/timeseries.json',
-    cadenceMin: 60,
-    toleranceMin: 180,
+    /**
+     * The cadence is what GitHub delivers, not what the cron line asks for.
+     *
+     * watch-sources.yml says `17 * * * *`. Measured across 40 scheduled runs the
+     * median gap is 140 minutes, the worst is 641, and a third of them are
+     * dropped entirely — GitHub throttles scheduled workflows and makes no
+     * promise it will not. Declaring 60 here made the duty cycle report a
+     * permanent 31% and made every ordinary gap look like a fault.
+     *
+     * A tolerance below the median gap is not a check; it is a scheduled alarm.
+     */
+    cadenceMin: 140,
+    toleranceMin: 480,
+    /**
+     * This file is rewritten by an earlier step of the same job. When it is old,
+     * the question is never "did the agent stop" — it is "did the measurement
+     * run". attemptFile answers that directly.
+     */
+    attemptFile: 'docs/measurements/last-attempt.json',
     series: (j) => (Array.isArray(j) ? j : j.observations || []).map((p) => p.at).filter(Boolean)
   },
   {
     id: 'source-watch',
     label: 'Source watcher',
     file: 'docs/watch/state.json',
-    cadenceMin: 60,
-    toleranceMin: 180,
+    // Same scheduler, same measured cadence. See the note above.
+    cadenceMin: 140,
+    toleranceMin: 480,
     series: (j) => (j.checkedAt ? [j.checkedAt] : [])
   },
   {
@@ -163,7 +181,35 @@ for (const artefact of ARTEFACTS) {
 
   const newest = Math.max(...timestamps.map((t) => Date.parse(t)).filter(Number.isFinite));
   const ageMin = (Date.now() - newest) / MINUTE;
-  const isStale = ageMin > artefact.toleranceMin;
+  let isStale = ageMin > artefact.toleranceMin;
+
+  /**
+   * Ask why it is old before reporting that it is old.
+   *
+   * measure-network deliberately skips a reading when the server is having a
+   * moment — it says so, in this job's own log, and says the next run will fill
+   * the gap. Three steps later this check read the untouched file and failed the
+   * build for staleness. The run therefore failed itself on a condition it had
+   * already declared harmless, in the same run, and did it often enough that 38%
+   * of scheduled runs were red. A red build that means nothing is worse than no
+   * build at all: it is the one this repository already learned to stop reading,
+   * which is how the 21-hour outage went unnoticed.
+   *
+   * A recent failed attempt is a BLOCKED reading, not a stale artefact. An
+   * attempt that has not happened at all is still stale, and still ours.
+   */
+  let blockedBy = null;
+  if (isStale && artefact.attemptFile && fs.existsSync(path.resolve(artefact.attemptFile))) {
+    try {
+      const attempt = JSON.parse(fs.readFileSync(path.resolve(artefact.attemptFile), 'utf8'));
+      const attemptAgeMin = (Date.now() - Date.parse(attempt.at)) / MINUTE;
+      if (attempt.ok === false && attemptAgeMin < artefact.toleranceMin) {
+        blockedBy = attempt.reason || 'the source was unreachable';
+        isStale = false;
+      }
+    } catch { /* an unreadable marker tells us nothing, so it changes nothing */ }
+  }
+
   // An informational artefact is still measured and printed; it just cannot
   // turn a quiet week into a red build.
   if (isStale && !artefact.informational) stale++;
@@ -176,7 +222,8 @@ for (const artefact of ARTEFACTS) {
     toleranceMin: artefact.toleranceMin,
     newest: new Date(newest).toISOString(),
     ageMin,
-    state: isStale ? (artefact.informational ? 'QUIET' : 'STALE') : 'FRESH',
+    blockedBy,
+    state: blockedBy ? 'BLOCKED' : isStale ? (artefact.informational ? 'QUIET' : 'STALE') : 'FRESH',
     duty: artefact.dutyCycle === false ? null : dutyCycle(timestamps, artefact.cadenceMin)
   });
 }
@@ -307,8 +354,11 @@ if (!quiet) {
     const tag = r.state === 'FRESH' ? ' OK '
       : r.state === 'STANDING DOWN' ? 'IDLE'
         : r.state === 'UNVERIFIED' ? ' ?? '
-          : r.state === 'QUIET' ? 'QUIET' : 'STALE';
-    console.log(`  [${tag}] ${r.label.padEnd(w)}  ${age.padEnd(10)} ${r.detail || ''}`);
+          : r.state === 'BLOCKED' ? 'BLKD'
+            : r.state === 'QUIET' ? 'QUIET' : 'STALE';
+    // The reason an artefact is old is the useful half of the line.
+    const why = r.detail || (r.blockedBy ? `not measured this run — ${r.blockedBy}` : '');
+    console.log(`  [${tag}] ${r.label.padEnd(w)}  ${age.padEnd(10)} ${why}`);
   }
 
   const withDuty = results.filter((r) => r.duty);

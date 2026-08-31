@@ -154,9 +154,33 @@ export class Lease {
     const mine = encodeLease(this.holder, now + this.ttlMs);
     const state = await this.read();
 
-    // Not knowing is its own answer. Trying to claim on an unreadable note would
-    // fail on the same outage and report contention that never happened.
+    /**
+     * A lease we already hold does not stop being ours when the server blinks.
+     *
+     * Measured 2026-08-31 over 69 probes two seconds apart: 43 × 503, 5 timeouts,
+     * 21 × 200 — a 30% success rate, with failures arriving in runs of up to 23
+     * in a row, about 45 seconds. Against that, retrying for two seconds is not
+     * a retry. Overnight it cost 224 of 579 cycles: the agent stood down for
+     * 39% of its working time while nothing was wrong with it.
+     *
+     * But an unreadable note is not evidence that our lease ended. We wrote it
+     * ourselves, we know when it expires, and no other process may take it
+     * before then — that is the whole guarantee the TTL provides. So while the
+     * clock says it is still ours, we keep working and try to renew next cycle.
+     *
+     * The margin matters: this only holds while a comfortable slice of the TTL
+     * remains. Near expiry the honest answer is that we no longer know, and the
+     * safe move is to stand down rather than risk two writers.
+     */
     if (!state.reachable) {
+      const remainingMs = this.heldUntil - now;
+      if (this.currentValue && remainingMs > this.ttlMs / 3) {
+        return {
+          acquired: true,
+          degraded: true,
+          reason: `server unreachable (${state.error || 'unknown'}), but our lease runs for another ${Math.ceil(remainingMs / 1000)}s`
+        };
+      }
       return { acquired: false, transient: true, reason: `server unreachable (${state.error || 'unknown'})` };
     }
 

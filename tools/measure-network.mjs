@@ -280,11 +280,31 @@ function appendToSeries(data) {
  * 4xx, a bug in this file — still fails loudly, because that is ours to fix and
  * would otherwise go unnoticed forever.
  */
-main().catch((err) => {
+/**
+ * Every run leaves a note saying whether it managed to measure.
+ *
+ * Without one, a skipped reading is invisible: the series file is simply not
+ * touched, and the freshness check three steps later reads an unchanged file
+ * and calls the artefact stale. The job then fails on a condition it declared
+ * harmless in its own log, in the same run — which is what turned 38% of the
+ * scheduled runs red and taught the operator that a red build here means
+ * nothing.
+ */
+function recordAttempt(ok, reason = null) {
+  try {
+    const file = path.resolve('docs/measurements/last-attempt.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ at: new Date().toISOString(), ok, reason }, null, 2), 'utf8');
+  } catch { /* a missing marker degrades to the old behaviour, which is safe */ }
+}
+
+main().then(() => recordAttempt(true)).catch((err) => {
   if (err.transient) {
+    recordAttempt(false, err.message);
     console.warn(`[measure] Skipped this reading — ${err.message}. The next scheduled run will retry.`);
     return;
   }
+  recordAttempt(false, err.message);
   console.error('Measurement failed:', err.message);
   // exitCode rather than exit(): a hard exit while an AbortSignal timer is still
   // pending trips a libuv assertion on Windows, which buries the real message

@@ -434,6 +434,13 @@ export async function runScoutDaemon(options = {}) {
       if (lease) {
         // Acquire covers all three cases: unheld, expired, and already ours.
         const attempt = await lease.acquire();
+        if (attempt.acquired && attempt.degraded) {
+          // Working on trust rather than on a fresh read. Recorded, because
+          // "we kept going" and "we confirmed we could" are different facts and
+          // the audit trail should never blur them.
+          console.log(`[Lease] ${attempt.reason}`);
+          appendAudit(config.auditLogPath, { event: 'lease_degraded', reason: attempt.reason });
+        }
         if (!attempt.acquired) {
           // A blip and a genuine handover are different events and deserve
           // different words. Reporting an outage as "lost the race" sent the
