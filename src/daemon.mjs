@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { loadOrCreateIdentity } from './identity.mjs';
-import { TechnocoreClient } from './technocore-client.mjs';
+import { TechnocoreClient, READ_WINDOW } from './technocore-client.mjs';
 import { Guardrails } from './guardrails.mjs';
 import { ScoutEngine } from './scout-engine.mjs';
 import { ScribeEngine } from './scribe-engine.mjs';
@@ -547,7 +547,7 @@ export async function runScoutDaemon(options = {}) {
         // A room that cannot be read is not worth failing the cycle over, and
         // one failure must not cancel the other five reads — hence a resolved
         // null rather than a rejection.
-        client.readRoom(archiveRoom, { limit: 25 }).catch(() => null))));
+        client.readRoom(archiveRoom, { limit: READ_WINDOW }).catch(() => null))));
 
       for (const [i, data] of reads.entries()) {
         const archiveRoom = archiveRooms[i];
@@ -580,7 +580,7 @@ export async function runScoutDaemon(options = {}) {
 
       // Archive events messages if any
       try {
-        const eventsData = await timed('events', () => client.readRoom('events', { limit: 25 }));
+        const eventsData = await timed('events', () => client.readRoom('events', { limit: READ_WINDOW }));
         // The archive directory is not optional here. Left to its default this
         // one call wrote events into data/chats while every other room went to
         // dataDir/chats, splitting the corpus in two.

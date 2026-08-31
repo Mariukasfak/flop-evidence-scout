@@ -2,6 +2,7 @@ import { formatKnowledgeResponse, shouldRespond } from './knowledge.mjs';
 import { messageSkeleton } from './learning-engine.mjs';
 import { Guardrails } from './guardrails.mjs';
 import { getDidShardedPath, getStateKey } from './identity.mjs';
+import { READ_WINDOW } from './technocore-client.mjs';
 
 /**
  * Topical rooms carry real conversation; /r/lobby is a firehose that has run
@@ -187,7 +188,7 @@ export class ScoutEngine {
      */
     const data = await this.client.readRoom(room, {
       since: cursor > 0 ? cursor : null,
-      limit: 20,
+      limit: READ_WINDOW,
       format: 'json'
     });
 

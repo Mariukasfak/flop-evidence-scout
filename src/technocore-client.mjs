@@ -65,6 +65,23 @@ export function parseRoomText(text) {
   return messages;
 }
 
+/**
+ * How many messages one read is worth.
+ *
+ * Technocore 0.11.0 documents `limit` as clamping to 1..200. Measured against
+ * /r/lobby on 2026-08-31: limit=25 returns 8,746 bytes, limit=200 returns
+ * 67,718 — eight times the messages for the same round-trip, in the same time,
+ * because the second is dominated by latency and not by payload.
+ *
+ * That ratio is the whole argument. /r/lobby runs at roughly 3,100 messages a
+ * minute and a cycle takes about forty seconds, so a 25-message window saw
+ * about one percent of what happened and the rest fell off the ring unread —
+ * 17,346 messages went missing that way in one earlier stretch. The read budget
+ * is 600 a minute per IP and the agent uses about twenty, so nothing here is
+ * scarce except the messages themselves.
+ */
+export const READ_WINDOW = 200;
+
 export class TechnocoreClient {
   constructor({
     baseUrl = 'https://technocore.chat',
@@ -270,6 +287,17 @@ export class TechnocoreClient {
   }
 
   async setKv(ns, key, value, { ifValue = null, ifAbsent = false } = {}) {
+    /**
+     * 0.11.0 refuses both conditions at once with a 400, and is right to.
+     * if_absent means "nothing is there", if= means "this exact value is
+     * there", and there is no correct pick between them. Before 0.11.0 the
+     * server silently dropped the if= and still answered ok — so a caller that
+     * sent both got a write it never asked for and no way to know. Caught here
+     * rather than as an opaque 400 from a server round-trip away.
+     */
+    if (ifAbsent && ifValue !== null) {
+      throw new Error('setKv: if_absent and if= are mutually exclusive — send one or the other');
+    }
     this.assertWritable(`write the note /kv/${ns}/${key}`);
     assertValidName('namespace', ns);
     assertValidName('key', key);

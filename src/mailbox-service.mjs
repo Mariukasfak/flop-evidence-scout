@@ -2,6 +2,7 @@ import { getDidShardedPath, getStateKey, singleLineSweep, isValidTechnocoreName 
 import { formatKnowledgeResponse, shouldRespond } from './knowledge.mjs';
 import { Guardrails } from './guardrails.mjs';
 import { signExchange, recordExchange } from './collaboration.mjs';
+import { READ_WINDOW } from './technocore-client.mjs';
 
 /**
  * Makes the agent addressable instead of merely audible.
@@ -132,7 +133,7 @@ export class MailboxService {
     try {
       // JSON carries the full DID in `from`; the text view truncates it to
       // <z6Mk…uB6z>, which cannot be resolved back to a DID note.
-      const data = await this.client.readRoom(this.mailbox, { limit: 20, format: 'json' });
+      const data = await this.client.readRoom(this.mailbox, { limit: READ_WINDOW, format: 'json' });
       inbound = Array.isArray(data?.messages) ? data.messages : [];
     } catch (err) {
       await this.saveRemoteState();

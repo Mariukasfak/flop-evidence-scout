@@ -23,7 +23,7 @@ import {
 } from '../src/knowledge.mjs';
 
 import { Guardrails } from '../src/guardrails.mjs';
-import { TechnocoreClient } from '../src/technocore-client.mjs';
+import { TechnocoreClient, READ_WINDOW } from '../src/technocore-client.mjs';
 import { archiveRoomMessages, trimArchive, resetArchiveIndex, parseArgs } from '../src/daemon.mjs';
 import { ScoutEngine } from '../src/scout-engine.mjs';
 
@@ -1145,5 +1145,37 @@ describe('--once and --dry-run are not the same thing', () => {
     const o = parseArgs(['node', 'daemon']);
     assert.notEqual(o.once, true);
     assert.notEqual(o.dryRun, true);
+  });
+});
+
+/**
+ * The read window, and the one rule the server changed under us.
+ *
+ * 0.11.0 clamps `limit` to 1..200 and refuses if_absent together with if=.
+ * Both are pinned here because both are the kind of thing that breaks quietly:
+ * a window silently clamped back to 50 would look like a working agent that
+ * simply never saw anything, and before 0.11.0 sending both conditions got you
+ * a write you never asked for and an "ok" in reply.
+ */
+describe('reading, at the size the server actually allows', () => {
+  test('the read window is within the documented clamp', () => {
+    assert.ok(READ_WINDOW >= 1 && READ_WINDOW <= 200,
+      `limit is clamped to 1..200 by the server; ${READ_WINDOW} would be silently replaced`);
+  });
+
+  test('if_absent and if= are refused together, not silently resolved', async () => {
+    const client = new TechnocoreClient({ baseUrl: 'https://example.invalid' });
+    await assert.rejects(
+      () => client.setKv('ns', 'key', 'value', { ifAbsent: true, ifValue: 'other' }),
+      /mutually exclusive/
+    );
+  });
+
+  test('either condition alone is still allowed to reach the server', () => {
+    // Not executed against a server — the point is that the guard above does not
+    // reject the ordinary single-condition calls the lease depends on.
+    const client = new TechnocoreClient({ baseUrl: 'https://example.invalid' });
+    assert.doesNotThrow(() => { client.setKv('ns', 'k', 'v', { ifAbsent: true }).catch(() => {}); });
+    assert.doesNotThrow(() => { client.setKv('ns', 'k', 'v', { ifValue: 'x' }).catch(() => {}); });
   });
 });

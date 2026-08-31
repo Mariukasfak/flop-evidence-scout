@@ -1,6 +1,7 @@
 import { getDidShardedPath, getStateKey, singleLineSweep } from './identity.mjs';
 import { Guardrails } from './guardrails.mjs';
 import { signExchange, recordExchange } from './collaboration.mjs';
+import { READ_WINDOW } from './technocore-client.mjs';
 
 /** What a testnet faucet room would plausibly be called when it appears. */
 export const FAUCET_PATTERNS = [/faucet/i, /testnet/i, /\bdrip\b/i, /\btap\b/i];
@@ -151,7 +152,7 @@ export class ScribeEngine {
     try {
       eventsData = await this.client.readRoom(eventsRoom, {
         since: this.localState.lastEventsSeq > 0 ? this.localState.lastEventsSeq : null,
-        limit: 20
+        limit: READ_WINDOW
       });
     } catch {
       // Non-blocking events read
