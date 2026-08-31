@@ -105,13 +105,51 @@ export class KibbleEngine {
       claimsLost: 0
     };
     this.lastStateError = null;
+
+    /**
+     * Whether the remote note has been merged yet.
+     *
+     * An instance field, deliberately not part of localState: everything in
+     * there is serialised into the note, and a "have I loaded?" flag written
+     * into the thing it describes is both meaningless remotely and confusing
+     * on the way back.
+     */
+    this.stateLoaded = false;
   }
 
+  /**
+   * Pull the remote note once, then never again while this process lives.
+   *
+   * Re-merging the note at the top of every turn is what forced the three
+   * kibble lanes to run one after another: each did load-modify-save on the
+   * same key, so a lane that loaded while another held an unsaved claim would
+   * overwrite it — losing exactly the claim the fast lane exists to win. That
+   * serialisation cost real coverage. The fast lane could only run in the tail
+   * of a cycle, about 58% of the interval, and every job posted in the other
+   * 42% was one we never saw.
+   *
+   * Memory is the authority instead. This is one single-threaded process, so
+   * concurrent lanes interleave only at awaits and cannot tear an object;
+   * dropping the reload removes the clobber without a lock, and the note goes
+   * back to being what it should be — a restart's memory, not a shared
+   * variable. Saves still happen after every meaningful change.
+   */
   async loadRemoteState() {
+    if (this.stateLoaded) return this.localState;
+    this.stateLoaded = true;
     try {
       const remote = await this.client.getKv('kibble', this.stateKey);
       if (remote && typeof remote === 'object') {
-        this.localState = { ...this.localState, ...remote };
+        // Counters only go up: a note that was reset or half-written must not
+        // roll back what this process has already done and posted.
+        const merged = { ...this.localState, ...remote };
+        for (const key of ['resultsDelivered', 'attestsPosted', 'totalWorkerTurns',
+          'totalValidatorTurns', 'claimsWon', 'claimsLost']) {
+          merged[key] = Math.max(this.localState[key] || 0, remote[key] || 0);
+        }
+        // Held claims and the cursor belong to the live process, not the note.
+        merged.heldJobs = this.localState.heldJobs?.length ? this.localState.heldJobs : (remote.heldJobs || []);
+        this.localState = merged;
       }
     } catch (err) {
       this.lastStateError = err.message;

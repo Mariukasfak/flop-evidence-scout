@@ -444,6 +444,15 @@ export async function runScoutDaemon(options = {}) {
    * the cycles this was throwing away.
    */
   const LEASE_CYCLES = 8;
+
+  /**
+   * Headroom left between the fast lane's deadline and the next cycle.
+   *
+   * The lane is awaited before the cycle's gap, so any overrun is time the next
+   * cycle starts late. Wide enough to absorb one in-flight long poll (capped at
+   * 10s by the protocol) plus the claim behind it.
+   */
+  const MIN_LANE_MARGIN_MS = 12_000;
   const leaseTtl = Math.min(10 * 60_000, Math.max(2 * 60_000, config.intervalMs * LEASE_CYCLES));
 
   /**
@@ -716,6 +725,20 @@ export async function runScoutDaemon(options = {}) {
             '[Kibble] Board writes are OFF — npm run kibble-preview shows what they would be. '
             + 'Set KIBBLE_WRITES=true to take part.');
         } else {
+          // Runs concurrently with the rest of the cycle now that the engine
+          // stops re-reading its note mid-run: memory is the authority, so two
+          // lanes can no longer clobber each other's claims. That matters
+          // because coverage is the whole game here — a lane confined to the
+          // cycle's tail saw about 58% of the interval, and every job posted in
+          // the other 42% was one we never had a chance at.
+          //
+          // Sized to end just before the next cycle would start, so it is
+          // always awaited below rather than left running into it.
+          const laneMs = Math.max(5_000, config.intervalMs - (Date.now() - cycleTop) - MIN_LANE_MARGIN_MS);
+          kibbleFastLane = kibbleEngine
+            .runFastLane({ maxMs: laneMs })
+            .catch((err) => ({ action: 'failed', error: err.message }));
+
           try {
             const kibbleWorker = await timed('kibbleWorker', () => kibbleEngine.runWorkerTurn({ backend, real, ledgerPath }));
             if (kibbleWorker.action !== 'no_job') {
@@ -735,15 +758,6 @@ export async function runScoutDaemon(options = {}) {
             console.log(`[Kibble/Validator] Skipped — ${err.message}`);
           }
 
-          // Started only after the two turns above have finished with the
-          // engine's state. All three read-modify-write the same note, and a
-          // fast lane running concurrently with them would let one save clobber
-          // a claim the other had just recorded — losing exactly the claim this
-          // lane exists to win. It runs alone, through the idle part of the
-          // cycle, and is awaited before the next one begins.
-          kibbleFastLane = kibbleEngine
-            .runFastLane({ maxMs: Math.max(5_000, config.intervalMs - 25_000) })
-            .catch((err) => ({ action: 'failed', error: err.message }));
         }
 
         work = await runBurst({

@@ -254,6 +254,64 @@ describe('KibbleEngine worker turn', () => {
   });
 });
 
+/**
+ * Memory is the authority inside one process; the note is only a restart's
+ * memory. Re-merging it mid-run is what forced the three lanes to run one after
+ * another, and that serialisation cost the fast lane roughly half the interval.
+ */
+describe('KibbleEngine state ownership', () => {
+  test('the remote note is read once, not on every turn', async () => {
+    const client = makeClient({ roomMessages: [] });
+    let reads = 0;
+    const wrapped = { ...client, async getKv(...args) { reads += 1; return client.getKv(...args); } };
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client: wrapped
+    });
+
+    await engine.loadRemoteState();
+    await engine.loadRemoteState();
+    await engine.runWorkerTurn({ backend: makeBackend(GOOD_ANSWER), real: true });
+
+    assert.equal(reads, 1, 'a second read is a chance to clobber what memory already holds');
+  });
+
+  test('a claim made during another turn is not wiped by a later load', async () => {
+    // The exact failure this guards: the fast lane records a claim, another
+    // lane re-reads the note it was written before, and the claim disappears —
+    // losing the race we had already won.
+    const client = makeClient({ roomMessages: [jobLine('k000000000a')] });
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client
+    });
+
+    engine.localState.cursor = 0;
+    await engine.runFastLane({ maxMs: 3000 });
+    assert.equal(engine.localState.heldJobs.length, 1);
+
+    await engine.loadRemoteState();
+    assert.equal(engine.localState.heldJobs.length, 1, 'the held claim survived');
+  });
+
+  test('counters never roll backwards when the note is behind', async () => {
+    const client = makeClient({ roomMessages: [] });
+    // A note written by an older run, or half-written, must not undo work this
+    // process has already posted to a public tape.
+    await client.setKv('kibble', 'anything', {});
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client
+    });
+    engine.localState.resultsDelivered = 5;
+    engine.localState.attestsPosted = 9;
+
+    const stale = { resultsDelivered: 0, attestsPosted: 2 };
+    client.getKv = async () => stale;
+    await engine.loadRemoteState();
+
+    assert.equal(engine.localState.resultsDelivered, 5);
+    assert.equal(engine.localState.attestsPosted, 9);
+  });
+});
+
 describe('KibbleEngine validator turn', () => {
   test('does nothing when no thin delivery is waiting', async () => {
     const client = makeClient({ roomMessages: [jobLine('k000000000e'), deliverLine('k000000000e', 'A genuinely specific answer with concrete detail.')] });
