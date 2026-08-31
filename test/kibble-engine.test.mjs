@@ -259,6 +259,82 @@ describe('KibbleEngine worker turn', () => {
  * memory. Re-merging it mid-run is what forced the three lanes to run one after
  * another, and that serialisation cost the fast lane roughly half the interval.
  */
+/**
+ * A fixed claim rate has been wrong twice — once set on a belief measurement
+ * disproved, once on plain caution. The operator asked the right question: if
+ * more genuine work is worth more, why is there a ceiling? Because an abandoned
+ * claim blocks that job for every other agent. So the rate follows the one
+ * thing that actually matters, which is whether we finish what we take.
+ */
+describe('KibbleEngine claim rate follows the finishing rate', () => {
+  const engineWith = () => new KibbleEngine({
+    workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client: makeClient()
+  });
+
+  test('nothing moves until there is a full window to judge', () => {
+    const engine = engineWith();
+    const start = engine.workerGuardrails.maxPerHour;
+    for (let i = 0; i < 7; i++) engine.recordClaimOutcome(true);
+    assert.equal(engine.workerGuardrails.maxPerHour, start, 'seven outcomes is not evidence');
+  });
+
+  test('finishing everything opens the rate up, and it stops at the ceiling', () => {
+    const engine = engineWith();
+    const start = engine.workerGuardrails.maxPerHour;
+    for (let i = 0; i < 8; i++) engine.recordClaimOutcome(true);
+    assert.ok(engine.workerGuardrails.maxPerHour > start);
+
+    for (let i = 0; i < 200; i++) engine.recordClaimOutcome(true);
+    assert.equal(engine.workerGuardrails.maxPerHour, 20, 'we stay a guest on somebody else\'s server');
+  });
+
+  test('abandoning claims backs off fast, and it stops at the floor', () => {
+    // The failure this exists for: one sentence in a prompt turned 11 of 17
+    // claims into abandonments, and a fixed rate kept taking jobs throughout.
+    const engine = engineWith();
+    for (let i = 0; i < 16; i++) engine.recordClaimOutcome(true);
+    const raised = engine.workerGuardrails.maxPerHour;
+
+    for (let i = 0; i < 8; i++) engine.recordClaimOutcome(false);
+    assert.ok(engine.workerGuardrails.maxPerHour < raised, 'backed off once claims stopped landing');
+
+    for (let i = 0; i < 200; i++) engine.recordClaimOutcome(false);
+    assert.equal(engine.workerGuardrails.maxPerHour, 3, 'never stops taking part entirely');
+  });
+
+  test('it falls faster than it rises, because the damage is asymmetric', () => {
+    // Claiming too slowly costs us some work. Claiming too fast and abandoning
+    // costs everyone else the job.
+    const up = engineWith();
+    for (let i = 0; i < 8; i++) up.recordClaimOutcome(true);
+    const gained = up.workerGuardrails.maxPerHour - 6;
+
+    const down = engineWith();
+    for (let i = 0; i < 8; i++) down.recordClaimOutcome(false);
+    const lost = 6 - down.workerGuardrails.maxPerHour;
+
+    assert.ok(lost > gained, `lost ${lost} per step, gained ${gained}`);
+  });
+
+  test('the learned rate survives a restart', () => {
+    const client = makeClient();
+    const workerIdentity = generateIdentity();
+    const validatorIdentity = generateIdentity();
+
+    const first = new KibbleEngine({ workerIdentity, validatorIdentity, client });
+    for (let i = 0; i < 16; i++) first.recordClaimOutcome(true);
+    const learned = first.workerGuardrails.maxPerHour;
+    assert.ok(learned > 6);
+
+    return first.saveRemoteState().then(async () => {
+      const second = new KibbleEngine({ workerIdentity, validatorIdentity, client });
+      await second.loadRemoteState();
+      assert.equal(second.workerGuardrails.maxPerHour, learned,
+        'an hour of evidence is not re-learned from scratch on every restart');
+    });
+  });
+});
+
 describe('KibbleEngine state ownership', () => {
   test('the remote note is read once, not on every turn', async () => {
     const client = makeClient({ roomMessages: [] });

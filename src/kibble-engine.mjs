@@ -70,6 +70,36 @@ const FRANCHISE_TIMEOUT_MS = 5_000;
 const HELD_TTL_MS = 10 * 60_000;
 
 /**
+ * How hard the worker is allowed to go, and what decides it.
+ *
+ * A fixed number here has been wrong twice. 3/hour was set on the belief that
+ * the claim race was unwinnable, which measurement disproved; 6/hour was set by
+ * me being cautious, which is not evidence either. The operator's question was
+ * the right one — if more genuine work is worth more, why is there a ceiling at
+ * all?
+ *
+ * Because there is exactly one real cost, and it is not ours: a claim we take
+ * and abandon blocks that job for every other agent, since the board ignores
+ * competing claims. So the ceiling should be set by whether we are finishing
+ * what we take, and that is measurable. It now is: the rate rises while claims
+ * turn into deliveries and falls when they stop, between a floor that keeps us
+ * present and a ceiling that keeps us a guest on somebody else's server.
+ *
+ * The failure mode this guards against is the one that already happened. A
+ * single sentence in a prompt turned 11 of 17 claims into abandonments, and a
+ * fixed rate would have kept taking jobs at full speed throughout.
+ */
+const WORKER_RATE_FLOOR = 3;
+const WORKER_RATE_CEILING = 20;
+
+/** Outcomes considered when adjusting; small enough to react within an hour. */
+const RATE_WINDOW = 8;
+
+/** Above this share of abandoned claims, back off. Below it, open up. */
+const ABANDON_BACKOFF = 0.25;
+const ABANDON_HEADROOM = 0.10;
+
+/**
  * The URL a reader can click straight from the public tape to the DID note that
  * proves who posted a line — the same note publishDidProfile() writes, turning an
  * opaque did:key into "Addressable, not just audible" the way the rest of this
@@ -87,26 +117,10 @@ export class KibbleEngine {
     client,
     room = 'kibble',
     /**
-     * Raised, because the reason for the old number turned out to be false.
-     *
-     * It was 3/hour with a 15-minute cooldown, and the comment justifying it
-     * said the claim race is lost before a cycle can enter it, so rate limiting
-     * bought nothing but politeness. Both halves of that are now measured
-     * wrong: the fast lane wins claims (2 of 6 in one window, and 8 of 9 jobs
-     * were still unclaimed at the moment the long poll handed them over), and
-     * since the prompt fix every claim we made was delivered rather than
-     * abandoned — 0 refusals after, against 11 before.
-     *
-     * So the cooldown was leaving the lane idle for a quarter of an hour at a
-     * time against a room posting several jobs a minute. 6/hour with a
-     * five-minute cooldown matches the validator's pacing, roughly doubles the
-     * work we finish, and still keeps us a small and well-behaved presence on
-     * somebody else's board.
-     *
-     * The thing that would justify tightening it again is refusals coming back:
-     * an abandoned claim blocks that job for every other agent, because the
-     * board ignores competing claims. Watch "paimta ir palikta" in
-     * tools/quick-status.mjs.
+     * A starting point, not a policy. recordClaimOutcome moves it between
+     * WORKER_RATE_FLOOR and WORKER_RATE_CEILING according to how many claims we
+     * actually finish, and loadRemoteState restores whatever it had learned.
+     * Six is simply where it begins on a machine with no history.
      */
     workerGuardrails = new Guardrails({ maxPerHour: 6, minCooldownMs: 5 * 60_000 }),
     /** The room is validator-starved 7:1, so this stays looser than the worker's. */
@@ -202,6 +216,13 @@ export class KibbleEngine {
         // Held claims and the cursor belong to the live process, not the note.
         merged.heldJobs = this.localState.heldJobs?.length ? this.localState.heldJobs : (remote.heldJobs || []);
         this.localState = merged;
+        // A rate learned over an hour should not be re-learned from scratch on
+        // every restart, and this daemon restarts often.
+        const learned = Number(this.localState.workerRate);
+        if (Number.isFinite(learned) && learned >= WORKER_RATE_FLOOR && learned <= WORKER_RATE_CEILING) {
+          this.workerGuardrails.maxPerHour = learned;
+          this.workerGuardrails.minCooldownMs = Math.max(60_000, Math.floor(3600_000 / learned / 2));
+        }
       }
     } catch (err) {
       this.lastStateError = err.message;
@@ -332,6 +353,37 @@ export class KibbleEngine {
     return { action: claimed ? 'claimed' : 'nothing_to_claim', claimed, held: (this.localState.heldJobs || []).length };
   }
 
+  /**
+   * Let the finishing rate set the claiming rate.
+   *
+   * Called once per settled claim. Rises slowly and falls fast, because the
+   * damage is asymmetric: claiming too slowly costs us some work, claiming too
+   * fast and abandoning blocks jobs for everybody else.
+   */
+  recordClaimOutcome(finished) {
+    const window = [...(this.localState.claimOutcomes || []), finished ? 1 : 0].slice(-RATE_WINDOW);
+    this.localState.claimOutcomes = window;
+    if (window.length < RATE_WINDOW) return this.workerGuardrails.maxPerHour;
+
+    const abandoned = window.filter((x) => x === 0).length / window.length;
+    const current = this.workerGuardrails.maxPerHour;
+    let next = current;
+
+    if (abandoned > ABANDON_BACKOFF) next = Math.max(WORKER_RATE_FLOOR, Math.floor(current / 2));
+    else if (abandoned <= ABANDON_HEADROOM) next = Math.min(WORKER_RATE_CEILING, current + 2);
+
+    if (next !== current) {
+      this.workerGuardrails.maxPerHour = next;
+      // Spread the allowance across the hour rather than letting it burst, and
+      // never faster than a minute apart.
+      this.workerGuardrails.minCooldownMs = Math.max(60_000, Math.floor(3600_000 / next / 2));
+      this.localState.workerRate = next;
+      console.log(`[Kibble] Claim rate ${current} -> ${next}/h `
+        + `(${Math.round(abandoned * 100)}% of the last ${window.length} claims abandoned).`);
+    }
+    return next;
+  }
+
   /** Forget claims too old to answer honestly. */
   #expireHeldJobs(now = () => Date.now()) {
     const cutoff = now() - HELD_TTL_MS;
@@ -417,6 +469,7 @@ export class KibbleEngine {
         ...(this.localState.refusedJobIds || []), job.jobId
       ].slice(-MAX_REMEMBERED);
       release();
+      this.recordClaimOutcome(false);
       await this.saveRemoteState();
       return { action: 'refused', jobId: job.jobId, reason: answer ? 'failed validator' : 'empty completion' };
     }
@@ -439,6 +492,7 @@ export class KibbleEngine {
 
     this.workerGuardrails.recordSent(line);
     release();
+    this.recordClaimOutcome(true);
     this.localState.resultsDelivered += 1;
     this.localState.claimsWon = (this.localState.claimsWon || 0) + 1;
     this.localState.lastResultJobId = job.jobId;
