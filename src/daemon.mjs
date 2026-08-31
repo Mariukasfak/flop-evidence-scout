@@ -91,6 +91,32 @@ export function parseArgs(argv) {
   return options;
 }
 
+/**
+ * The commit this checkout is currently on, or null.
+ *
+ * Exported and given a directory so it can be tested, because the version that
+ * lived inline read HEAD three times in one expression and nothing checked it.
+ * A daemon that silently never notices new code looks exactly like a daemon
+ * that never needs to, and this whole mechanism exists to stop that.
+ *
+ * null means "no answer" and never "restart": a detached checkout, a repo mid
+ * write, a packed ref we cannot resolve, or no .git at all are all reasons to
+ * carry on rather than to stand down.
+ */
+export function readGitHead(repoDir = process.cwd()) {
+  try {
+    const head = fs.readFileSync(path.join(repoDir, '.git', 'HEAD'), 'utf8').trim();
+    if (!head.startsWith('ref:')) return head || null;      // detached: HEAD is the sha
+    const ref = head.slice(4).trim();
+    // A ref whose loose file is missing lives in packed-refs; resolving that is
+    // more machinery than this is worth, and "unknown" is the safe answer.
+    const sha = fs.readFileSync(path.join(repoDir, '.git', ref), 'utf8').trim();
+    return sha || null;
+  } catch {
+    return null;
+  }
+}
+
 /** The watcher's finding, if there is one waiting. */
 function readSourceChange(dataDir) {
   try {
@@ -372,16 +398,7 @@ export async function runScoutDaemon(options = {}) {
    * agent is editing is a way to lose someone's uncommitted work; noticing that
    * HEAD moved is not.
    */
-  const headNow = () => {
-    try {
-      return fs.readFileSync(path.resolve('.git/HEAD'), 'utf8').trim().startsWith('ref:')
-        ? fs.readFileSync(path.resolve('.git',
-            fs.readFileSync(path.resolve('.git/HEAD'), 'utf8').trim().slice(5).trim()), 'utf8').trim()
-        : fs.readFileSync(path.resolve('.git/HEAD'), 'utf8').trim();
-    } catch {
-      return null;                       // not a checkout, or mid-write: never a reason to stop
-    }
-  };
+  const headNow = () => readGitHead();
   const startedFrom = headNow();
   const codeChanged = () => {
     if (!startedFrom) return false;
@@ -455,7 +472,10 @@ export async function runScoutDaemon(options = {}) {
     }
   };
 
-  appendAudit(config.auditLogPath, { event: 'startup', did: scoutIdentity.did, scribeDid: scribeIdentity.did, server: config.serverUrl });
+  // The commit is recorded so anything reading this log can tell whether the
+  // running process is the code on disk. Without it, a pending restart is
+  // invisible — which is how half a day of fixes stayed inert.
+  appendAudit(config.auditLogPath, { event: 'startup', did: scoutIdentity.did, scribeDid: scribeIdentity.did, server: config.serverUrl, commit: readGitHead() });
   await writeHeartbeat('started');
 
   /**

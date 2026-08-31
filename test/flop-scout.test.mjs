@@ -24,7 +24,7 @@ import {
 
 import { Guardrails } from '../src/guardrails.mjs';
 import { TechnocoreClient, READ_WINDOW } from '../src/technocore-client.mjs';
-import { readArchiveTail, archiveRoomMessages, trimArchive, resetArchiveIndex, parseArgs } from '../src/daemon.mjs';
+import { readGitHead, readArchiveTail, archiveRoomMessages, trimArchive, resetArchiveIndex, parseArgs } from '../src/daemon.mjs';
 import { ScoutEngine } from '../src/scout-engine.mjs';
 
 describe('FLOP Scout Identity & Cryptography', () => {
@@ -1301,5 +1301,45 @@ describe('an outage must not idle the model', () => {
     const back = readArchiveTail(dir, ['lobby'], 200);
     assert.equal(back.length, 200, 'took the newest slice, not the whole file');
     assert.match(back.at(-1).text, /message number 899/);
+  });
+});
+
+describe('knowing whether we are running the code on disk', () => {
+  // A daemon holds the modules it started with, so a fix can be committed and
+  // inert at the same time — which happened repeatedly across one day while the
+  // status screen reported everything as fine. The version that first did this
+  // read HEAD three times in one expression and nothing checked it; a reader
+  // that silently always answers "no change" is indistinguishable from one that
+  // works.
+  test('resolves a normal checkout to its commit', () => {
+    const head = readGitHead(process.cwd());
+    assert.match(head, /^[0-9a-f]{40}$/, 'this repo should resolve to a sha');
+  });
+
+  test('a detached HEAD is the sha itself', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'head-'));
+    fs.mkdirSync(path.join(dir, '.git'), { recursive: true });
+    const sha = 'a'.repeat(40);
+    fs.writeFileSync(path.join(dir, '.git', 'HEAD'), sha);
+    assert.equal(readGitHead(dir), sha);
+  });
+
+  test('follows a ref to the file that holds the sha', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'head-'));
+    fs.mkdirSync(path.join(dir, '.git', 'refs', 'heads'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.git', 'HEAD'), 'ref: refs/heads/main');
+    fs.writeFileSync(path.join(dir, '.git', 'refs', 'heads', 'main'), 'b'.repeat(40));
+    assert.equal(readGitHead(dir), 'b'.repeat(40));
+  });
+
+  test('anything unreadable answers null, which never means restart', () => {
+    // A packed ref, a repo mid-write, or no checkout at all are all reasons to
+    // carry on rather than to stand down.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'head-'));
+    assert.equal(readGitHead(dir), null);
+
+    fs.mkdirSync(path.join(dir, '.git'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.git', 'HEAD'), 'ref: refs/heads/gone');
+    assert.equal(readGitHead(dir), null, 'a ref with no loose file is unknown, not changed');
   });
 });

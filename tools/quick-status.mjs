@@ -17,6 +17,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { readGitHead } from '../src/daemon.mjs';
+
 const DATA = 'data/local';
 const AUDIT = path.join(DATA, 'scout-audit.jsonl');
 const HEARTBEAT = path.join(DATA, 'scout-heartbeat.json');
@@ -126,6 +128,22 @@ function main() {
   if (fatals.length) {
     console.log(`  ${RED}Luzimu su priezastimi: ${fatals.length}${OFF}`);
     console.log(`  ${DIM}${String(fatals[fatals.length - 1].error).split('\n')[0].slice(0, 90)}${OFF}`);
+  }
+
+  // ── ar veikia tas kodas, kuris yra diske ──────────────────────────────
+  //
+  // A running daemon holds the modules it started with, so a fix can be
+  // committed and inert at the same time — which is exactly what happened for
+  // most of a day, repeatedly, while the status screen said everything was
+  // fine. The daemon now stands down by itself when HEAD moves, but a process
+  // started before that landed cannot know to, so the gap has to be visible.
+  const onDisk = readGitHead(process.cwd());
+  const running = lastStart?.commit ?? null;
+  if (onDisk && running && onDisk !== running) {
+    console.log(`  ${YEL}Naujas kodas laukia${OFF}  ${DIM}(veikia ${running.slice(0, 7)}, diske ${onDisk.slice(0, 7)})${OFF}`);
+    console.log(`  ${DIM}Agentas persileis pats. Jei ne — meniu.bat punktas [14].${OFF}`);
+  } else if (onDisk && !running) {
+    console.log(`  ${DIM}Veikianti versija nezinoma (paleista pries si patikrinima).${OFF}`);
   }
 
   // ── ka nuveike ────────────────────────────────────────────────────────
