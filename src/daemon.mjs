@@ -749,7 +749,7 @@ export async function runScoutDaemon(options = {}) {
             console.log(`[Kibble/Worker] Skipped — ${err.message}`);
           }
           try {
-            const kibbleValidator = await timed('kibbleValidator', () => kibbleEngine.runValidatorTurn());
+            const kibbleValidator = await timed('kibbleValidator', () => kibbleEngine.runValidatorTurn({ backend, real, ledgerPath }));
             if (kibbleValidator.action !== 'no_target') {
               console.log(`[Kibble/Validator] ${kibbleValidator.action}${kibbleValidator.jobId ? ` — ${kibbleValidator.jobId}` : ''}`);
             }

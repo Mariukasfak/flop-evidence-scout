@@ -73,9 +73,10 @@ export const TASK_PRIORITY = Object.freeze({
   'summarise-source-change': 1,   // a protocol change decays fastest
   'draft-answer': 2,              // someone is waiting
   'kibble-answer': 3,             // we claimed it publicly; an undelivered claim is worse than none
-  'extract-claims': 4,
-  'explain-measurement': 5,
-  'classify-message': 6           // useful, endless, and the natural filler
+  'kibble-judge': 4,              // somebody's delivery is sitting unjudged in a room short of validators
+  'extract-claims': 5,
+  'explain-measurement': 6,
+  'classify-message': 7           // useful, endless, and the natural filler
 });
 
 export function prioritise(plan) {

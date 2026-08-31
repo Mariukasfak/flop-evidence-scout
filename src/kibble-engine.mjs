@@ -8,12 +8,26 @@
  * Scribe validates.
  *
  * Bootstrapping matters here specifically: the board's own scorer only counts a
- * "useful" ATTEST once the attesting DID has at least one RESULT of its own — a
+ * "useful" ATTEST once the attesting side has a scored RESULT behind it — a
  * franchise that opens on the first genuine delivery. Until then the only honest
- * attestation available is `not`, which the spec exempts from that requirement, so
- * that is the only kind this file ever writes. A "useful" ATTEST needs a result hash
- * bound to a delivery we actually read, and never our own — that is real work,
- * deliberately left undone rather than half-done.
+ * attestation available is `not`, which the spec exempts from that requirement,
+ * and that is the only kind this file writes while unfranchised.
+ *
+ * Both attestation lanes are here now. The `not` lane is regex-decided and
+ * covers only the do-nothing templates, because a template is a pattern.
+ * "Useful" is a judgement, so it goes to a real model, is refused unless the
+ * model names something specific, and is bound to a hash of the exact delivery
+ * text that was judged. A NOT_USEFUL verdict from that model is discarded
+ * rather than posted: the template lane already covers work that plainly did
+ * nothing, and calling a genuine attempt useless on a 3B model's say-so is not
+ * a claim this project has earned the right to publish.
+ *
+ * The hash is computed locally, not fetched. The spec points at /api/board and
+ * that endpoint does not answer — 90 seconds, then 45, then nothing — so a lane
+ * built on it is permanently dormant and would hang the turn it runs in. The
+ * recipe was recovered from the tape instead and reproduces the published hash
+ * on 195 of 201 real pairs; see resultHashFor in kibble.mjs for why the other
+ * six miss and what follows from that.
  */
 
 import { READ_WINDOW } from './technocore-client.mjs';
@@ -24,8 +38,8 @@ import { runSession } from './inference.mjs';
 import { appendReceipt } from './inference-ledger.mjs';
 import { sayOnce } from './log-once.mjs';
 import {
-  reconstructBoard, pickJob, pickThinDelivery, sameDid,
-  claimLine, resultLine, attestNotLine
+  reconstructBoard, pickJob, pickThinDelivery, pickRealDelivery, sameDid,
+  claimLine, resultLine, attestNotLine, attestUsefulLine, resultHashFor
 } from './kibble.mjs';
 
 /** How many refused job ids to remember, so a bad answer is not regenerated forever. */
@@ -39,6 +53,18 @@ const MAX_REMEMBERED = 200;
  * are trying to win honestly into hoarding.
  */
 const MAX_HELD = 2;
+
+/**
+ * How long a franchise answer is trusted before asking again.
+ *
+ * The scoring host is the flaky one — /api/board does not answer at all — so
+ * this is asked rarely and cached, and a failure to reach it means "not
+ * franchised yet" rather than an exception.
+ */
+const FRANCHISE_TTL_MS = 30 * 60_000;
+
+/** Nothing on that host is worth stalling a cycle for. */
+const FRANCHISE_TIMEOUT_MS = 5_000;
 
 /** A held claim we never got to is dropped rather than answered hours late. */
 const HELD_TTL_MS = 10 * 60_000;
@@ -64,7 +90,10 @@ export class KibbleEngine {
     workerGuardrails = new Guardrails({ maxPerHour: 3, minCooldownMs: 15 * 60_000 }),
     /** The room is validator-starved 7:1, so this stays looser than the worker's. */
     validatorGuardrails = new Guardrails({ maxPerHour: 6, minCooldownMs: 5 * 60_000 }),
-    stateKey = null
+    stateKey = null,
+    /** The scoring host. Only ever asked whether the worker is franchised. */
+    kibbleApiUrl = 'https://flop-kibble.onrender.com',
+    fetchFn = globalThis.fetch
   }) {
     if (!workerIdentity?.did || !workerIdentity?.privateKeyPem) {
       throw new Error('Valid Ed25519 workerIdentity is required for KibbleEngine');
@@ -83,6 +112,8 @@ export class KibbleEngine {
     this.workerGuardrails = workerGuardrails;
     this.validatorGuardrails = validatorGuardrails;
     this.stateKey = stateKey || getStateKey(workerIdentity.did, 'kibble');
+    this.kibbleApiUrl = String(kibbleApiUrl).replace(/\/+$/, '');
+    this.fetchFn = fetchFn;
     this.localState = {
       totalWorkerTurns: 0,
       totalValidatorTurns: 0,
@@ -402,6 +433,113 @@ export class KibbleEngine {
   }
 
   /**
+   * Has the worker earned the right for our "useful" attestations to score?
+   *
+   * The board only counts a peer `useful` once the attesting side has a scored
+   * RESULT behind it. Under the three-party split Scribe never posts a RESULT —
+   * Scout does — so this asks about Scout. That is a deliberate reading of the
+   * rule rather than a quote of it, and it is the conservative direction: if the
+   * real rule is stricter, we simply post fewer useful attestations than we
+   * could, which costs nothing. A `not` needs no franchise and is unaffected.
+   *
+   * Unreachable means "no", never an exception. The host that answers this is
+   * the same one whose /api/board never replies, and a validator turn must not
+   * hang waiting for it.
+   */
+  async checkFranchise({ now = () => Date.now() } = {}) {
+    const checkedAt = this.localState.franchiseCheckedAt || 0;
+    if (now() - checkedAt < FRANCHISE_TTL_MS) return this.localState.franchised === true;
+
+    // Stamp before the call, not after: a host that times out every time would
+    // otherwise re-ask on every single validator turn forever.
+    this.localState.franchiseCheckedAt = now();
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FRANCHISE_TIMEOUT_MS);
+    try {
+      const url = `${this.kibbleApiUrl}/api/score?did=${encodeURIComponent(this.workerIdentity.did)}`;
+      const response = await this.fetchFn(url, { signal: controller.signal });
+      if (!response.ok) { this.localState.franchised = false; return false; }
+      const data = await response.json();
+      this.localState.franchised = data?.found === true && Number(data?.score) > 0;
+    } catch {
+      this.localState.franchised = false;
+    } finally {
+      clearTimeout(timer);
+    }
+    return this.localState.franchised === true;
+  }
+
+  /**
+   * Judge one genuine delivery and, if it holds up, say so on the record.
+   *
+   * The only place this project lets a model's opinion become a public claim
+   * about somebody else's work, so it is fenced accordingly: the delivery is
+   * untrusted input, the verdict must be one of two words, the reason must name
+   * something specific, and the whole line is bound to a hash of the exact text
+   * that was judged. A model that hedges, rambles or rubber-stamps fails the
+   * validator and nothing is posted — which is the correct outcome, not a
+   * failure.
+   *
+   * A NOT_USEFUL verdict here is discarded rather than posted. The thin-template
+   * lane already covers deliveries that plainly did nothing; calling a genuine
+   * attempt "not useful" on a 3B model's say-so is a judgement this project has
+   * not earned the right to publish.
+   */
+  async attemptUsefulAttest({ backend, real, ledgerPath, jobs } = {}) {
+    if (!real) return { action: 'useful_skipped_no_real_model' };
+    if (!(await this.checkFranchise())) return { action: 'useful_unfranchised' };
+
+    const found = pickRealDelivery(jobs, {
+      selfDid: this.validatorIdentity.did,
+      excludeDids: [this.workerIdentity.did]
+    });
+    if (!found) return { action: 'no_useful_target' };
+
+    const paced = this.validatorGuardrails.canSendMessage(`kibble-useful-probe-${found.job.jobId}`);
+    if (!paced.allowed) return { action: `paced: ${paced.reason}`, jobId: found.job.jobId };
+
+    const task = buildTask('kibble-judge', {
+      category: found.job.category, title: found.job.title,
+      body: found.job.body, delivery: found.delivery.summary
+    });
+    const { receipt, completion } = await runSession(task, { backend, identity: this.validatorIdentity });
+    try { appendReceipt(receipt, ledgerPath); } catch { /* a ledger write must never lose the run */ }
+
+    const answer = String(completion || '').trim();
+    if (!task.validate(answer)) return { action: 'useful_refused', jobId: found.job.jobId };
+
+    const [verdict, ...rest] = answer.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (verdict !== 'USEFUL') return { action: 'judged_not_useful', jobId: found.job.jobId };
+
+    // Hashed over exactly the text we judged, which is the text we read off the
+    // tape — never a re-fetch, because then the hash would not describe what the
+    // model actually saw.
+    const hash = resultHashFor(found.delivery.summary);
+    const reason = `${rest.join(' ')} Verified by: ${didCardUrl(this.client, this.validatorIdentity)}`;
+    const line = attestUsefulLine(found.job.jobId, hash, reason);
+
+    const finalCheck = this.validatorGuardrails.canSendMessage(line);
+    if (!finalCheck.allowed) return { action: `blocked: ${finalCheck.reason}`, jobId: found.job.jobId };
+
+    try {
+      await this.client.postMessage(this.room, line, this.validatorIdentity);
+    } catch (err) {
+      sayOnce('kibble:useful-post', `[Kibble] Useful attest failed: ${err.message}`);
+      return { action: 'post_failed', jobId: found.job.jobId, error: err.message };
+    }
+
+    this.validatorGuardrails.recordSent(line);
+    this.localState.attestsPosted += 1;
+    this.localState.usefulAttests = (this.localState.usefulAttests || 0) + 1;
+    this.localState.lastAttestJobId = found.job.jobId;
+    this.localState.lastAttestAt = new Date().toISOString();
+    await this.saveRemoteState();
+
+    return { action: 'attested_useful', jobId: found.job.jobId, attestsPosted: this.localState.attestsPosted };
+  }
+
+  /**
    * Scribe's turn: hygiene-attest a thin delivery, or do nothing.
    *
    * Never our own delivery, never our own job, never a job we already attested —
@@ -409,7 +547,7 @@ export class KibbleEngine {
    * is the one thing this file can do from the very first cycle, before the worker
    * has ever delivered anything.
    */
-  async runValidatorTurn() {
+  async runValidatorTurn({ backend, real, ledgerPath } = {}) {
     await this.loadRemoteState();
     this.localState.totalValidatorTurns += 1;
 
@@ -420,8 +558,15 @@ export class KibbleEngine {
       return { action: 'read_failed', error: err.message };
     }
 
-    const found = pickThinDelivery(jobs, { selfDid: this.validatorIdentity.did });
-    if (!found) return { action: 'no_target' };
+    const found = pickThinDelivery(jobs, {
+      selfDid: this.validatorIdentity.did,
+      excludeDids: [this.workerIdentity.did]
+    });
+    if (!found) {
+      // Nothing plainly empty to call out. The room is short of validators
+      // either way, so spend the turn judging something real instead.
+      return this.attemptUsefulAttest({ backend, real, ledgerPath, jobs });
+    }
 
     const paced = this.validatorGuardrails.canSendMessage(`kibble-attest-probe-${found.job.jobId}`);
     if (!paced.allowed) return { action: `paced: ${paced.reason}`, jobId: found.job.jobId };

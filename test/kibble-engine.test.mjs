@@ -319,8 +319,10 @@ describe('KibbleEngine validator turn', () => {
     const validatorIdentity = generateIdentity();
     const engine = new KibbleEngine({ workerIdentity, validatorIdentity, client });
 
+    // No thin template to call out, so the turn falls through to the useful
+    // lane — which needs a real model and a franchise, and has neither here.
     const result = await engine.runValidatorTurn();
-    assert.equal(result.action, 'no_target');
+    assert.match(result.action, /^(no_target|useful_skipped_no_real_model|useful_unfranchised|no_useful_target)$/);
     assert.equal(client.posts.length, 0);
   });
 
@@ -347,14 +349,18 @@ describe('KibbleEngine validator turn', () => {
     const validatorIdentity = generateIdentity();
     const client = makeClient({
       roomMessages: [
-        jobLine('k000000000g'),
-        { text: "DELIVER v1 | k000000000g | Completed work on 'Test title' successfully.", from: workerIdentity.did, seq: 2 }
+        jobLine('k000000000e'),
+        { text: "DELIVER v1 | k000000000e | Completed work on 'Test title' successfully.", from: workerIdentity.did, seq: 2 }
       ]
     });
     const engine = new KibbleEngine({ workerIdentity, validatorIdentity, client });
 
+    // The fixture used to say `k000000000g`. `g` is not hex, so the line never
+    // parsed, nothing was ever found, and "found nothing" read as "correctly
+    // refused" — while the exclusion it claimed to prove did not exist at all.
+    // What matters is the post count: our two keys never judge each other.
     const result = await engine.runValidatorTurn();
-    assert.equal(result.action, 'no_target');
-    assert.equal(client.posts.length, 0);
+    assert.doesNotMatch(result.action, /^attested/);
+    assert.equal(client.posts.length, 0, 'Scribe must never attest Scout, and did not');
   });
 });

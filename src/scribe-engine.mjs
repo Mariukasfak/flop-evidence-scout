@@ -7,9 +7,25 @@ import { sayOnce } from './log-once.mjs';
 /** What a testnet faucet room would plausibly be called when it appears. */
 export const FAUCET_PATTERNS = [/faucet/i, /testnet/i, /\bdrip\b/i, /\btap\b/i];
 
+/**
+ * Words that mark a room as market commentary rather than an actual faucet,
+ * even when its name also matches FAUCET_PATTERNS.
+ *
+ * Measured on the live tape 2026-08-31: `flop-aave-v4-testnet-goes-live-flz9`
+ * and `flop-testnet-faucet-inference-spend-a-xoum` both tripped the detector
+ * twice, and both were rooms discussing news about a DIFFERENT protocol or
+ * spend commentary, not FLOP distributing anything. No official FLOP faucet
+ * exists as of this writing — a room name is a string a stranger typed, and
+ * these are the shape strangers type when the news is about someone else's
+ * testnet or someone else's token unlock.
+ */
+const FAUCET_NOISE_PATTERNS = [/aave/i, /v\d+/i, /goes-live/i, /spend/i, /unlock/i, /funding/i];
+
 export function looksLikeFaucet(value) {
   const text = String(value || '');
-  return FAUCET_PATTERNS.some((re) => re.test(text));
+  if (!FAUCET_PATTERNS.some((re) => re.test(text))) return false;
+  if (FAUCET_NOISE_PATTERNS.some((re) => re.test(text))) return false;
+  return true;
 }
 
 /**

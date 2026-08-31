@@ -1,9 +1,12 @@
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 
+import crypto from 'node:crypto';
+
 import {
-  parseKibbleLine, reconstructBoard, pickJob, pickThinDelivery,
-  isThinDelivery, sameDid, claimLine, resultLine, attestNotLine
+  parseKibbleLine, reconstructBoard, pickJob, pickThinDelivery, pickRealDelivery,
+  isThinDelivery, sameDid, claimLine, resultLine, attestNotLine,
+  attestUsefulLine, resultHashFor
 } from '../src/kibble.mjs';
 
 /**
@@ -193,5 +196,103 @@ describe('the lines we write', () => {
   test('claim and attest lines carry the schema the scorer parses', () => {
     assert.equal(claimLine('k0000000014'), 'CLAIM v1 | k0000000014 | worker');
     assert.equal(attestNotLine('k0000000015', 'names no specifics'), 'ATTEST v1 | k0000000015 | not | names no specifics');
+  });
+});
+
+
+describe('binding a useful attestation to what was actually delivered', () => {
+  test('the hash is sha256 of the delivery text, first 16 hex', () => {
+    // Recovered from the tape, not guessed: across 201 real (delivery, rh:)
+    // pairs in the room's own export this reproduced the published hash 195
+    // times. The spec says to read it from /api/board; that endpoint returned
+    // nothing in 90s and again in 45s, so deriving it is the only lane open.
+    const text = 'SQLite embeds the engine in your process; MySQL runs as a server.';
+    const expected = crypto.createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16);
+    assert.equal(resultHashFor(text), expected);
+    assert.equal(resultHashFor(text).length, 16);
+  });
+
+  test('a useful attestation without a real hash is refused, not fudged', () => {
+    // An unbound "useful" is the rubber stamp the board says it ignores.
+    assert.throws(() => attestUsefulLine('k000000000a', '', 'because'), /16-hex/);
+    assert.throws(() => attestUsefulLine('k000000000a', 'nothex', 'because'), /16-hex/);
+    assert.throws(() => attestUsefulLine('k000000000a', 'abc123', 'because'), /16-hex/);
+  });
+
+  test('a bound useful attestation carries the hash the scorer looks for', () => {
+    const hash = resultHashFor('a real answer');
+    const line = attestUsefulLine('k000000000a', hash, 'It names the specific tradeoff and its consequence.');
+    assert.match(line, /^ATTEST v1 \| k000000000a \| useful \| rh:[0-9a-f]{16} \| /);
+
+    // And it parses back to the same hash — the round trip a reader would do.
+    assert.equal(parseKibbleLine(line).resultHash, hash);
+    assert.equal(parseKibbleLine(line).verdict, 'useful');
+  });
+});
+
+describe('choosing a delivery worth judging', () => {
+  const OTHER2 = 'did:key:z6MkSomebodyElseEntirely00000000000000000000';
+  const real = 'Floodsub re-broadcasts every message to every peer it knows, so liveness is '
+    + 'bounded by fan-out rather than by routing, and the cost is duplicate traffic.';
+
+  test('skips the templates and finds the delivery with real content', () => {
+    const jobs = reconstructBoard([
+      { text: 'JOB v1 | k000000001a | explain | T | Explain the tradeoff between A and B in detail.', from: OTHER, seq: 1 },
+      { text: `DELIVER v1 | k000000001a | ${real}`, from: OTHER2, seq: 2 },
+      { text: 'JOB v1 | k000000001b | explain | T | Explain the tradeoff between A and B in detail.', from: OTHER, seq: 3 },
+      { text: 'DELIVER v1 | k000000001b | Completed work on T successfully.', from: OTHER2, seq: 4 }
+    ]);
+    const found = pickRealDelivery(jobs, { selfDid: SELF });
+    assert.equal(found.job.jobId, 'k000000001a');
+  });
+
+  test('never judges our own delivery, however good it is', () => {
+    const jobs = reconstructBoard([
+      { text: 'JOB v1 | k000000001c | explain | T | Explain the tradeoff between A and B in detail.', from: OTHER, seq: 1 },
+      { text: `DELIVER v1 | k000000001c | ${real}`, from: SELF, seq: 2 }
+    ]);
+    assert.equal(pickRealDelivery(jobs, { selfDid: SELF }), null);
+  });
+
+  test('never judges an answer to a question we never read', () => {
+    const jobs = reconstructBoard([
+      { text: `DELIVER v1 | k000000001d | ${real}`, from: OTHER2, seq: 2 }
+    ]);
+    assert.equal(pickRealDelivery(jobs, { selfDid: SELF }), null);
+  });
+});
+
+
+describe('two keys, one machine', () => {
+  // This agent signs with two identities so the spec's three-party rule holds.
+  // That only works if each lane knows about both: a validator excluding only
+  // its own DID happily attests its own worker's delivery, which is
+  // self-dealing between keys held in the same folder. The hole was real and
+  // its test was vacuous; these are the tests that actually close it.
+  const WORKER = 'did:key:z6MkWorkerAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+  const OUTSIDER = 'did:key:z6MkOutsiderDDDDDDDDDDDDDDDDDDDDDDDDDDDDD';
+  const realAnswer = 'Floodsub re-broadcasts to every known peer, so liveness is bounded by '
+    + 'fan-out rather than routing, and the price is duplicate traffic on every hop.';
+
+  const boardWith = (from, summary) => reconstructBoard([
+    { text: 'JOB v1 | k00000000ab | explain | T | Explain the tradeoff between A and B in detail.', from: OUTSIDER, seq: 1 },
+    { text: `DELIVER v1 | k00000000ab | ${summary}`, from, seq: 2 }
+  ]);
+
+  test('the thin lane will not call out our own worker', () => {
+    const jobs = boardWith(WORKER, 'Completed work on T successfully.');
+    assert.ok(pickThinDelivery(jobs, { selfDid: SELF }), 'a stranger would be fair game');
+    assert.equal(pickThinDelivery(jobs, { selfDid: SELF, excludeDids: [WORKER] }), null);
+  });
+
+  test('the useful lane will not praise our own worker', () => {
+    const jobs = boardWith(WORKER, realAnswer);
+    assert.ok(pickRealDelivery(jobs, { selfDid: SELF }));
+    assert.equal(pickRealDelivery(jobs, { selfDid: SELF, excludeDids: [WORKER] }), null);
+  });
+
+  test('a delivery from an outsider is still judged normally', () => {
+    const jobs = boardWith(OUTSIDER, realAnswer);
+    assert.ok(pickRealDelivery(jobs, { selfDid: SELF, excludeDids: [WORKER] }));
   });
 });

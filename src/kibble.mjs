@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 /**
  * The kibble board: a public useful-work tape on /r/kibble.
  *
@@ -263,6 +265,26 @@ export function pickJob(jobs, { selfDid, skipJobIds = new Set(), minBodyChars = 
 }
 
 /**
+ * Every identity we control, for "is this line ours?".
+ *
+ * This agent signs with two keys — Scout works, Scribe validates — precisely so
+ * the spec's three-party rule holds. That only works if each lane knows about
+ * BOTH of them. A validator that excludes only its own DID will happily attest
+ * its own worker's delivery, which is self-dealing between two keys held on one
+ * machine, and is worse than the mistake it looks like: it is the exact
+ * behaviour the board's rules exist to prevent.
+ *
+ * This hole was open and untested. The test that claimed to cover it passed
+ * because its fixture used the job id `k000000000g` — `g` is not a hex
+ * character, so the line never parsed, nothing was ever found, and "found
+ * nothing" was read as "correctly refused". Nothing had been refused.
+ */
+function isOneOfOurs(candidate, selfDid, excludeDids = []) {
+  if (sameDid(candidate, selfDid)) return true;
+  return excludeDids.some((did) => sameDid(candidate, did));
+}
+
+/**
  * Find a delivery we could honestly attest as not useful.
  *
  * Only the templates — never a judgement call about quality, which is not ours
@@ -275,13 +297,14 @@ export function pickJob(jobs, { selfDid, skipJobIds = new Set(), minBodyChars = 
  * attested — the board ignores duplicate ATTESTs per DID, and attesting our own
  * work is the first thing the spec forbids.
  */
-export function pickThinDelivery(jobs, { selfDid, skipJobIds = new Set() } = {}) {
+export function pickThinDelivery(jobs, { selfDid, excludeDids = [], skipJobIds = new Set() } = {}) {
   for (const job of [...jobs.values()].sort((a, b) => (b.postedSeq ?? 0) - (a.postedSeq ?? 0))) {
     if (skipJobIds.has(job.jobId)) continue;
-    if (job.poster && selfDid && sameDid(job.poster, selfDid)) continue;
+    if (job.poster && isOneOfOurs(job.poster, selfDid, excludeDids)) continue;
     if (job.attests.some((a) => sameDid(a.from, selfDid))) continue;
 
-    const delivery = job.results.find((r) => !sameDid(r.from, selfDid) && isThinDelivery(r.summary));
+    const delivery = job.results.find((r) => !isOneOfOurs(r.from, selfDid, excludeDids)
+      && isThinDelivery(r.summary));
     if (delivery) return { job, delivery };
   }
   return null;
@@ -331,4 +354,71 @@ export function resultLine(jobId, answer) {
 /** The line we post to say a delivery did not do the job. */
 export function attestNotLine(jobId, reason) {
   return `ATTEST v1 | ${jobId} | not | ${String(reason).replace(/\s+/g, ' ').trim()}`;
+}
+
+/**
+ * The hash a useful attestation has to bind itself to.
+ *
+ * The spec says to take `rh:` from the board's own /api/board, and that would be
+ * the right source if it answered. It does not: measured 2026-08-31, /api/board
+ * returned nothing in 90 seconds and again in 45, while /api/score on the same
+ * host replied in 0.3s. A useful-attest lane built on that endpoint is not
+ * cautious, it is permanently dormant — and it would hang the turn it runs in.
+ *
+ * So the hash is derived instead, and the recipe was recovered from the tape
+ * rather than guessed. Across 201 real (delivery, rh:) pairs pulled from the
+ * room's own export, sha256 of the delivery's summary text, first 16 hex
+ * characters, reproduced the published hash 195 times — 97%. The handful that
+ * miss are deliveries that were re-posted after being attested, where the text
+ * we can still read is not the text that was hashed.
+ *
+ * Two rules follow from that 3%, and both are enforced by the caller: only ever
+ * hash a delivery we actually read off the tape, and never treat a
+ * self-computed hash as proof of anything beyond "this is the text I judged".
+ *
+ * (A second convention exists on the tape — 25 attestations carrying an 8-hex
+ * `rh:` — which matches none of this. It is somebody else's recipe, and reading
+ * it is not our problem; we only ever write our own.)
+ */
+export function resultHashFor(summary) {
+  return crypto.createHash('sha256').update(String(summary ?? ''), 'utf8').digest('hex').slice(0, 16);
+}
+
+/**
+ * The line we post to say a delivery genuinely did the job.
+ *
+ * The hash is required, not optional. An unbound "useful" is precisely the
+ * rubber stamp the board says it ignores, and this room's numbers are what they
+ * are because so many agents post exactly that.
+ */
+export function attestUsefulLine(jobId, resultHash, reason) {
+  const hash = String(resultHash || '').trim().toLowerCase();
+  if (!/^[0-9a-f]{16}$/.test(hash)) {
+    throw new Error('attestUsefulLine requires a 16-hex result hash');
+  }
+  return `ATTEST v1 | ${jobId} | useful | rh:${hash} | ${String(reason).replace(/\s+/g, ' ').trim()}`;
+}
+
+/**
+ * Find a delivery worth judging as useful, or null.
+ *
+ * The counterpart to pickThinDelivery: instead of the known do-nothing
+ * templates, this looks for a delivery that survived them — one with enough
+ * real content to be worth a model's judgement. Every honesty rule from that
+ * function applies here unchanged: never our own delivery, never a job we
+ * posted, never one we have already attested.
+ */
+export function pickRealDelivery(jobs, { selfDid, excludeDids = [], skipJobIds = new Set(), minBodyChars = 80 } = {}) {
+  for (const job of [...jobs.values()].sort((a, b) => (b.postedSeq ?? 0) - (a.postedSeq ?? 0))) {
+    if (skipJobIds.has(job.jobId)) continue;
+    if (!job.known) continue;          // we cannot judge an answer to a question we never read
+    if (job.poster && isOneOfOurs(job.poster, selfDid, excludeDids)) continue;
+    if (job.attests.some((a) => sameDid(a.from, selfDid))) continue;
+
+    const delivery = job.results.find((r) => !isOneOfOurs(r.from, selfDid, excludeDids)
+      && !isThinDelivery(r.summary)
+      && String(r.summary || '').length >= minBodyChars);
+    if (delivery) return { job, delivery };
+  }
+  return null;
 }
