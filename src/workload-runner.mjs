@@ -72,9 +72,10 @@ async function pool(jobs, limit, worker) {
 export const TASK_PRIORITY = Object.freeze({
   'summarise-source-change': 1,   // a protocol change decays fastest
   'draft-answer': 2,              // someone is waiting
-  'extract-claims': 3,
-  'explain-measurement': 4,
-  'classify-message': 5           // useful, endless, and the natural filler
+  'kibble-answer': 3,             // we claimed it publicly; an undelivered claim is worse than none
+  'extract-claims': 4,
+  'explain-measurement': 5,
+  'classify-message': 6           // useful, endless, and the natural filler
 });
 
 export function prioritise(plan) {

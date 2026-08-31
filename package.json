@@ -23,7 +23,8 @@
     "freshness": "node tools/check-freshness.mjs",
     "hardware-model": "node tools/hardware-model.mjs",
     "verify-collab": "node tools/verify-collab.mjs",
-    "x-preview": "node tools/x-preview.mjs"
+    "x-preview": "node tools/x-preview.mjs",
+    "kibble-preview": "node tools/kibble-preview.mjs"
   },
   "keywords": [
     "flop-network",
