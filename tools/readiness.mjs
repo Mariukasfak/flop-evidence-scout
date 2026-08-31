@@ -32,6 +32,21 @@ const OUT = path.resolve('docs/readiness.json');
 const READY = 'READY';
 const ACTION = 'ACTION';
 const BLOCKED = 'BLOCKED';
+/**
+ * A fourth state, because "we could not look" is not one of the other three.
+ *
+ * BLOCKED means Flop Labs has not published the thing and no amount of work
+ * here changes that. A 503 is nothing like it: the answer exists, the server
+ * would not hand it over this minute, and the next run will probably see it.
+ * Filing those together made a bad morning on someone else's server read as
+ * five product decisions we were waiting on; filing them under ACTION, which is
+ * where they were before, read as five faults of ours.
+ *
+ * Neither is true, and both are the same mistake this repository has now made
+ * in five different files: reporting the absence of an observation as an
+ * observation of absence.
+ */
+const UNREACHABLE = 'UNREACHABLE';
 
 /**
  * Retry what is worth retrying, because this report is read as a verdict.
@@ -79,12 +94,17 @@ async function main() {
   for (const [name, identity] of [['Scout', scout], ['Scribe', scribe]]) {
     const { fullPath } = getDidShardedPath(identity.did);
     const profile = await get(fullPath);
+    // A 5xx or no answer at all means we did not get to look. The note is
+    // either there or it is not, and this reading cannot tell us which.
+    const serverSilent = !profile.ok && (profile.status === 0 || profile.status >= 500);
     record(
       `did-${name.toLowerCase()}`,
       `${name} identity published`,
-      profile.ok && profile.text.includes('did:') ? READY : ACTION,
+      profile.ok && profile.text.includes('did:') ? READY : (serverSilent ? UNREACHABLE : ACTION),
       profile.ok ? `${fullPath} resolves` : `${fullPath} → ${profile.status || profile.text}`,
-      'Run the daemon once so it republishes its DID note.'
+      serverSilent
+        ? 'Nothing to do: the server would not answer, so the note was never checked.'
+        : 'Run the daemon once so it republishes its DID note.'
     );
   }
 
@@ -112,13 +132,27 @@ async function main() {
   const stateNote = await new (await import('../src/technocore-client.mjs')).TechnocoreClient({ baseUrl: BASE })
     .readNote('scout', stateKey);
   const stateBytes = stateNote.reachable && stateNote.found ? String(stateNote.value).length : 0;
+
+  /**
+   * A note we could not read is not a note that is missing.
+   *
+   * On 2026-08-31 Technocore answered 43 of 69 probes with a 503, and three
+   * checks on this board turned amber and said "ours to fix" — the state note,
+   * the state history and the room ownership. None of them was ours. A board
+   * that blames the operator for someone else's outage is the same board that
+   * gets skimmed, and this project has already paid for that once.
+   */
   record(
     'state-size',
     'State note fits the server limit',
-    stateBytes > 0 && stateBytes < NOTE_CAP * 0.9 ? READY : ACTION,
-    stateBytes === 0 ? 'no state note readable' : `${stateBytes} of ${NOTE_CAP} characters`,
-    'answeredAuthors is pruned by cooldown age on every save. If this is near the cap, '
-    + 'something else in the state is growing without bound.'
+    !stateNote.reachable ? UNREACHABLE : (stateBytes > 0 && stateBytes < NOTE_CAP * 0.9 ? READY : ACTION),
+    !stateNote.reachable
+      ? `could not be read — the server returned ${stateNote.error || 'no answer'}`
+      : stateBytes === 0 ? 'no state note readable' : `${stateBytes} of ${NOTE_CAP} characters`,
+    !stateNote.reachable
+      ? 'Nothing to do here: this says the server is unwell, not that the note is wrong.'
+      : 'answeredAuthors is pruned by cooldown age on every save. If this is near the cap, '
+        + 'something else in the state is growing without bound.'
   );
 
   /**
@@ -166,7 +200,8 @@ async function main() {
         : external.length > 0
           ? 'Collaboration with an outside agent is on record'
           : 'Collaboration on record — but only between our own two keys',
-      !reachable ? ACTION : (collab?.mutual && external.length > 0 ? READY : ACTION),
+      // Unreachable is the server's problem, not a gap in our record.
+      !reachable ? UNREACHABLE : (collab?.mutual && external.length > 0 ? READY : ACTION),
       !reachable
         ? 'Technocore unreachable — nothing checked'
         : `${collab.verified} verified, ${collab.rejected} rejected; `
@@ -181,16 +216,22 @@ async function main() {
           + 'An exchange with an agent we do not control is the thing this check is waiting for.'
     );
   } catch (err) {
-    record('collaboration', 'Agent collaboration is on record', ACTION, `could not be read: ${err.message}`,
+    record('collaboration', 'Collaboration record could not be read', UNREACHABLE, `could not be read: ${err.message}`,
       'Run tools/verify-collab.mjs to see the record directly.');
   }
 
+  // Same note, same outage: an unreadable note says nothing about the history
+  // it holds, so an unreachable server is BLOCKED here too, not ACTION.
   record(
     'state-persistence',
     'State survives restarts',
-    Number(turns) > 1 ? READY : ACTION,
-    turns == null ? 'no readable state note yet' : `${turns} turns recorded on the server`,
-    'The daemon must complete at least two turns and write state to /kv/.'
+    !stateNote.reachable ? UNREACHABLE : (Number(turns) > 1 ? READY : ACTION),
+    !stateNote.reachable
+      ? `could not be read — the server returned ${stateNote.error || 'no answer'}`
+      : turns == null ? 'no readable state note yet' : `${turns} turns recorded on the server`,
+    !stateNote.reachable
+      ? 'Nothing to do here: the history is in a note the server would not hand over.'
+      : 'The daemon must complete at least two turns and write state to /kv/.'
   );
 
   // ------------------------------------------------------------------- rooms
@@ -216,7 +257,7 @@ async function main() {
     record(
       `room-${room}`,
       `Room /r/${room}`,
-      exists && claimed ? READY : (unreachable ? BLOCKED : ACTION),
+      exists && claimed ? READY : (unreachable ? UNREACHABLE : ACTION),
       detail,
       unreachable
         ? 'Technocore was unreachable. Re-run when it answers; nothing here is ours to fix.'
@@ -436,11 +477,24 @@ async function main() {
 
   console.log('\n=== FAUCET-DAY READINESS ===\n');
   for (const c of checks) {
-    const mark = c.state === READY ? ' OK ' : c.state === ACTION ? 'TODO' : 'WAIT';
+    // Four marks, because the summary line counts four things and a table that
+    // prints two of them identically is a table you have to cross-reference.
+    const mark = c.state === READY ? ' OK '
+      : c.state === ACTION ? 'TODO'
+        : c.state === UNREACHABLE ? ' ?? '
+          : 'WAIT';
     console.log(`  [${mark}] ${c.label.padEnd(width)}  ${c.detail}`);
   }
 
-  console.log(`\n  ${byState(READY).length} ready · ${byState(ACTION).length} ours to fix · ${byState(BLOCKED).length} waiting on Flop Labs\n`);
+  const unchecked = byState(UNREACHABLE).length;
+  console.log(`\n  ${byState(READY).length} ready · ${byState(ACTION).length} ours to fix · `
+    + `${byState(BLOCKED).length} waiting on Flop Labs`
+    + (unchecked ? ` · ${unchecked} not checkable right now (server)` : '') + '\n');
+
+  if (unchecked) {
+    console.log('COULD NOT BE CHECKED — the server would not answer\n');
+    for (const c of byState(UNREACHABLE)) console.log(`  ${c.label}\n    → ${c.detail}\n`);
+  }
 
   if (byState(ACTION).length) {
     console.log('OURS TO FIX\n');
@@ -454,7 +508,12 @@ async function main() {
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
   fs.writeFileSync(OUT, JSON.stringify({
     checkedAt: new Date().toISOString(),
-    summary: { ready: byState(READY).length, action: byState(ACTION).length, blocked: byState(BLOCKED).length },
+    summary: {
+      ready: byState(READY).length,
+      action: byState(ACTION).length,
+      blocked: byState(BLOCKED).length,
+      unreachable: byState(UNREACHABLE).length
+    },
     checks,
     note: 'Every READY is verified against the live service or a file read at check time. '
       + 'BLOCKED means waiting on Flop Labs, not deferred by us.'
