@@ -1,6 +1,6 @@
 # FLOP Evidence Scout — pilna dokumentacija
 
-**Būklė:** 2026-08-30 · 270 testai · CI žalias · agentas veikia
+**Būklė:** 2026-08-31 · 276 testai · CI žalias · agentas veikia
 
 > Testų skaičius čia sensta. Tikras skaičius visada: `npm test`.
 **Repo:** github.com/Mariukasfak/flop-evidence-scout (**viešas**)
@@ -272,6 +272,50 @@ sistema nematė. Kiekvienas patikrintas iš pirminio šaltinio prieš taisant.
 
 **Ko auditas neįvertino:** tuo pat metu vyko darbas, todėl jo matytas
 testų skaičius (265) ir readiness (12 ready) buvo trumpam pasenę.
+
+---
+
+## 7c. 2026-08-31: Technocore 0.11.0 ir serverio bėdos
+
+### Kas naujo serveryje
+
+| | Buvo | Dabar |
+|---|---|---|
+| Versija | 0.10.0 | **0.11.0** |
+| API keliai | 26 | **28** |
+| DID | 892 136 | **1 128 066** |
+
+Du nauji keliai: `/.well-known/mcp/server-card.json` ir **`/r/<room>/export`** —
+visas išsaugotas kambario žiedas viena užklausa.
+
+**Faucet / session / claim kelio vis dar nėra.** Tai, ko laukiame, nepasirodė.
+
+### Trys taisyklės, kurios pasikeitė
+
+1. **`limit` ribojamas 1..200.** Skaitėme po 25. Išmatavau: 25 → 8 746 baitai,
+   200 → 67 718 baitų, **tas pats laikas**. Lobby rašo ~3 100 žin./min, ciklas
+   ~40 s — matėme apie 1% to, kas vyko. Dabar skaitome 200.
+2. **`if_absent` kartu su `if=` dabar atmetamas (400).** Anksčiau serveris tyliai
+   numesdavo `if=` ir atsakydavo „ok" — t. y. įrašydavo tai, ko neprašėte.
+   Mes taip niekada nesiuntėme; pridėjau apsaugą, kad taip ir liktų.
+3. Kambario išsaugojimo garantija dabar aprašyta kaip **64 KiB** minimumas.
+
+### Serveris šiandien blogos būklės
+
+69 bandymai kas 2 s: **43 × 503, 5 nutrūkę, 21 × 200 — pavyksta 30%.**
+Nesėkmės eina serijomis iki ~45 s.
+
+Todėl per naktį agentas be reikalo stovėjo **224 ciklus iš 579 (39%)**.
+Pataisyta: jei nuoma jau mūsų ir laiko dar daug, dirbame toliau — serverio
+mirktelėjimas nereiškia, kad nuoma pasibaigė. Arti pabaigos vis tiek
+sustojame, nes du rašytojai vienu metu yra būtent tai, ko vengiame.
+
+### Ko sąmoningai NEDARIAU
+
+`/r/<room>/export` skamba patraukliai, bet **neišsprendžia mūsų problemos.**
+Praleistos žinutės jau iškritusios iš žiedo; eksportas grąžina tik tai, kas
+dar saugoma. Kainuoja ~850 KB ir iki 40 s vienam kambariui. `limit=200`
+duoda 8 kartus daugiau nemokamai — to ir pakanka.
 
 ---
 
