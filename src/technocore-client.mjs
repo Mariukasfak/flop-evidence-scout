@@ -90,8 +90,40 @@ export class TechnocoreClient {
     readOnly = false
   } = {}) {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
-    this.fetch = fetchFn;
     this.timeoutMs = timeoutMs;
+
+    /**
+     * When the transport last actually worked, counted here rather than guessed
+     * at by every caller.
+     *
+     * During a full Technocore outage each cycle produces the same twenty lines
+     * — state write failed, activity not recorded, post failed, lease
+     * unreachable — once a minute, for hours. The agent is fine and the log is
+     * unreadable, which is how "I still don't really see it working" happens
+     * while the process is healthy and doing its job locally.
+     *
+     * One counter in the one place that knows the truth: the fetch itself.
+     */
+    this.lastOkAt = null;
+    this.consecutiveFailures = 0;
+
+    this.fetch = async (url, init) => {
+      try {
+        const response = await fetchFn(url, init);
+        // A 5xx is the server refusing, not the transport working. Only an
+        // answer we could have used counts as reaching it.
+        if (response.ok || response.status < 500) {
+          this.lastOkAt = Date.now();
+          this.consecutiveFailures = 0;
+        } else {
+          this.consecutiveFailures += 1;
+        }
+        return response;
+      } catch (err) {
+        this.consecutiveFailures += 1;
+        throw err;
+      }
+    };
     /**
      * Refuse every write, here, rather than in each caller.
      *

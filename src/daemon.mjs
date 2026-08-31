@@ -454,6 +454,9 @@ export async function runScoutDaemon(options = {}) {
    * wiped the whole history — seven restarts in one day of audit log, each one
    * quietly re-doing everything the next room read returned.
    */
+  /** When the current outage was last announced, so it is said once, not every minute. */
+  let outageAnnouncedAt = null;
+
   /** Tracks the backend across cycles so a downgrade is announced once, not endlessly. */
   let lastBackendWasReal = null;
   const seenWorkPath = path.join(config.dataDir, 'seen-work.json');
@@ -793,7 +796,48 @@ export async function runScoutDaemon(options = {}) {
      */
     const MIN_GAP_MS = 5_000;
     const elapsed = Date.now() - cycleTop;
-    await new Promise((resolve) => setTimeout(resolve, Math.max(MIN_GAP_MS, config.intervalMs - elapsed)));
+
+    /**
+     * Stand off a server that is properly down, and say so once.
+     *
+     * This is different from the flapping the lease already survives. On
+     * 2026-08-31 Technocore returned 503 to everything including its own front
+     * page, for hours. Each cycle then produced the same twenty failure lines a
+     * minute — state write failed, activity not recorded, post failed — and
+     * twenty pointless requests with them. The agent was healthy the whole time
+     * and its log said nothing but "broken", which is exactly how a working
+     * agent comes to look like a dead one.
+     *
+     * So: after three cycles in which nothing reached the server, slow down to
+     * at most five minutes and print one line instead of the flood. Any answer
+     * at all resets it immediately — the next cycle runs in full, so a recovery
+     * is noticed by working, not by a separate probe.
+     *
+     * Capped below the lease TTL on purpose: backing off past our own renewal
+     * window would hand the lease away while we sat quiet.
+     */
+    const OUTAGE_CYCLES = 3;
+    const OUTAGE_MAX_GAP_MS = 5 * 60_000;
+    let gapMs = Math.max(MIN_GAP_MS, config.intervalMs - elapsed);
+
+    const downFor = client.lastOkAt ? Date.now() - client.lastOkAt : null;
+    if (client.consecutiveFailures >= OUTAGE_CYCLES && downFor !== null) {
+      gapMs = Math.min(OUTAGE_MAX_GAP_MS, Math.max(gapMs, config.intervalMs * 3));
+      if (!outageAnnouncedAt || Date.now() - outageAnnouncedAt > 10 * 60_000) {
+        outageAnnouncedAt = Date.now();
+        const mins = Math.round(downFor / 60_000);
+        console.log(`[Outage] Technocore has answered nothing for ${mins} min. `
+          + `Backing off to ${Math.round(gapMs / 1000)}s between cycles. `
+          + 'The agent is fine; there is nothing here to fix.');
+        appendAudit(config.auditLogPath, { event: 'outage', downMin: mins, gapMs });
+      }
+    } else if (outageAnnouncedAt && client.consecutiveFailures === 0) {
+      outageAnnouncedAt = null;
+      console.log('[Outage] Technocore is answering again.');
+      appendAudit(config.auditLogPath, { event: 'outage_over' });
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, gapMs));
   } while (running);
 
   // Hand the lease back rather than making the other machine wait out the TTL.

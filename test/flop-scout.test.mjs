@@ -1179,3 +1179,50 @@ describe('reading, at the size the server actually allows', () => {
     assert.doesNotThrow(() => { client.setKv('ns', 'k', 'v', { ifValue: 'x' }).catch(() => {}); });
   });
 });
+
+/**
+ * The transport is the only thing that knows whether the server answered.
+ *
+ * Every caller was guessing from its own error string, which is why a total
+ * outage produced twenty different "broken" lines a minute and no single line
+ * saying the one true thing: Technocore is down, the agent is fine.
+ */
+describe('knowing whether the server is actually there', () => {
+  const res = (status) => ({ ok: status < 400, status, text: async () => '', json: async () => ({}) });
+
+  test('a 5xx counts as not reaching the server', async () => {
+    const client = new TechnocoreClient({ baseUrl: 'https://x.invalid', fetchFn: async () => res(503) });
+    await client.fetch('https://x.invalid/r/lobby').catch(() => {});
+    await client.fetch('https://x.invalid/r/lobby').catch(() => {});
+    assert.equal(client.consecutiveFailures, 2);
+    assert.equal(client.lastOkAt, null, 'never once got through');
+  });
+
+  test('a 404 is an answer, not an outage', async () => {
+    const client = new TechnocoreClient({ baseUrl: 'https://x.invalid', fetchFn: async () => res(404) });
+    await client.fetch('https://x.invalid/kv/nope').catch(() => {});
+    assert.equal(client.consecutiveFailures, 0, 'the server told us something');
+    assert.ok(client.lastOkAt, 'and that counts as reachable');
+  });
+
+  test('one good answer clears the streak', async () => {
+    let status = 503;
+    const client = new TechnocoreClient({ baseUrl: 'https://x.invalid', fetchFn: async () => res(status) });
+    await client.fetch('https://x.invalid/r/lobby').catch(() => {});
+    await client.fetch('https://x.invalid/r/lobby').catch(() => {});
+    assert.equal(client.consecutiveFailures, 2);
+
+    status = 200;
+    await client.fetch('https://x.invalid/r/lobby');
+    assert.equal(client.consecutiveFailures, 0);
+  });
+
+  test('a transport failure counts too', async () => {
+    const client = new TechnocoreClient({
+      baseUrl: 'https://x.invalid',
+      fetchFn: async () => { throw new Error('This operation was aborted'); }
+    });
+    await assert.rejects(() => client.fetch('https://x.invalid/r/lobby'));
+    assert.equal(client.consecutiveFailures, 1);
+  });
+});
