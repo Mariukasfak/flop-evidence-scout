@@ -1,5 +1,5 @@
 {
-  "at": "2026-08-31T20:05:50.239Z",
-  "ok": false,
-  "reason": "GET /.well-known/agent.json -> HTTP 503"
+  "at": "2026-08-31T23:53:08.684Z",
+  "ok": true,
+  "reason": null
 }
