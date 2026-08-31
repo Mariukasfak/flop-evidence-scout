@@ -377,8 +377,38 @@ export async function runScoutDaemon(options = {}) {
    *
    * Disable with --no-lease for a single-writer setup.
    */
-  // Named once so the lease and the shared activity record agree on who we are.
-  const holderId = makeHolderId(process.env.LEASE_HOLDER || (process.env.CI === 'true' ? 'github' : 'local'));
+  /**
+   * The same holder id across restarts on this machine, remembered on disk.
+   *
+   * The id carries a random suffix so that two processes running at once are two
+   * writers — that part is essential and unchanged. But a process that dies and
+   * is restarted by the launcher is not a second writer; it is the same one,
+   * back. With a fresh id it could not recognise its own abandoned lease, so it
+   * stood down for the full TTL every time — and after the TTL was widened to
+   * survive outages, that meant up to eight minutes of doing nothing after each
+   * crash. Restarting every ten minutes, that is most of the agent's life.
+   *
+   * Reusing the id is safe precisely because the lease is a compare-and-set: if
+   * an older process with this id were somehow still alive and renewing, our
+   * write would still be ordered by the server, and only one of us can hold the
+   * value at a time. What changes is only that we can now tell "this lease is
+   * mine, I just restarted" from "somebody else is working".
+   */
+  const holderLabel = process.env.LEASE_HOLDER || (process.env.CI === 'true' ? 'github' : 'local');
+  const holderIdPath = path.join(config.dataDir, 'lease-holder-id');
+  let holderId;
+  try {
+    const remembered = fs.readFileSync(holderIdPath, 'utf8').trim();
+    // Only reuse an id that still belongs to this role; a machine that switched
+    // from local to github must not inherit the other one's identity.
+    holderId = remembered.startsWith(`${holderLabel}-`) ? remembered : makeHolderId(holderLabel);
+  } catch {
+    holderId = makeHolderId(holderLabel);
+  }
+  try {
+    fs.mkdirSync(path.dirname(holderIdPath), { recursive: true });
+    fs.writeFileSync(holderIdPath, holderId, 'utf8');
+  } catch { /* a forgotten id costs one standdown, not correctness */ }
 
   /**
    * The lease only has to outlive a missed renewal, not a coffee break.
@@ -783,8 +813,35 @@ export async function runScoutDaemon(options = {}) {
 
 const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
 if (isDirectRun) {
-  runScoutDaemon().catch((err) => {
-    console.error('Fatal error:', err);
+  /**
+   * A crash that says nothing is a crash you cannot fix.
+   *
+   * On 2026-08-31 the daemon died roughly every ten minutes and the launcher
+   * restarted it, so from outside it looked like an agent that "does not really
+   * work". The audit log had a `startup` for each life and NO `shutdown` and NO
+   * `error` — the process was not exiting through any path this file knows
+   * about, which is exactly the shape of an uncaught exception or a rejected
+   * promise nobody awaited. Neither leaves a trace here by default, and the
+   * console output scrolls away in a window nobody is watching at 03:00.
+   *
+   * Memory was 230 MB, so it was not the machine running out of anything.
+   *
+   * These two handlers do not fix the crash. They make the next one name
+   * itself, in the same log every other finding in this project came from.
+   */
+  const recordFatal = (kind) => (err) => {
+    const detail = err instanceof Error ? `${err.message}
+${err.stack}` : String(err);
+    console.error(`Fatal (${kind}):`, detail);
+    try {
+      const { auditLogPath } = deriveFrom(parseArgs(process.argv));
+      appendAudit(auditLogPath, { event: 'fatal', kind, error: detail.slice(0, 2000) });
+    } catch { /* if even this fails, the console line above is what is left */ }
     process.exit(1);
-  });
+  };
+
+  process.on('uncaughtException', recordFatal('uncaughtException'));
+  process.on('unhandledRejection', recordFatal('unhandledRejection'));
+
+  runScoutDaemon().catch(recordFatal('fatal'));
 }
