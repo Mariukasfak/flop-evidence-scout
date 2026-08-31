@@ -48,6 +48,36 @@ function tailLines(file, bytes = 400_000) {
   return buf.toString('utf8').split('\n').filter(Boolean);
 }
 
+/**
+ * Count matching lines across the whole log, without holding it in memory.
+ *
+ * The audit is 7 MB and grows every minute. Reading it whole to answer "how
+ * many times has this happened" would make the tool slower the longer the agent
+ * has been healthy; reading only the tail makes it wrong. Streaming is neither.
+ */
+function countActions(file, patterns) {
+  const counts = Object.fromEntries(Object.keys(patterns).map((k) => [k, 0]));
+  const fd = fs.openSync(file, 'r');
+  const buf = Buffer.alloc(1 << 20);
+  let carry = '';
+  try {
+    for (;;) {
+      const read = fs.readSync(fd, buf, 0, buf.length, null);
+      if (read <= 0) break;
+      const chunk = carry + buf.toString('utf8', 0, read);
+      const lines = chunk.split('\n');
+      carry = lines.pop() ?? '';
+      for (const line of lines) {
+        for (const [key, re] of Object.entries(patterns)) if (re.test(line)) counts[key] += 1;
+      }
+    }
+    for (const [key, re] of Object.entries(patterns)) if (carry && re.test(carry)) counts[key] += 1;
+  } finally {
+    fs.closeSync(fd);
+  }
+  return counts;
+}
+
 function main() {
   console.log('\n================================================================');
   console.log('   KAIP SEKASI');
@@ -110,16 +140,27 @@ function main() {
   }
 
   // ── kibble ────────────────────────────────────────────────────────────
-  const kw = records.filter((r) => r.agent === 'kibble-worker');
-  const kv = records.filter((r) => r.agent === 'kibble-validator');
-  const delivered = kw.filter((r) => r.action === 'delivered').length;
-  const attested = kv.filter((r) => r.action === 'attested_not').length;
-  const off = records.some((r) => r.agent === 'kibble-worker') ? '' : ' (isjungta arba nera darbo)';
+  //
+  // Counted over the WHOLE log, not the tail the rest of this tool reads.
+  // These are lifetime totals and a tail is not one: at 7.3 MB the 400 KB
+  // window reported 2 deliveries against 5 that had actually happened, and
+  // printed it under a heading that promised a total. A tool that quietly
+  // understates is worse than one that says it does not know.
+  const totals = countActions(AUDIT, {
+    delivered: /"action":"delivered"/,
+    attested: /"action":"attested_(not|useful)"/,
+    refused: /"action":"refused"/,
+    lost: /"action":"claims_lost"/
+  });
 
   console.log('\n----------------------------------------------------------------');
-  console.log(`  Naudingo darbo lenta${off}`);
-  console.log(`    pristatyta atsakymu: ${delivered}`);
-  console.log(`    pateikta vertinimu:  ${attested}`);
+  console.log('  Naudingo darbo lenta');
+  console.log(`    pristatyta atsakymu: ${totals.delivered}`);
+  console.log(`    pateikta vertinimu:  ${totals.attested}`);
+  if (totals.refused || totals.lost) {
+    console.log(`    ${DIM}paimta ir palikta:   ${totals.refused} (atsakyti nepavyko)`
+      + `, pralaimeta lenktyniu: ${totals.lost}${OFF}`);
+  }
 
   console.log('\n================================================================');
   console.log(`${DIM}  Visi skaiciai perskaityti is ${AUDIT} ka tik.${OFF}`);

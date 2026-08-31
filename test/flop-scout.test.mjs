@@ -24,7 +24,7 @@ import {
 
 import { Guardrails } from '../src/guardrails.mjs';
 import { TechnocoreClient, READ_WINDOW } from '../src/technocore-client.mjs';
-import { archiveRoomMessages, trimArchive, resetArchiveIndex, parseArgs } from '../src/daemon.mjs';
+import { readArchiveTail, archiveRoomMessages, trimArchive, resetArchiveIndex, parseArgs } from '../src/daemon.mjs';
 import { ScoutEngine } from '../src/scout-engine.mjs';
 
 describe('FLOP Scout Identity & Cryptography', () => {
@@ -1265,5 +1265,41 @@ describe('the public check-in, as a stranger sees it', () => {
 
   test('it still fits the message limit with room to spare', () => {
     assert.ok(checkin(999999, 99999, 6, 'inference-agents', 999999999).length < 4096);
+  });
+});
+
+
+describe('an outage must not idle the model', () => {
+  // Two of eight consecutive cycles read nothing at all when Technocore
+  // flapped, and a cycle that reads nothing plans nothing — so a local GPU and
+  // 99,095 archived messages sat idle because somebody else's server was down.
+  test('reads messages back out of the archive when the network gave none', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-tail-'));
+    archiveRoomMessages('lobby', [
+      { seq: 1, timestamp: 't', from: 'a', content: 'first message in the room' },
+      { seq: 2, timestamp: 't', from: 'b', content: 'second message in the room' }
+    ], dir);
+
+    const back = readArchiveTail(dir, ['lobby']);
+    assert.equal(back.length, 2);
+    assert.deepEqual(back.map((m) => m.text),
+      ['first message in the room', 'second message in the room']);
+    assert.ok(back.every((m) => m.room === 'lobby'));
+  });
+
+  test('a room never archived contributes nothing rather than throwing', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-tail-'));
+    assert.deepEqual(readArchiveTail(dir, ['never-seen']), []);
+  });
+
+  test('the tail is bounded, so a full archive cannot swallow a cycle', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-tail-'));
+    archiveRoomMessages('lobby', Array.from({ length: 900 }, (_, i) => (
+      { seq: i + 1, timestamp: 't', from: 'a', content: `message number ${i} with enough text to matter` }
+    )), dir);
+
+    const back = readArchiveTail(dir, ['lobby'], 200);
+    assert.equal(back.length, 200, 'took the newest slice, not the whole file');
+    assert.match(back.at(-1).text, /message number 899/);
   });
 });

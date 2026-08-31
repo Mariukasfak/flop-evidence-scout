@@ -170,6 +170,59 @@ export function trimArchive(archivePath, { maxBytes = ARCHIVE_MAX_BYTES } = {}) 
   return { trimmed: true, dropped: lines.length - kept.length, kept: kept.length };
 }
 
+/**
+ * Messages from the archive on disk, for a cycle whose reads all failed.
+ *
+ * Technocore flaps: on 2026-08-31 two of eight consecutive cycles read nothing
+ * at all, and a cycle that reads nothing plans nothing, so those cycles ran
+ * zero inference sessions. That is a local GPU and 99,095 archived messages
+ * sitting idle because somebody else's server returned 503 — the one part of
+ * this agent that needs no network was the part that stopped.
+ *
+ * This is not a way to manufacture work. The planner still keys work by message
+ * TEMPLATE and skips anything it has already classified, so replaying the
+ * archive yields sessions only for shapes never seen before and otherwise
+ * yields nothing, exactly as it should. The outage changes where the messages
+ * are read from, never what counts as work worth doing.
+ */
+export function readArchiveTail(archiveDir, rooms, perRoom = 200) {
+  const out = [];
+  for (const room of rooms) {
+    const archivePath = path.join(archiveDir, `${room}-archive.jsonl`);
+    let stat;
+    try {
+      stat = fs.statSync(archivePath);
+    } catch {
+      continue;                       // a room we have never archived
+    }
+    // Read a bounded tail rather than the file: these reach 3 MB each and the
+    // point is to fill an idle cycle, not to spend it on disk.
+    const want = Math.min(stat.size, 256 * 1024);
+    const start = stat.size - want;
+    let text;
+    try {
+      const fd = fs.openSync(archivePath, 'r');
+      const buf = Buffer.alloc(want);
+      fs.readSync(fd, buf, 0, want, start);
+      fs.closeSync(fd);
+      text = buf.toString('utf8');
+    } catch {
+      continue;
+    }
+    const lines = text.split('\n').filter(Boolean);
+    // The first line is very likely cut in half by the byte offset.
+    if (start > 0) lines.shift();
+    for (const line of lines.slice(-perRoom)) {
+      try {
+        const message = JSON.parse(line);
+        const body = message.content ?? message.text;
+        if (body) out.push({ room, text: body });
+      } catch { /* a truncated line is not worth failing a fallback over */ }
+    }
+  }
+  return out;
+}
+
 export function archiveRoomMessages(room, messages = [], archiveDir = path.resolve('data/chats')) {
   if (!Array.isArray(messages) || messages.length === 0) return;
   const archivePath = path.join(archiveDir, `${room}-archive.jsonl`);
@@ -758,6 +811,19 @@ export async function runScoutDaemon(options = {}) {
             console.log(`[Kibble/Validator] Skipped — ${err.message}`);
           }
 
+        }
+
+        // Every room read failed this cycle, so there is nothing fresh to think
+        // about — but there are 99,095 archived messages and a local model that
+        // needs no network. Read from disk instead of standing idle; the planner
+        // still refuses anything whose template it has already classified.
+        if (recentMessages.length === 0) {
+          const fromDisk = readArchiveTail(config.chatArchiveDir, archiveRooms);
+          if (fromDisk.length) {
+            recentMessages.push(...fromDisk);
+            sayOnce('work:archive-fallback',
+              `[Work] No room reads this cycle — planning from ${fromDisk.length} archived messages instead.`);
+          }
         }
 
         work = await runBurst({
