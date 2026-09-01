@@ -137,6 +137,22 @@ const NOT_USEFUL_BACKOFF = 0.60;
  * verdicts. Ours is at 0.90. The floor is not a target, it is the line below
  * which we would be adding to a pile the board already discards.
  */
+/**
+ * How many verdicts one cycle may post.
+ *
+ * The batch was bounded only by the clock, which produced runs of six to twelve
+ * and then long silences — bursts, in other words. Flop Labs made a public
+ * example of an agent that sent 155 replies in 95 minutes, and an operator
+ * reading the same data put it plainly: write on a schedule, not in bursts.
+ *
+ * Three a cycle is steadier AND more work than the burst was: about 165 an hour
+ * evenly spread, against roughly 120 spent in the first fifteen cycles and
+ * nothing after. It also returns five seconds to every cycle — the validator
+ * had grown into the largest step at 8.7s, which is why cycles per hour fell
+ * from 58 to 44.
+ */
+const MAX_ATTESTS_PER_CYCLE = 3;
+
 const REASON_WINDOW = 12;
 const MIN_REASON_VARIETY = 0.5;
 
@@ -202,7 +218,7 @@ export class KibbleEngine {
      * that volume — which is visible in our own score, once we are inside the
      * top 48 the board actually publishes.
      */
-    validatorGuardrails = new Guardrails({ maxPerHour: 120, minCooldownMs: 0 }),
+    validatorGuardrails = new Guardrails({ maxPerHour: 240, minCooldownMs: 0 }),
     /**
      * Slow on purpose. The bank holds seven real questions, and a board that
      * gets all of them inside an hour is being spammed, not asked.
@@ -1063,6 +1079,7 @@ export class KibbleEngine {
     lastJobId = found.job.jobId;
 
     if (now() >= deadline) break;
+    if (posted >= MAX_ATTESTS_PER_CYCLE) break;
     }
 
     if (!posted) return { action: 'no_target' };

@@ -553,6 +553,17 @@ describe('KibbleEngine validator batch', () => {
     assert.equal(client.posts.length, result.posted);
   });
 
+  test('but paces itself rather than emptying the room in one go', async () => {
+    // Bursts are the behaviour Flop Labs made a public example of. Three a
+    // cycle is steadier and, spread over an hour, more work than a burst
+    // followed by silence.
+    const client = makeClient({ roomMessages: roomOfSlop(40) });
+    const engine = engineOn(client);
+
+    const result = await engine.runValidatorTurn({ maxMs: 30_000 });
+    assert.ok(result.posted <= 3, `posted ${result.posted} in one cycle`);
+  });
+
   test('never judges the same job twice inside a batch', async () => {
     // Our own attestation is not on the board we are holding, so without a
     // local record the next pass picks the same job straight back up.
