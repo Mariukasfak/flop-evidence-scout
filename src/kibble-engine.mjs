@@ -1107,6 +1107,38 @@ export class KibbleEngine {
    * attempt "not useful" on a 3B model's say-so is a judgement this project has
    * not earned the right to publish.
    */
+  /**
+   * Stop before we become the thing we are calling out.
+   *
+   * Reasons are written by a model, and a composed sentence is the fallback for
+   * when it refuses or is unreachable. If the model goes away, every reason
+   * becomes that one sentence and a lane turns into exactly the behaviour Flop
+   * Labs put on a poster — an agent repeating itself at volume.
+   *
+   * Measured on a live export, the median validator's reason variety is 0.07:
+   * one sentence doing the work of fourteen verdicts, on a board that says
+   * canned reasons are ignored. Ours, measured 2026-09-01 over the receipt
+   * ledger, is 0.90 on judgements and 0.88 on rejections — but that number is
+   * produced by a model that is currently running, not by anything structural,
+   * which is the whole reason this check exists rather than a comment saying we
+   * are fine.
+   *
+   * It guards both lanes. It used to guard only rejections, and the omission
+   * was backwards: a canned rejection is rude, while a canned endorsement at
+   * volume is pair-farming, which is what the board's own caps are for.
+   */
+  reasonsTooAlike() {
+    const recent = this.localState.recentReasons || [];
+    if (recent.length < REASON_WINDOW) return null;
+
+    const variety = new Set(recent).size / recent.length;
+    if (variety >= MIN_REASON_VARIETY) return null;
+
+    sayOnce('kibble:variety', `[Kibble] Holding off: our last ${recent.length} reasons are only `
+      + `${variety.toFixed(2)} distinct, which is the rubber-stamping this lane exists to call out.`);
+    return { variety };
+  }
+
   async attemptUsefulAttest({ backend, real, ledgerPath, jobs } = {}) {
     if (!real) return { action: 'useful_skipped_no_real_model' };
     if (!(await this.checkFranchise({ jobs }))) return { action: 'useful_unfranchised' };
@@ -1140,6 +1172,9 @@ export class KibbleEngine {
     const [verdict, ...rest] = answer.split('\n').map((l) => l.trim()).filter(Boolean);
     if (verdict !== 'USEFUL') return { action: 'judged_not_useful', jobId: found.job.jobId };
 
+    const tooAlike = this.reasonsTooAlike();
+    if (tooAlike) return { action: 'reasons_too_alike', variety: tooAlike.variety };
+
     // Hashed over exactly the text we judged, which is the text we read off the
     // tape — never a re-fetch, because then the hash would not describe what the
     // model actually saw.
@@ -1158,6 +1193,10 @@ export class KibbleEngine {
     }
 
     this.validatorGuardrails.recordSent(line);
+    // The same window both lanes are measured against, so a model that starts
+    // repeating itself is caught whichever lane it repeats itself in.
+    this.localState.recentReasons =
+      [...(this.localState.recentReasons || []), rest.join(' ').slice(0, 70)].slice(-REASON_WINDOW);
     this.localState.attestsPosted += 1;
     this.localState.usefulAttests = (this.localState.usefulAttests || 0) + 1;
     this.localState.lastAttestJobId = found.job.jobId;
@@ -1269,15 +1308,10 @@ export class KibbleEngine {
      * canned reasons are ignored. Ours sits at 0.90 across 77 attestations.
      * Below the floor this stops rather than adding to that pile.
      */
-    const recent = this.localState.recentReasons || [];
-    if (recent.length >= REASON_WINDOW) {
-      const variety = new Set(recent).size / recent.length;
-      if (variety < MIN_REASON_VARIETY) {
-        sayOnce('kibble:variety', `[Kibble] Holding off: our last ${recent.length} reasons are only `
-          + `${variety.toFixed(2)} distinct, which is the rubber-stamping this lane exists to call out.`);
-        if (posted) break;
-        return { action: 'reasons_too_alike', variety };
-      }
+    const tooAlike = this.reasonsTooAlike();
+    if (tooAlike) {
+      if (posted) break;
+      return { action: 'reasons_too_alike', variety: tooAlike.variety };
     }
 
     // Written by the model about this delivery, because a skeleton with slots

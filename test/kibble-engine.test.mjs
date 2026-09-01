@@ -961,3 +961,75 @@ describe('The validator judges real work, not only templates', () => {
     assert.ok(engine);
   });
 });
+
+/**
+ * A canned rejection is rude; a canned endorsement at volume is pair-farming.
+ * The guard covered only the first for as long as the second could not happen,
+ * and then the useful lane started posting 36 verdicts an hour.
+ */
+describe('Both verdict lanes stop when our reasons stop varying', () => {
+  const alike = (n) => Array.from({ length: n }, () => 'this delivery answers the question asked');
+
+  test('the useful lane refuses to post once the window is one sentence', async () => {
+    const workerIdentity = generateIdentity();
+    const client = makeClient({
+      roomMessages: [
+        jobLine('k000000000d'),
+        deliverLine('k000000000d', GOOD_ANSWER, { from: OTHER, seq: 2 }),
+        jobLine('k000000000e'),
+        deliverLine('k000000000e', GOOD_ANSWER, { from: workerIdentity.did, seq: 3 })
+      ]
+    });
+    const engine = new KibbleEngine({ workerIdentity, validatorIdentity: generateIdentity(), client });
+    engine.localState.recentReasons = alike(12);
+
+    const backend = makeBackend('USEFUL\nthe answer names the single-file design and contrasts it with a server socket, which is what was asked');
+    const jobs = reconstructBoard(client.roomMessages);
+    const result = await engine.attemptUsefulAttest({ backend, real: true, jobs });
+
+    assert.equal(result.action, 'reasons_too_alike');
+    assert.equal(client.posts.length, 0, 'nothing goes out while we are repeating ourselves');
+  });
+
+  test('a varied window lets the same verdict through', async () => {
+    const workerIdentity = generateIdentity();
+    const client = makeClient({
+      roomMessages: [
+        jobLine('k000000000d'),
+        deliverLine('k000000000d', GOOD_ANSWER, { from: OTHER, seq: 2 }),
+        jobLine('k000000000e'),
+        deliverLine('k000000000e', GOOD_ANSWER, { from: workerIdentity.did, seq: 3 })
+      ]
+    });
+    const engine = new KibbleEngine({ workerIdentity, validatorIdentity: generateIdentity(), client });
+    engine.localState.recentReasons = Array.from({ length: 12 }, (_, i) => `a distinct reason number ${i}`);
+
+    const backend = makeBackend('USEFUL\nthe answer names the single-file design and contrasts it with a server socket, which is what was asked');
+    const jobs = reconstructBoard(client.roomMessages);
+    const result = await engine.attemptUsefulAttest({ backend, real: true, jobs });
+
+    assert.equal(result.action, 'attested_useful');
+    assert.equal(client.posts.length, 1);
+    assert.match(client.posts[0].text, /useful/i);
+  });
+
+  test('what the useful lane posts is remembered, so the window sees both lanes', async () => {
+    const workerIdentity = generateIdentity();
+    const client = makeClient({
+      roomMessages: [
+        jobLine('k000000000d'),
+        deliverLine('k000000000d', GOOD_ANSWER, { from: OTHER, seq: 2 }),
+        jobLine('k000000000e'),
+        deliverLine('k000000000e', GOOD_ANSWER, { from: workerIdentity.did, seq: 3 })
+      ]
+    });
+    const engine = new KibbleEngine({ workerIdentity, validatorIdentity: generateIdentity(), client });
+
+    const backend = makeBackend('USEFUL\nthe answer names the single-file design and contrasts it with a server socket, which is what was asked');
+    const jobs = reconstructBoard(client.roomMessages);
+    await engine.attemptUsefulAttest({ backend, real: true, jobs });
+
+    assert.equal((engine.localState.recentReasons || []).length, 1,
+      'a judgement counts toward the same window a rejection does');
+  });
+});
