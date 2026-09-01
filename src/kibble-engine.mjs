@@ -76,6 +76,20 @@ const MAX_HELD = 2;
  * this is asked rarely and cached, and a failure to reach it means "not
  * franchised yet" rather than an exception.
  */
+/**
+ * The host's own number, read from /api/stats: `caps.min_franchise_results`.
+ * Copied here rather than chosen, and our worker had 8 results in a single
+ * export window when this was written.
+ */
+const MIN_FRANCHISE_RESULTS = 1;
+
+/**
+ * One turn in nine starts on templates, because 11% of the deliveries on the
+ * board are templates. Measured 674 thin against 5,503 real in one export;
+ * this is that ratio and moves when the ratio does, not when we prefer it to.
+ */
+const THIN_TURN_IN = 9;
+
 const FRANCHISE_TTL_MS = 30 * 60_000;
 
 /** Nothing on that host is worth stalling a cycle for. */
@@ -1021,7 +1035,39 @@ export class KibbleEngine {
    * the same one whose /api/board never replies, and a validator turn must not
    * hang waiting for it.
    */
-  async checkFranchise({ now = () => Date.now() } = {}) {
+  async checkFranchise({ jobs = null, now = () => Date.now() } = {}) {
+    /**
+     * The rule first, the scoreboard second.
+     *
+     * `/api/stats` publishes the franchise rule as `min_franchise_results: 1` —
+     * deliver one result and your verdicts count. This asked a different
+     * question instead: does the passport table list us with a score above
+     * zero. That is a proxy, and on 2026-09-01 it was measurably the wrong one.
+     * The table was empty: `passports: []`, `stats_engine_warm: false`, and all
+     * six of the busiest attesting agents on the board — ours among them —
+     * returned `found: false, score: 0, terms: {}`. Nobody was scored, so this
+     * answered "no" for everybody, and the useful lane had posted 0 verdicts
+     * against 334 rejections.
+     *
+     * So the tape decides. It is the same tape the host recomputes from, we
+     * already hold it, and it cannot be cold. The API stays as a positive
+     * shortcut and is no longer allowed to be the sole "no".
+     */
+    if (jobs) {
+      let ours = 0;
+      for (const job of jobs.values()) {
+        for (const result of job.results || []) {
+          if (sameDid(result.from, this.workerIdentity.did)) ours += 1;
+        }
+        if (ours >= MIN_FRANCHISE_RESULTS) break;
+      }
+      if (ours >= MIN_FRANCHISE_RESULTS) {
+        this.localState.franchised = true;
+        this.localState.franchiseCheckedAt = now();
+        return true;
+      }
+    }
+
     const checkedAt = this.localState.franchiseCheckedAt || 0;
     if (now() - checkedAt < FRANCHISE_TTL_MS) return this.localState.franchised === true;
 
@@ -1063,7 +1109,7 @@ export class KibbleEngine {
    */
   async attemptUsefulAttest({ backend, real, ledgerPath, jobs } = {}) {
     if (!real) return { action: 'useful_skipped_no_real_model' };
-    if (!(await this.checkFranchise())) return { action: 'useful_unfranchised' };
+    if (!(await this.checkFranchise({ jobs }))) return { action: 'useful_unfranchised' };
 
     const found = pickRealDelivery(jobs, {
       selfDid: this.validatorIdentity.did,
@@ -1157,6 +1203,34 @@ export class KibbleEngine {
       jobs = await this.readBoard();
     } catch (err) {
       return { action: 'read_failed', error: err.message };
+    }
+
+    /**
+     * Judge the board that is there, not the one this lane was built for.
+     *
+     * Rejecting templates was the only thing that needed no franchise, so it
+     * ran first and judging real work was the branch taken when it found
+     * nothing. It never found nothing. The result, over the whole log: 334
+     * `not` verdicts and 0 `useful` ones, from the single most active attester
+     * on the board — 201 of 709 attestations in one export were ours.
+     *
+     * That is not a strict reading of the room. Counted over the same export,
+     * 674 of 6,177 deliveries match one of the four templates and 5,503 do not:
+     * the board is 11% slop and 89% genuine attempts, and a validator that
+     * spends every verdict on the 11% is reporting a room that does not exist.
+     *
+     * So the share is the measured one rather than a preference. Roughly one
+     * turn in nine goes looking for a template first; the rest look at real
+     * work first, and either falls back to the other when its own side of the
+     * board is empty.
+     */
+    const thinFirst = this.localState.totalValidatorTurns % THIN_TURN_IN === 0;
+    if (!thinFirst) {
+      const judged = await this.attemptUsefulAttest({ backend, real, ledgerPath, jobs });
+      const nothingToJudge = judged.action === 'no_useful_target'
+        || judged.action === 'useful_unfranchised'
+        || judged.action === 'useful_skipped_no_real_model';
+      if (!nothingToJudge) return judged;
     }
 
     const deadline = now() + maxMs;

@@ -855,3 +855,109 @@ describe('KibbleEngine validator turn', () => {
     assert.equal(client.posts.length, 0, 'Scribe must never attest Scout, and did not');
   });
 });
+
+/**
+ * An empty scoreboard is not a verdict about us.
+ *
+ * On 2026-09-01 the host's passport table was empty — `passports: []`,
+ * `stats_engine_warm: false` — and every one of the six busiest attesting
+ * agents on the board, ours included, returned `found: false, score: 0,
+ * terms: {}`. The franchise gate read that as "not allowed to say anything is
+ * useful", so it had posted 0 useful verdicts against 334 rejections.
+ */
+describe('Franchise comes from the tape, not from an empty scoreboard', () => {
+  const scoreboardSaying = (payload) => async () => ({ ok: true, json: async () => payload });
+
+  test('a result of ours on the board is franchise, whatever /api/score says', async () => {
+    const workerIdentity = generateIdentity();
+    const client = makeClient({
+      roomMessages: [jobLine('k000000000a'), deliverLine('k000000000a', GOOD_ANSWER, { from: workerIdentity.did, seq: 2 })]
+    });
+    const engine = new KibbleEngine({
+      workerIdentity, validatorIdentity: generateIdentity(), client,
+      // Exactly what the live endpoint returned for every agent that day.
+      fetchFn: scoreboardSaying({ found: false, score: 0, breakdown: { terms: {} } })
+    });
+
+    const jobs = reconstructBoard(client.roomMessages);
+    assert.equal(await engine.checkFranchise({ jobs }), true);
+  });
+
+  test('no result of ours means the scoreboard still decides, and it says no', async () => {
+    const client = makeClient({ roomMessages: [jobLine('k000000000b'), deliverLine('k000000000b', GOOD_ANSWER)] });
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client,
+      fetchFn: scoreboardSaying({ found: false, score: 0, breakdown: { terms: {} } })
+    });
+
+    const jobs = reconstructBoard(client.roomMessages);
+    assert.equal(await engine.checkFranchise({ jobs }), false);
+  });
+
+  test('a scored passport still grants it with nothing of ours on the board', async () => {
+    const client = makeClient({ roomMessages: [jobLine('k000000000c')] });
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client,
+      fetchFn: scoreboardSaying({ found: true, score: 41 })
+    });
+
+    assert.equal(await engine.checkFranchise({ jobs: reconstructBoard(client.roomMessages) }), true);
+  });
+});
+
+/**
+ * The board is 11% templates and 89% genuine attempts — 674 against 5,503 in
+ * one export. A validator whose every verdict lands on the 11% is describing a
+ * different room.
+ */
+describe('The validator judges real work, not only templates', () => {
+  test('most turns look at a genuine delivery before a template', async () => {
+    const workerIdentity = generateIdentity();
+    const validatorIdentity = generateIdentity();
+    // Both kinds are on the board at once, and there is always a template left,
+    // which is exactly the condition under which the useful lane never ran.
+    const client = makeClient({
+      roomMessages: [
+        jobLine('k000000000a'),
+        deliverLine('k000000000a', THIN_ANSWER, { from: OTHER, seq: 2 }),
+        jobLine('k000000000d'),
+        deliverLine('k000000000d', GOOD_ANSWER, { from: OTHER, seq: 3 }),
+        // One result of ours, so the franchise rule is satisfied from the tape.
+        jobLine('k000000000e'),
+        deliverLine('k000000000e', GOOD_ANSWER, { from: workerIdentity.did, seq: 4 })
+      ]
+    });
+
+    const engine = new KibbleEngine({ workerIdentity, validatorIdentity, client });
+    let judgedReal = 0;
+    const backend = {
+      id: 'test-backend',
+      simulated: false,
+      async generate({ prompt } = {}) {
+        const text = String(prompt || '');
+        if (text.includes(GOOD_ANSWER)) judgedReal += 1;
+        return { text: 'USEFUL — the answer names the single-file, in-process design and contrasts it with a server socket, which is the distinction the question asked about.' };
+      }
+    };
+
+    for (let turn = 0; turn < 4; turn += 1) {
+      engine.boardCache = null;
+      await engine.runValidatorTurn({ backend, real: true, maxMs: 2000 });
+    }
+
+    assert.ok(judgedReal > 0, 'the genuine delivery must be looked at at least once in four turns');
+  });
+
+  test('one turn in nine still starts on the templates', () => {
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client: makeClient()
+    });
+    const thinFirst = [];
+    for (let turn = 1; turn <= 18; turn += 1) {
+      engine.localState.totalValidatorTurns = turn;
+      thinFirst.push(turn % 9 === 0);
+    }
+    assert.equal(thinFirst.filter(Boolean).length, 2, 'two of eighteen, which is the measured 11%');
+    assert.ok(engine);
+  });
+});
