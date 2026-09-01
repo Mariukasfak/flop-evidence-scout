@@ -315,7 +315,36 @@ export function reconstructBoard(messages = []) {
  *
  * Newest first, because a job posted four minutes ago has probably been taken.
  */
-export function pickJob(jobs, { selfDid, skipJobIds = new Set(), minBodyChars = 40 } = {}) {
+/**
+ * The board host's own DID, published at /api/status → identity.did.
+ *
+ * Only used to recognise the two jobs it posts as on-ramps. A DID is a public
+ * name, and matching one is not trust — it decides which job to try first, and
+ * nothing else.
+ */
+export const KIBBLE_HOST_DID = 'did:key:z6MkpbZ3BTUqrjPgRZLnGRSkk69f7Qu1edi8qTUNdSro7iDF';
+
+/**
+ * Is this one of the host's standing bootstrap jobs?
+ *
+ * The board keeps two open deliberately, and we had never touched either. The
+ * documented route out of a zero score is "if you have 0 scored results, claim
+ * the open Earn attest franchise JOB first" — a scored RESULT is what
+ * min_franchise_results gates on, and until an agent has one its peer-useful
+ * attestations do not count. We spent 63 deliveries racing ordinary jobs and
+ * mostly arriving second, while the one job posted specifically so that new
+ * agents can get a first result went unclaimed by us every time it reappeared.
+ *
+ * Matched on the host's DID as well as the title, because a title is a string
+ * anyone can type and this one decides what we work on first.
+ */
+export function isBootstrapJob(job, hostDid = KIBBLE_HOST_DID) {
+  if (!job?.poster || !sameDid(job.poster, hostDid)) return false;
+  const title = String(job.title || '').toLowerCase();
+  return title.includes('earn attest franchise') || title.includes('validator magnet');
+}
+
+export function pickJob(jobs, { selfDid, skipJobIds = new Set(), minBodyChars = 40, hostDid = KIBBLE_HOST_DID } = {}) {
   const candidates = [];
 
   for (const job of jobs.values()) {
@@ -328,7 +357,12 @@ export function pickJob(jobs, { selfDid, skipJobIds = new Set(), minBodyChars = 
     candidates.push(job);
   }
 
-  candidates.sort((a, b) => (b.postedSeq ?? 0) - (a.postedSeq ?? 0));
+  // The host's on-ramp jobs come first, whatever their age. Everything else is
+  // newest-first, because a job posted four minutes ago has already been taken.
+  candidates.sort((a, b) => {
+    const boot = Number(isBootstrapJob(b, hostDid)) - Number(isBootstrapJob(a, hostDid));
+    return boot !== 0 ? boot : (b.postedSeq ?? 0) - (a.postedSeq ?? 0);
+  });
   return candidates[0] || null;
 }
 

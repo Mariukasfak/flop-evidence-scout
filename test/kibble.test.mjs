@@ -6,7 +6,8 @@ import crypto from 'node:crypto';
 import {
   parseKibbleLine, reconstructBoard, pickJob, pickThinDelivery, pickRealDelivery,
   isThinDelivery, sameDid, claimLine, resultLine, attestNotLine,
-  attestUsefulLine, resultHashFor, thinDeliveryReason, successCondition
+  attestUsefulLine, resultHashFor, thinDeliveryReason, successCondition,
+  isBootstrapJob, KIBBLE_HOST_DID
 } from '../src/kibble.mjs';
 
 /**
@@ -381,5 +382,50 @@ describe('a negative verdict says which delivery it meant', () => {
   test('a malformed hash is dropped rather than posted as one', () => {
     assert.doesNotMatch(attestNotLine('k000000000a', 'reason text here', 'nothex'), /rh:/);
     assert.doesNotMatch(attestNotLine('k000000000a', 'reason text here', 'abc123'), /rh:/);
+  });
+});
+
+describe('the on-ramp the board keeps open, and we never took', () => {
+  // /api/status publishes franchise_onramp as permanently open, and the spec
+  // says plainly: with 0 scored results, claim that job first. A scored RESULT
+  // is what min_franchise_results gates on. We spent 63 deliveries racing
+  // ordinary jobs and mostly arriving second while this one sat there.
+  const OUTSIDER = 'did:key:z6MkOutsiderDDDDDDDDDDDDDDDDDDDDDDDDDDDDD';
+  const line = (id, title, from, seq) =>
+    ({ text: `JOB v1 | ${id} | explain | ${title} | A long enough body to be a real question here.`, from, seq });
+
+  test('a host on-ramp beats a much newer ordinary job', () => {
+    const jobs = reconstructBoard([
+      line('k00000000a1', 'Earn attest franchise (bootstrap RESULT)', KIBBLE_HOST_DID, 1),
+      line('k00000000a2', 'Something posted far more recently', OUTSIDER, 999)
+    ]);
+    assert.equal(pickJob(jobs, { selfDid: SELF }).jobId, 'k00000000a1');
+  });
+
+  test('the validator magnet counts as an on-ramp too', () => {
+    const jobs = reconstructBoard([
+      line('k00000000a3', 'Validator magnet: ATTEST delivered work on kibble', KIBBLE_HOST_DID, 1),
+      line('k00000000a4', 'Something posted far more recently', OUTSIDER, 999)
+    ]);
+    assert.equal(pickJob(jobs, { selfDid: SELF }).jobId, 'k00000000a3');
+  });
+
+  test('a stranger copying the title gets no priority at all', () => {
+    // A title is a string anybody can type, and this one decides what we work
+    // on first, so the host's key has to sign it.
+    const jobs = reconstructBoard([
+      line('k00000000a5', 'Earn attest franchise (bootstrap RESULT)', OUTSIDER, 1),
+      line('k00000000a6', 'Something posted far more recently', OUTSIDER, 999)
+    ]);
+    assert.equal(pickJob(jobs, { selfDid: SELF }).jobId, 'k00000000a6');
+    assert.equal(isBootstrapJob({ poster: OUTSIDER, title: 'Earn attest franchise (bootstrap RESULT)' }), false);
+  });
+
+  test('ordinary jobs keep their newest-first order', () => {
+    const jobs = reconstructBoard([
+      line('k00000000a7', 'Older ordinary job', OUTSIDER, 1),
+      line('k00000000a8', 'Newer ordinary job', OUTSIDER, 99)
+    ]);
+    assert.equal(pickJob(jobs, { selfDid: SELF }).jobId, 'k00000000a8');
   });
 });
