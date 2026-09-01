@@ -235,6 +235,9 @@ export class KibbleEngine {
     stateKey = null,
     /** The scoring host. Only ever asked whether the worker is franchised. */
     kibbleApiUrl = 'https://flop-kibble.onrender.com',
+    /** The room this agent owns, where the same findings are kept on our record. */
+    ownRoom = 'd-scout-telemetry',
+    repoUrl = 'github.com/Mariukasfak/flop-evidence-scout',
     fetchFn = globalThis.fetch
   }) {
     if (!workerIdentity?.did || !workerIdentity?.privateKeyPem) {
@@ -258,6 +261,8 @@ export class KibbleEngine {
     this.posterVerdictGuardrails = posterVerdictGuardrails;
     this.stateKey = stateKey || getStateKey(workerIdentity.did, 'kibble');
     this.kibbleApiUrl = String(kibbleApiUrl).replace(/\/+$/, '');
+    this.ownRoom = ownRoom;
+    this.repoUrl = repoUrl;
     this.fetchFn = fetchFn;
     this.localState = {
       totalWorkerTurns: 0,
@@ -700,6 +705,31 @@ export class KibbleEngine {
     this.briefGuardrails.recordSent(line);
     this.localState.postedBriefKeys = [...(this.localState.postedBriefKeys || []), brief.key];
     this.localState.briefsPosted = (this.localState.briefsPosted || 0) + 1;
+
+    /**
+     * The same finding, in the room we actually own.
+     *
+     * d-scout-telemetry is claimed by the scribe key, so only we can write to
+     * it — and it had reported feed_quiet on sixty consecutive cycles while we
+     * published measurements into somebody else's room. The feed that owns it
+     * publishes only when a figure it tracks moves, which is a good rule and
+     * the reason it was silent: none of these numbers are among the figures it
+     * tracks.
+     *
+     * Best-effort and deliberately after the board post. This is our permanent
+     * record rather than a scored line, and failing to write it should never
+     * cost the one that scores.
+     */
+    if (this.ownRoom) {
+      const mine = `[board] ${brief.headline}. ${brief.body} | ${this.repoUrl}`;
+      try {
+        await this.client.postMessage(this.ownRoom, mine, this.validatorIdentity);
+        this.localState.ownRoomPosts = (this.localState.ownRoomPosts || 0) + 1;
+      } catch (err) {
+        sayOnce('kibble:own-room', `[Kibble] Could not mirror to ${this.ownRoom}: ${err.message}`);
+      }
+    }
+
     await this.saveRemoteState();
     return { action: 'brief_posted', key: brief.key, headline: brief.headline };
   }

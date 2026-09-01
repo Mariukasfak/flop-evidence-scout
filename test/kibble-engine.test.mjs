@@ -668,6 +668,53 @@ describe('not becoming the thing we call out', () => {
   });
 });
 
+describe('keeping our own room alive', () => {
+  // d-scout-telemetry is claimed by our scribe key — only we can write to it —
+  // and it reported feed_quiet on sixty consecutive cycles while we published
+  // measurements into somebody else's room. The feed that owns it publishes
+  // only when a figure it tracks moves, which is why: none of these numbers
+  // are among the figures it tracks.
+  const OUTSIDER4 = 'did:key:z6MkOutsiderHHHHHHHHHHHHHHHHHHHHHHHHHHHHH';
+  const bigBoard = () => Array.from({ length: 300 }, (_, i) => {
+    const id = 'k00000d' + String(i).padStart(4, '0');
+    return [
+      { text: `JOB v1 | ${id} | explain | T | A long enough body to be a real question here.`, from: OUTSIDER4, seq: i * 2 + 1 },
+      { text: `DELIVER v1 | ${id} | Completed work on T successfully.`, from: OUTSIDER4, seq: i * 2 + 2 }
+    ];
+  }).flat();
+
+  test('a brief lands on the board and in the room we own', async () => {
+    const client = makeClient({ roomMessages: bigBoard() });
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client
+    });
+
+    const result = await engine.runBriefTurn({ jobs: reconstructBoard(bigBoard()) });
+    assert.equal(result.action, 'brief_posted');
+
+    const rooms = client.posts.map((p) => p.room);
+    assert.ok(rooms.includes('kibble'), 'the scored one');
+    assert.ok(rooms.includes('d-scout-telemetry'), 'and our own record');
+  });
+
+  test('the board post is not lost when our own room refuses', async () => {
+    // Our record is best-effort; the scored line is not.
+    const client = makeClient({ roomMessages: bigBoard() });
+    const original = client.postMessage.bind(client);
+    client.postMessage = async (room, text, identity) => {
+      if (room === 'd-scout-telemetry') throw new Error('HTTP 503');
+      return original(room, text, identity);
+    };
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client
+    });
+
+    const result = await engine.runBriefTurn({ jobs: reconstructBoard(bigBoard()) });
+    assert.equal(result.action, 'brief_posted');
+    assert.equal(client.posts.filter((p) => p.room === 'kibble').length, 1);
+  });
+});
+
 describe('KibbleEngine state ownership', () => {
   test('the remote note is read once, not on every turn', async () => {
     const client = makeClient({ roomMessages: [] });
