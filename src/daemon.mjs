@@ -707,6 +707,19 @@ export async function runScoutDaemon(options = {}) {
             // waiting out an interval to learn that again burns nothing useful.
             console.log(`[Lease] Standing down — ${attempt.reason}.`);
             if (config.dryRun || config.once || !running) break;
+            /**
+             * Still take new code. This branch used to `continue` straight past
+             * the update check at the bottom of the loop, which made it a trap:
+             * a process stuck here could never restart onto the fix for being
+             * stuck here. Today that cost an operator a manual restart during
+             * an outage, and the fix for the outage was already pushed.
+             */
+            if (codeChanged()) {
+              console.log('[Update] New code on disk while we hold no lease. Standing down for it.');
+              appendAudit(config.auditLogPath, { event: 'restart_for_update', from: startedFrom });
+              stop();
+              break;
+            }
             await new Promise((resolve) => setTimeout(resolve, config.intervalMs));
             continue;
           }
