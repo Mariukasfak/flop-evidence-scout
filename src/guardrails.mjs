@@ -17,13 +17,23 @@ export class Guardrails {
     return crypto.createHash('sha256').update(text.trim()).digest('hex');
   }
 
-  canSendMessage(content, { isPriorityInquiry = false } = {}) {
+  /**
+   * `dedupeKey` is the part of the message that carries the meaning.
+   *
+   * Deduplicating on the whole string looked like it worked and caught nothing:
+   * every scout reply opens with `[FLOP Scout -> <did>]`, so the same paragraph
+   * sent to two different agents hashes differently. Measured over the audit
+   * log, 2,062 replies the hourly budget threw away held 271 distinct strings —
+   * but only 97 distinct answers once the address line and a rotating greeting
+   * were stripped. The caller passes what it actually wants counted as a repeat.
+   */
+  canSendMessage(content, { isPriorityInquiry = false, dedupeKey = null } = {}) {
     const validation = this.validateContent(content);
     if (!validation.valid) {
       return { allowed: false, reason: validation.reason };
     }
 
-    const contentHash = this.hashContent(content);
+    const contentHash = this.hashContent(dedupeKey ?? content);
     if (this.recentHashes.has(contentHash)) {
       return { allowed: false, reason: 'Deduplikacija: identiškas pranešimas jau buvo išsiųstas' };
     }
@@ -47,10 +57,10 @@ export class Guardrails {
     return { allowed: true };
   }
 
-  recordSent(content) {
+  recordSent(content, { dedupeKey = null } = {}) {
     const now = Date.now();
     this.sentTimestamps.push(now);
-    const contentHash = this.hashContent(content);
+    const contentHash = this.hashContent(dedupeKey ?? content);
     this.recentHashes.add(contentHash);
     
     // Keep max 100 hashes

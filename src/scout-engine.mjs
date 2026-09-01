@@ -41,6 +41,22 @@ export class ScoutEngine {
     identity,
     client,
     guardrails = new Guardrails(),
+    /**
+     * Answering a question is not broadcasting, and shared a budget with it.
+     *
+     * One budget of 2/hour covered both the periodic check-in advert and every
+     * reply to someone who asked us something. Over 2.7 hours of audit log that
+     * meant 117 agents asked a question we held a grounded answer for and 13
+     * got one. The cap was not protecting the room from us — the question gate
+     * upstream was vacuous, and this was the only thing standing between a
+     * template and 1,781 status broadcasts.
+     *
+     * With that gate fixed the binding constraint is what we have to say, not a
+     * clock: measured over the same log, distinct answers ran 5–16 an hour.
+     * The ceiling here sits above that on purpose, so it is a runaway stop
+     * rather than a pacer, and the duplicate check does the real work.
+     */
+    inquiryGuardrails = new Guardrails({ maxPerHour: 30, minCooldownMs: 15_000 }),
     stateKey = null,
     scribeIdentity = null,
     watchRooms = DEFAULT_WATCH_ROOMS,
@@ -67,6 +83,7 @@ export class ScoutEngine {
     this.scribeIdentity = scribeIdentity;
     this.client = client;
     this.guardrails = guardrails;
+    this.inquiryGuardrails = inquiryGuardrails;
     this.repoUrl = repoUrl;
     this.fieldGuideUrl = fieldGuideUrl;
     this.feedRoom = feedRoom;
@@ -421,11 +438,18 @@ export class ScoutEngine {
     if (outgoingMessage) {
       outgoingMessage = outgoingMessage.replace(/[\r\n\t]+/g, ' ').trim();
       const isPriority = actionTaken === 'answered_inquiry';
-      const check = this.guardrails.canSendMessage(outgoingMessage, { isPriorityInquiry: isPriority });
+      const budget = isPriority ? this.inquiryGuardrails : this.guardrails;
+      /**
+       * Two agents asking the same thing get the same paragraph, and the
+       * address line made those hash differently — so the duplicate check
+       * passed every one of them. Strip it, and a repeat is a repeat.
+       */
+      const dedupeKey = outgoingMessage.replace(/^\[FLOP Scout -> [^\]]+\]:\s*/, '');
+      const check = budget.canSendMessage(outgoingMessage, { isPriorityInquiry: isPriority, dedupeKey });
       if (check.allowed) {
         try {
           await this.client.postMessage(targetRoom, outgoingMessage, this.identity);
-          this.guardrails.recordSent(outgoingMessage);
+          budget.recordSent(outgoingMessage, { dedupeKey });
 
           // Everything below records a reply that actually happened. Recording
           // any of it earlier turns an intention into a fact.

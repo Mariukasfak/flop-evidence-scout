@@ -245,6 +245,26 @@ export function stripUrls(text) {
   return String(text ?? '').replace(/https?:\/\/\S+/gi, ' ');
 }
 
+/**
+ * An interrogative that opens a clause, not one that happens to appear.
+ *
+ * The old test matched `how|what|where|...` anywhere in the message, which is
+ * the same mistake as reading a `?` inside a URL: a keyword standing in for a
+ * speech act. Replayed over the 1,781 distinct messages this gate had already
+ * accepted, it rejected exactly none of them — a vacuous gate whose entire
+ * effect was being carried by the hourly budget downstream. Most of what it
+ * waved through was other agents' status broadcasts: "I refined the evidence
+ * checklist so contributors know what to save" is not a question to anyone.
+ *
+ * Requiring the word to open a sentence or clause keeps 52% of that same
+ * population and drops the broadcasts. A real question survives it, because a
+ * real question puts its interrogative at the front.
+ */
+export function opensAQuestion(text) {
+  return /(^|[.!;:\n]\s*|,\s*)(how|what|where|why|which|who|when|can|does|is|are|do|help|kaip|kodėl|kodel|kur|kada|koks|ar|padėk|padek)\b/i
+    .test(String(text ?? ''));
+}
+
 export function shouldRespond(text, { selfDid = null, minLength = 20, maxLength = 1200, seenSkeletons = null } = {}) {
   const value = typeof text === 'string' ? text.trim() : '';
 
@@ -280,8 +300,7 @@ export function shouldRespond(text, { selfDid = null, minLength = 20, maxLength 
 
   const addressedToUs = Boolean(selfDid) && value.includes(selfDid);
   const withoutUrls = stripUrls(value);
-  const isQuestion = withoutUrls.includes('?')
-    || /\b(how|what|where|why|which|help|kaip|kodėl|kodel|kur|kada|koks|padėk|padek)\b/i.test(withoutUrls);
+  const isQuestion = withoutUrls.includes('?') || opensAQuestion(withoutUrls);
 
   if (!isQuestion && !addressedToUs) return { respond: false, reason: 'not_a_question', topics: [] };
   if (!hasStrongTerm(value) && !addressedToUs) return { respond: false, reason: 'off_topic', topics: [] };
@@ -292,27 +311,26 @@ export function shouldRespond(text, { selfDid = null, minLength = 20, maxLength 
   return { respond: true, reason: addressedToUs ? 'addressed_to_us' : 'on_topic_question', topics };
 }
 
-const GREETINGS_EN = [
-  'FLOP Scout Knowledge Assistant: ',
-  'Hello fellow agent! Here is the verified technical intel: ',
-  'Greetings! Official Technocore reference for you: ',
-  'Hey there! Here are the verified protocol facts: '
-];
-
-const GREETINGS_LT = [
-  'FLOP Scout Žinių Asistentas: ',
-  'Labas, kolega agente! Štai patikrinta informacija: ',
-  'Sveikas! Štai ką svarbu žinoti apie Technocore: ',
-  'Mielai padėsiu! Štai oficialios protokolo detalės: '
-];
+/**
+ * One lead, not four picked at random.
+ *
+ * Four greetings over the same fact paragraph do not make four answers; they
+ * make one answer that is hard to recognise as a repeat. The count is exact:
+ * 2,062 replies the hourly budget threw away held 271 distinct strings and 97
+ * distinct answers, and the whole of that difference was this rotation plus
+ * the address line. Flop Labs made public sport of an agent that sent 155
+ * identical replies — dressing repetition up is worse than repeating, because
+ * it defeats our own duplicate check as well as the reader's eye.
+ */
+const GREETING_EN = 'FLOP Scout: ';
+const GREETING_LT = 'FLOP Scout: ';
 
 export function formatKnowledgeResponse(query, targetLang = null) {
   const lang = targetLang || detectLanguage(query);
   const facts = findRelevantKnowledge(query);
   const topFacts = facts.slice(0, 2);
 
-  const greetings = lang === 'lt' ? GREETINGS_LT : GREETINGS_EN;
-  const greeting = greetings[Math.floor(Math.random() * greetings.length)];
+  const greeting = lang === 'lt' ? GREETING_LT : GREETING_EN;
 
   const sections = topFacts.map((fact) => {
     const text = lang === 'lt' ? fact.summary_lt : fact.summary_en;

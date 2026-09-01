@@ -579,6 +579,49 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
     assert.equal(lt.respond, true);
   });
 
+  test('a status broadcast that merely contains "what" is not a question', async () => {
+    const { shouldRespond } = await import('../src/knowledge.mjs');
+    // Every line here was taken from the audit log, where the old gate accepted
+    // all of them: an interrogative sitting in the middle of somebody else's
+    // announcement. Replaying that gate over 1,781 archived messages rejected
+    // none of them, so the hourly budget was the only thing keeping the agent
+    // out of a thousand conversations it was not part of.
+    const broadcasts = [
+      'Technocore contribution update for DID gAmgTkCstW4e: I refined the evidence checklist so contributors know what to save for a did:key claim.',
+      'Activity update for DID jHyc7tE4pwfS: I documented what makes a Technocore contribution useful instead of repetitive, with did:key examples.',
+      'Hello from a Technocore contributor. This agent is preparing a compatibility report and will describe how each did:key endpoint behaves.'
+    ];
+    for (const text of broadcasts) {
+      assert.equal(shouldRespond(text).respond, false, `should stay silent on: ${text.slice(0, 60)}`);
+    }
+
+    // The same subject, actually asked, still gets through.
+    assert.equal(shouldRespond('What should I save as evidence for a did:key claim on Technocore?').respond, true);
+    assert.equal(shouldRespond('none of these checklists mention re-checking the ed25519 signature. does anyone verify did:key properly?').respond, true);
+  });
+
+  test('the same answer to two different agents counts as a repeat', () => {
+    // The address line differs per recipient, so hashing the whole message let
+    // one paragraph go out to every asker. 2,062 replies in the audit log held
+    // 271 distinct strings and 97 distinct answers; the gap was this prefix and
+    // a rotating greeting, both of which fooled the check and nobody else.
+    const rails = new Guardrails({ maxPerHour: 30, minCooldownMs: 0 });
+    const body = formatKnowledgeResponse('What does a did:key identify on Technocore?');
+    const first = `[FLOP Scout -> did:key:zAAA]: ${body}`;
+    const second = `[FLOP Scout -> did:key:zBBB]: ${body}`;
+    const keyOf = (m) => m.replace(/^\[FLOP Scout -> [^\]]+\]:\s*/, '');
+
+    assert.equal(rails.canSendMessage(first, { dedupeKey: keyOf(first) }).allowed, true);
+    rails.recordSent(first, { dedupeKey: keyOf(first) });
+
+    const repeat = rails.canSendMessage(second, { dedupeKey: keyOf(second) });
+    assert.equal(repeat.allowed, false, 'the same paragraph to a second agent is a duplicate');
+    assert.match(repeat.reason, /Deduplikacija/);
+
+    // Without the key it slips through, which is exactly what used to happen.
+    assert.equal(rails.canSendMessage(second).allowed, true);
+  });
+
   test('scout ignores noise-only rooms without posting anything', async () => {
     const identity = generateIdentity();
     const client = new TechnocoreClient({ baseUrl: serverUrl });
@@ -823,6 +866,9 @@ describe('an intention is not recorded as an action', () => {
       identity: generateIdentity(),
       client: new TechnocoreClient({ baseUrl: url }),
       guardrails: new Guardrails({ maxPerHour: 0, minCooldownMs: 0 }),
+      // Answers draw on their own budget now, so starving the broadcast one
+      // alone no longer refuses anything. Both are empty here on purpose.
+      inquiryGuardrails: new Guardrails({ maxPerHour: 0, minCooldownMs: 0 }),
       watchRooms: ['lobby']
     });
 
