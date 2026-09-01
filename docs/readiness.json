@@ -1,9 +1,9 @@
 {
-  "checkedAt": "2026-09-01T10:08:18.803Z",
+  "checkedAt": "2026-09-01T14:57:08.939Z",
   "summary": {
-    "ready": 1,
+    "ready": 0,
     "action": 4,
-    "blocked": 2,
+    "blocked": 3,
     "unreachable": 7
   },
   "checks": [
@@ -11,14 +11,14 @@
       "id": "did-scout",
       "label": "Scout identity published",
       "state": "UNREACHABLE",
-      "detail": "/kv/did-6f/b2ca5028be7d4e → 503",
+      "detail": "/kv/did-de/06d2231b8d001c → 503",
       "fix": "Nothing to do: the server would not answer, so the note was never checked."
     },
     {
       "id": "did-scribe",
       "label": "Scribe identity published",
       "state": "UNREACHABLE",
-      "detail": "/kv/did-d7/c82f7eb6afe8b2 → 503",
+      "detail": "/kv/did-5a/3a9055d1195317 → 503",
       "fix": "Nothing to do: the server would not answer, so the note was never checked."
     },
     {
@@ -66,9 +66,9 @@
     {
       "id": "ledger",
       "label": "Spend ledger is intact",
-      "state": "READY",
-      "detail": "1 receipts across 1 ledger(s), 1 counted, 0 simulated, 0 rejected, 0 malformed — official FLOP spent: 0 (no paid endpoint exists yet)",
-      "fix": "Investigate rejected or malformed receipts before trusting the total."
+      "state": "ACTION",
+      "detail": "0 receipts across 0 ledger(s), 0 counted, 0 simulated, 0 rejected, 0 malformed — official FLOP spent: 0 (no paid endpoint exists yet)",
+      "fix": "Run the agent, or tools/inference-bench.mjs, to start the ledger."
     },
     {
       "id": "source-watch",
@@ -81,7 +81,7 @@
       "id": "faucet-route",
       "label": "Faucet / session route published",
       "state": "BLOCKED",
-      "detail": "none among 0 documented paths",
+      "detail": "none among 28 documented paths",
       "fix": "Waiting on Flop Labs. auth.md asks that nobody probe for unpublished paths, so this watches openapi.json rather than guessing. A route cannot ship without appearing there."
     },
     {
@@ -101,8 +101,8 @@
     {
       "id": "continuous-operation",
       "label": "Runs continuously, not in bursts",
-      "state": "ACTION",
-      "detail": "0 cycle(s) recorded — not enough for a rate yet",
+      "state": "BLOCKED",
+      "detail": "Technocore unreachable — the shared record could not be read",
       "fix": "GitHub drops most scheduled runs. Keep the local agent running, or use an always-on host — a rented validator box would run this too, collapsing two decisions into one."
     }
   ],

@@ -1,17 +1,7 @@
 {
-  "checkedAt": "2026-09-01T10:08:19.171Z",
+  "checkedAt": "2026-09-01T14:57:15.606Z",
   "stale": 0,
-  "combined": {
-    "cycles": 0,
-    "byHolder": {},
-    "totals": {},
-    "spend": {
-      "flop": 0,
-      "sessions": 0
-    },
-    "dutyCycle": null,
-    "windowHours": 0
-  },
+  "combined": null,
   "artefacts": [
     {
       "id": "measurements",
@@ -20,9 +10,9 @@
       "cadenceMin": 140,
       "toleranceMin": 480,
       "newest": "2026-09-01T05:09:00.000Z",
-      "ageMin": 299.31391666666667,
-      "blockedBy": null,
-      "state": "FRESH",
+      "ageMin": 588.1495666666667,
+      "blockedBy": "GET /r/lobby?limit=100 -> HTTP 503",
+      "state": "BLOCKED",
       "duty": {
         "records": 44,
         "spanHours": 159.15,
@@ -40,8 +30,8 @@
       "file": "docs/watch/state.json",
       "cadenceMin": 140,
       "toleranceMin": 480,
-      "newest": "2026-09-01T05:09:19.880Z",
-      "ageMin": 298.9825833333333,
+      "newest": "2026-09-01T14:53:59.858Z",
+      "ageMin": 3.1519333333333335,
       "blockedBy": null,
       "state": "FRESH",
       "duty": null
@@ -53,9 +43,9 @@
       "cadenceMin": 15,
       "toleranceMin": 90,
       "newest": "2026-09-01T10:07:26.920Z",
-      "ageMin": 0.8652666666666666,
+      "ageMin": 289.70091666666667,
       "blockedBy": null,
-      "state": "FRESH",
+      "state": "UNVERIFIED",
       "duty": {
         "records": 46,
         "spanHours": 159.73928916666668,
@@ -65,7 +55,8 @@
         "medianGapMin": 161.71443333333335,
         "worstGapMin": 683.1599333333334,
         "apparentlyMissed": 598
-      }
+      },
+      "detail": "this machine's log is old, and the shared record could not be read — a standdown and a stoppage look identical from here"
     },
     {
       "id": "feed",
@@ -74,7 +65,7 @@
       "cadenceMin": 240,
       "toleranceMin": 2880,
       "newest": "2026-08-28T00:00:46.187Z",
-      "ageMin": 6367.544166666667,
+      "ageMin": 6656.379816666667,
       "blockedBy": null,
       "state": "QUIET",
       "duty": null
