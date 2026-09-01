@@ -876,7 +876,9 @@ export class KibbleEngine {
       } catch { /* fall back to the composed sentence */ }
     }
     const reason = `${why} Verified by: ${didCardUrl(this.client, this.validatorIdentity)}`;
-    const line = attestNotLine(found.job.jobId, reason);
+    // Bound to the exact delivery we judged. Jobs here carry several, and an
+    // unbound verdict does not say which one it meant.
+    const line = attestNotLine(found.job.jobId, reason, resultHashFor(found.delivery.summary));
 
     const finalCheck = this.validatorGuardrails.canSendMessage(line);
     if (!finalCheck.allowed) return { action: `blocked: ${finalCheck.reason}`, jobId: found.job.jobId };

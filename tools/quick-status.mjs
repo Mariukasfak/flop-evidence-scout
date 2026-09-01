@@ -80,6 +80,39 @@ function countActions(file, patterns) {
   return counts;
 }
 
+/**
+ * The last line in the whole log matching a pattern, or null.
+ *
+ * Startup events are rare and the tail is small, so on a healthy agent the most
+ * recent one falls out of the 400 KB window within hours — at which point this
+ * tool reported "veikia be perkrovimo: nezinoma" and "veikianti versija
+ * nezinoma" about a daemon that had restarted cleanly forty minutes earlier and
+ * written both facts down. The longer the agent runs well, the less this knew.
+ *
+ * That is the third time a tail has been mistaken for a whole file here. The
+ * tail is right for "what happened lately" and wrong for "when did this last
+ * happen"; those are different questions and now use different readers.
+ */
+function lastMatching(file, pattern) {
+  const fd = fs.openSync(file, 'r');
+  const buf = Buffer.alloc(1 << 20);
+  let carry = '', found = null;
+  try {
+    for (;;) {
+      const read = fs.readSync(fd, buf, 0, buf.length, null);
+      if (read <= 0) break;
+      const lines = (carry + buf.toString('utf8', 0, read)).split('\n');
+      carry = lines.pop() ?? '';
+      for (const line of lines) if (pattern.test(line)) found = line;
+    }
+    if (carry && pattern.test(carry)) found = carry;
+  } finally {
+    fs.closeSync(fd);
+  }
+  if (!found) return null;
+  try { return JSON.parse(found); } catch { return null; }
+}
+
 function main() {
   console.log('\n================================================================');
   console.log('   KAIP SEKASI');
@@ -118,9 +151,13 @@ function main() {
   }
 
   // ── ar luzta ──────────────────────────────────────────────────────────
+  // Whole-file, not the tail: a healthy agent's last startup scrolls out of the
+  // window within hours, and "unknown" about a fact we wrote down is worse than
+  // slow. Fatals stay on the tail — a recent crash is the one worth showing.
   const startups = records.filter((r) => r.event === 'startup');
   const fatals = records.filter((r) => r.event === 'fatal');
-  const lastStart = startups[startups.length - 1];
+  const lastStart = lastMatching(AUDIT, /"event":"startup"/) || startups[startups.length - 1];
+  const lastUpdate = lastMatching(AUDIT, /"event":"restart_for_update"/);
   console.log(`  Veikia be perkrovimo: ${lastStart ? fmtAgo(minutesAgo(lastStart.timestamp)) : 'nezinoma'}`);
   if (startups.length > 1) {
     console.log(`  ${DIM}Paleidimu sioje istorijoje: ${startups.length}${OFF}`);
@@ -142,8 +179,13 @@ function main() {
   if (onDisk && running && onDisk !== running) {
     console.log(`  ${YEL}Naujas kodas laukia${OFF}  ${DIM}(veikia ${running.slice(0, 7)}, diske ${onDisk.slice(0, 7)})${OFF}`);
     console.log(`  ${DIM}Agentas persileis pats. Jei ne — meniu.bat punktas [14].${OFF}`);
-  } else if (onDisk && !running) {
+  } else if (onDisk && running) {
+    console.log(`  ${GREEN}Veikia naujausias kodas${OFF}  ${DIM}(${running.slice(0, 7)})${OFF}`);
+  } else if (onDisk) {
     console.log(`  ${DIM}Veikianti versija nezinoma (paleista pries si patikrinima).${OFF}`);
+  }
+  if (lastUpdate) {
+    console.log(`  ${DIM}Paskutinis savaiminis persileidimas: ${fmtAgo(minutesAgo(lastUpdate.timestamp))}${OFF}`);
   }
 
   // ── ka nuveike ────────────────────────────────────────────────────────

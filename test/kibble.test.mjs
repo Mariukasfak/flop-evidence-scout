@@ -356,3 +356,30 @@ describe('an attestation has to say something about the delivery it is about', (
     assert.equal(successCondition('Do a thing with no stated bar.'), null);
   });
 });
+
+describe('a negative verdict says which delivery it meant', () => {
+  // Jobs on this board routinely carry three or four deliveries, so an unbound
+  // attestation is ambiguous by construction. Measured on a tape export: the
+  // agent on 2,338 points binds 100% of its attestations, ours bound 0%.
+  test('binds the hash of the delivery it judged', () => {
+    const hash = resultHashFor('a delivery of some substance worth judging');
+    const line = attestNotLine('k000000000a', 'It restates the title and gives no content.', hash);
+    assert.match(line, /^ATTEST v1 \| k000000000a \| not \| rh:[0-9a-f]{16} \| /);
+
+    const back = parseKibbleLine(line);
+    assert.equal(back.resultHash, hash);
+    assert.equal(back.verdict, 'not');
+    assert.equal(back.reason, 'It restates the title and gives no content.');
+  });
+
+  test('still posts a usable line when there is no hash to bind', () => {
+    const line = attestNotLine('k000000000a', 'a reason of adequate length here');
+    assert.doesNotMatch(line, /rh:/);
+    assert.equal(parseKibbleLine(line).verdict, 'not');
+  });
+
+  test('a malformed hash is dropped rather than posted as one', () => {
+    assert.doesNotMatch(attestNotLine('k000000000a', 'reason text here', 'nothex'), /rh:/);
+    assert.doesNotMatch(attestNotLine('k000000000a', 'reason text here', 'abc123'), /rh:/);
+  });
+});

@@ -420,8 +420,25 @@ export function resultLine(jobId, answer) {
 }
 
 /** The line we post to say a delivery did not do the job. */
-export function attestNotLine(jobId, reason) {
-  return `ATTEST v1 | ${jobId} | not | ${String(reason).replace(/\s+/g, ' ').trim()}`;
+/**
+ * The line we post to say a delivery did not do the job.
+ *
+ * Bound to a result hash whenever we have one, which is always, since we read
+ * the delivery in order to judge it. The spec only *requires* `rh:` on a useful
+ * attestation, but binding a negative one costs nothing and says which of a
+ * job's several deliveries we meant — and on a board where jobs routinely carry
+ * three or four, an unbound verdict is ambiguous by construction.
+ *
+ * Measured on a tape export: the agent on 2,338 points binds 100% of its
+ * attestations, another still-unscored one binds 39%, and ours bound 0%. That
+ * is not proof it is the difference that matters — several agents far busier
+ * than us also score zero, and nothing here explains that — but it is a gap we
+ * can close for free rather than a theory about why we are stuck.
+ */
+export function attestNotLine(jobId, reason, resultHash = null) {
+  const hash = String(resultHash || '').trim().toLowerCase();
+  const bound = /^[0-9a-f]{16}$/.test(hash) ? `rh:${hash} | ` : '';
+  return `ATTEST v1 | ${jobId} | not | ${bound}${String(reason).replace(/\s+/g, ' ').trim()}`;
 }
 
 /**
