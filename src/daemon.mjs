@@ -20,6 +20,7 @@ import { FACTS } from './flop-facts.mjs';
 import { updateDashboardFile } from './dashboard.mjs';
 import { analyzeChatArchives, getLatestLearningReport } from './learning-engine.mjs';
 import { sayOnce, clearOnce } from './log-once.mjs';
+import { checkOneSurface } from './surface-watch.mjs';
 
 /**
  * Every writable path the daemon owns, derived from one base directory.
@@ -38,6 +39,7 @@ export function deriveFrom(o) {
     docsDir,
     auditLogPath: o.auditLogPath || path.join(dataDir, 'scout-audit.jsonl'),
     faucetAlertPath: o.faucetAlertPath || path.join(dataDir, 'faucet-alert.json'),
+    surfaceStatePath: o.surfaceStatePath || path.join(dataDir, 'surface-state.json'),
     heartbeatPath: o.heartbeatPath || path.join(dataDir, 'scout-heartbeat.json'),
     feedStatePath: o.feedStatePath || path.join(dataDir, 'feed-state.json'),
     feedPath: o.feedPath || path.join(docsDir, 'feed.json'),
@@ -371,6 +373,8 @@ export async function runScoutDaemon(options = {}) {
   console.log(`[Dual Agent Mesh] Connected to: ${config.serverUrl} (Rooms: ${config.room} & events)`);
 
   let running = true;
+  /** Which published surface this cycle checks; see the rotation in surface-watch.mjs. */
+  let surfaceIndex = 0;
   const stop = () => {
     if (!running) return;
     console.log('\n[Dual Agent Mesh] Shutting down gracefully...');
@@ -778,6 +782,57 @@ export async function runScoutDaemon(options = {}) {
           const text = m?.content || m?.text;
           if (text) recentMessages.push({ room: archiveRoom, text });
         }
+      }
+
+      /**
+       * Step A2: one published surface, in rotation.
+       *
+       * The hourly CI watcher in tools/watch-sources.mjs is the durable record;
+       * this is the part that runs between its runs. On 2026-09-01 /llms.txt
+       * gained the official MCP endpoint somewhere inside the five hours between
+       * two CI passes — the day after Hayes said work-coordination and
+       * completion-proof functionality was landing that week. An hour is a long
+       * time to be last to read a new route.
+       *
+       * One fetch, on a path the manual itself lists as never rate limited, so
+       * six cycles cover the whole set and no cycle pays for more than one.
+       */
+      try {
+        let surfaceState = {};
+        try { surfaceState = JSON.parse(fs.readFileSync(config.surfaceStatePath, 'utf8')); }
+        catch { /* no baseline yet; the first pass of each surface writes one */ }
+
+        const check = await timed('surface', () => checkOneSurface({
+          fetchFn: globalThis.fetch,
+          baseUrl: config.serverUrl,
+          state: surfaceState,
+          index: surfaceIndex
+        }));
+        surfaceIndex += 1;
+        fs.writeFileSync(config.surfaceStatePath, JSON.stringify(check.state, null, 2));
+
+        if (check.action === 'capability_signal') {
+          // Loud on purpose, and deliberately not through sayOnce: this is the
+          // single event the whole watcher exists for, and repeating it until
+          // somebody acts is the correct behaviour.
+          console.log('='.repeat(64));
+          console.log(`[SURFACE] ${check.surface} CHANGED AND NAMES A NEW CAPABILITY`);
+          for (const line of check.signals) console.log(`  + ${line}`);
+          console.log('='.repeat(64));
+        } else if (check.action === 'changed') {
+          console.log(`[Surface] ${check.surface} changed (${check.was} -> ${check.chars} chars), nothing named`);
+        }
+        if (check.action !== 'unchanged' && check.action !== 'baseline') {
+          appendAudit(config.auditLogPath, { agent: 'surface', ...check, state: undefined });
+        }
+        if (check.action === 'check_failed' && check.consecutiveFailures >= 6) {
+          // Six is a full rotation, so this is a surface that is reliably
+          // unreadable rather than one 503 in a flappy hour.
+          sayOnce(`surface:blind:${check.surface}`,
+            `[Surface] ${check.surface} unreadable on ${check.consecutiveFailures} checks running: ${check.error}`);
+        }
+      } catch (err) {
+        sayOnce('surface:watch', `[Surface] watcher failed: ${err.message}`);
       }
 
       // Stagger 2s between agents to ensure clean separation
