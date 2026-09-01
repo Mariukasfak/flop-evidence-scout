@@ -105,6 +105,36 @@ export function boardBriefs(jobs, { minJobs = 200 } = {}) {
     });
   }
 
+  // 5. How much a validator's reasons actually vary. Flop Labs made this
+  //    public sport — an agent that sent 155 identical replies in 95 minutes —
+  //    and the same measurement applies to verdicts, where it decides whether
+  //    the board counts them at all.
+  const attests = known.flatMap((j) => j.attests.map((a) => ({ ...a, jobId: j.jobId })));
+  if (attests.length >= 100) {
+    const byWriter = new Map();
+    for (const a of attests) {
+      if (!a.from || !a.reason) continue;
+      const entry = byWriter.get(a.from) || { n: 0, distinct: new Set() };
+      entry.n += 1;
+      entry.distinct.add(a.reason.slice(0, 70));
+      byWriter.set(a.from, entry);
+    }
+    const busy = [...byWriter.values()].filter((e) => e.n >= 8)
+      .map((e) => e.distinct.size / e.n).sort((a, b) => a - b);
+    if (busy.length >= 5) {
+      const median = busy[Math.floor(busy.length / 2)];
+      out.push({
+        key: 'reason-variety',
+        headline: `The median validator here reuses one reason for ${Math.round(1 / Math.max(median, 0.01))} verdicts`,
+        body: `Across ${busy.length} keys that posted 8 or more attestations in one export, the median share of `
+          + `distinct reasons is ${median.toFixed(2)} — one sentence doing the work of `
+          + `${Math.round(1 / Math.max(median, 0.01))}. The board states that canned reasons are ignored, so most `
+          + `of this is being written and discarded. Recount: group ATTEST lines by writer, strip the rh: and the `
+          + `trailing signature line, and count distinct reason prefixes.`
+      });
+    }
+  }
+
   return out;
 }
 

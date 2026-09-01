@@ -130,6 +130,16 @@ const ABANDON_HEADROOM = 0.10;
  */
 const NOT_USEFUL_BACKOFF = 0.60;
 
+/**
+ * How many of our own reasons to keep, and how varied they must stay.
+ *
+ * The room's median validator runs at 0.07 — one sentence for fourteen
+ * verdicts. Ours is at 0.90. The floor is not a target, it is the line below
+ * which we would be adding to a pile the board already discards.
+ */
+const REASON_WINDOW = 12;
+const MIN_REASON_VARIETY = 0.5;
+
 /** Judged deliveries needed before that share means anything. */
 const VERDICT_MIN_SAMPLE = 5;
 
@@ -986,6 +996,30 @@ export class KibbleEngine {
     const paced = this.validatorGuardrails.canSendMessage(`kibble-attest-probe-${found.job.jobId}`);
     if (!paced.allowed) { if (posted) break; return { action: `paced: ${paced.reason}`, jobId: found.job.jobId }; }
 
+    /**
+     * Stop before we become the thing we are calling out.
+     *
+     * Reasons are written by a model, and the composed sentence is the fallback
+     * when it refuses or is unreachable. If the model goes away, every reason
+     * becomes that one sentence and this lane turns into exactly the behaviour
+     * Flop Labs put on a poster — an agent repeating itself at volume.
+     *
+     * Measured on a live export: the median validator's reason variety is 0.07,
+     * one sentence doing the work of fourteen verdicts, and the board says
+     * canned reasons are ignored. Ours sits at 0.90 across 77 attestations.
+     * Below the floor this stops rather than adding to that pile.
+     */
+    const recent = this.localState.recentReasons || [];
+    if (recent.length >= REASON_WINDOW) {
+      const variety = new Set(recent).size / recent.length;
+      if (variety < MIN_REASON_VARIETY) {
+        sayOnce('kibble:variety', `[Kibble] Holding off: our last ${recent.length} reasons are only `
+          + `${variety.toFixed(2)} distinct, which is the rubber-stamping this lane exists to call out.`);
+        if (posted) break;
+        return { action: 'reasons_too_alike', variety };
+      }
+    }
+
     // Written by the model about this delivery, because a skeleton with slots
     // filled in is still one sentence wearing different clothes. The composed
     // version stays as the fallback: a validator that cannot phrase its
@@ -1022,6 +1056,8 @@ export class KibbleEngine {
     this.localState.attestsPosted += 1;
     this.localState.lastAttestJobId = found.job.jobId;
     this.localState.lastAttestAt = new Date().toISOString();
+    this.localState.recentReasons =
+      [...(this.localState.recentReasons || []), why.slice(0, 70)].slice(-REASON_WINDOW);
     done.add(found.job.jobId);
     posted += 1;
     lastJobId = found.job.jobId;

@@ -602,6 +602,61 @@ describe('KibbleEngine validator batch', () => {
   });
 });
 
+describe('not becoming the thing we call out', () => {
+  // Flop Labs put an agent on a poster for sending 155 identical replies in 95
+  // minutes. Our reasons are model-written, and the composed sentence is the
+  // fallback when the model refuses or is unreachable — so if the model goes
+  // away, every reason becomes that one sentence and this lane turns into
+  // exactly that. Measured on a live export: the room median validator runs at
+  // 0.07 reason variety, ours at 0.90 across 77 attestations.
+  const OUTSIDER3 = 'did:key:z6MkOutsiderFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
+  const slop = (n) => Array.from({ length: n }, (_, i) => {
+    const id = 'k000000' + String(i).padStart(4, '0');
+    return [
+      { text: `JOB v1 | ${id} | explain | T ${i} | A long enough body to be a real question here.`, from: OUTSIDER3, seq: i * 2 + 1 },
+      { text: `DELIVER v1 | ${id} | Completed work on T ${i} successfully.`, from: OUTSIDER3, seq: i * 2 + 2 }
+    ];
+  }).flat();
+
+  test('stops once our own reasons stop varying', async () => {
+    const client = makeClient({ roomMessages: slop(20) });
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client
+    });
+    // A full window of one sentence: the shape a dead model would produce.
+    engine.localState.recentReasons = Array.from({ length: 12 }, () => 'the same sentence every time');
+
+    const result = await engine.runValidatorTurn({ maxMs: 5000 });
+    assert.equal(result.action, 'reasons_too_alike');
+    assert.equal(client.posts.length, 0, 'better to say nothing than to rubber-stamp');
+  });
+
+  test('varied reasons are not held back', async () => {
+    const client = makeClient({ roomMessages: slop(20) });
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client
+    });
+    engine.localState.recentReasons = Array.from({ length: 12 }, (_, i) => `a distinct sentence number ${i}`);
+
+    const result = await engine.runValidatorTurn({ maxMs: 5000 });
+    assert.equal(result.action, 'attested_not');
+    assert.ok(client.posts.length > 0);
+  });
+
+  test('too few reasons to judge is not a reason to stop', async () => {
+    // Refusing to work until there is evidence of a problem would stop a fresh
+    // process from ever starting.
+    const client = makeClient({ roomMessages: slop(20) });
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client
+    });
+    engine.localState.recentReasons = ['one', 'one', 'one'];
+
+    const result = await engine.runValidatorTurn({ maxMs: 5000 });
+    assert.equal(result.action, 'attested_not');
+  });
+});
+
 describe('KibbleEngine state ownership', () => {
   test('the remote note is read once, not on every turn', async () => {
     const client = makeClient({ roomMessages: [] });
