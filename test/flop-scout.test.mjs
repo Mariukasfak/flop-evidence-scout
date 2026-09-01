@@ -24,7 +24,7 @@ import {
 
 import { Guardrails } from '../src/guardrails.mjs';
 import { TechnocoreClient, READ_WINDOW } from '../src/technocore-client.mjs';
-import { readGitHead, readArchiveTail, archiveRoomMessages, trimArchive, resetArchiveIndex, parseArgs } from '../src/daemon.mjs';
+import { readGitHead, readArchiveTail, archiveRoomMessages, trimArchive, resetArchiveIndex, parseArgs, leaseOutcome } from '../src/daemon.mjs';
 import { ScoutEngine } from '../src/scout-engine.mjs';
 
 describe('FLOP Scout Identity & Cryptography', () => {
@@ -1387,5 +1387,37 @@ describe('knowing whether we are running the code on disk', () => {
     fs.mkdirSync(path.join(dir, '.git'), { recursive: true });
     fs.writeFileSync(path.join(dir, '.git', 'HEAD'), 'ref: refs/heads/gone');
     assert.equal(readGitHead(dir), null, 'a ref with no loose file is unknown, not changed');
+  });
+});
+
+/**
+ * The second outage to strand this agent. The first cost twelve minutes and was
+ * fixed by resuming a held lease across a restart; this one cost half an hour
+ * with no restart involved, because an unreachable lease and a lease somebody
+ * else holds were the same branch.
+ */
+describe('An outage suppresses writes, it does not stop the cycle', () => {
+  test('a lease we hold proceeds', () => {
+    assert.equal(leaseOutcome({ acquired: true }), 'proceed');
+    assert.equal(leaseOutcome({ acquired: true, degraded: true }), 'proceed');
+  });
+
+  test('a lease somebody else holds stands us down', () => {
+    // Another writer is working. A second one would collide, which is the
+    // entire reason the lease exists.
+    assert.equal(leaseOutcome({ acquired: false, heldBy: 'other-machine' }), 'stand_down');
+  });
+
+  test('a lease we cannot reach runs the cycle read-only', () => {
+    // The lease lives on the server that is down, so the writer we would have
+    // collided with cannot write either. Standing down protects nothing and
+    // blinds the surface watcher through exactly the window a redeploy lands in.
+    assert.equal(leaseOutcome({ acquired: false, transient: true, reason: 'HTTP 530' }), 'proceed_readonly');
+  });
+
+  test('a missing attempt is treated as somebody else holding it', () => {
+    // The cautious direction: never invent permission to write out of nothing.
+    assert.equal(leaseOutcome(undefined), 'stand_down');
+    assert.equal(leaseOutcome({}), 'stand_down');
   });
 });

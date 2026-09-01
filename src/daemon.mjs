@@ -105,6 +105,31 @@ export function parseArgs(argv) {
  * write, a packed ref we cannot resolve, or no .git at all are all reasons to
  * carry on rather than to stand down.
  */
+/**
+ * What an unsuccessful lease attempt means for this cycle.
+ *
+ * Three outcomes, and for a long time there were two. A lease we could not
+ * reach was treated exactly like a lease somebody else was holding: skip the
+ * cycle, sleep, try again. On 2026-09-01 technocore.chat returned Cloudflare
+ * 1033 for half an hour and this agent logged `lease_unreachable` 94 times and
+ * ran zero cycles — the second time an outage has stranded it.
+ *
+ * They are not the same event. A lease held by somebody else means another
+ * writer is working and a second one would collide. A lease we cannot reach
+ * means the server is down, and the lease lives on that same server: nobody
+ * can write, including whoever we would have collided with. Standing down
+ * protects nothing and costs everything local — the archive, the dashboard,
+ * the learning pass, and most of all the surface watcher, which goes blind
+ * through exactly the window where a redeploy might publish a new route.
+ *
+ * So an unreachable lease runs the cycle with writes refused. The mutual
+ * exclusion guarantee is untouched: a write still requires a lease we hold.
+ */
+export function leaseOutcome(attempt) {
+  if (attempt?.acquired) return 'proceed';
+  return attempt?.transient ? 'proceed_readonly' : 'stand_down';
+}
+
 export function readGitHead(repoDir = process.cwd()) {
   try {
     const head = fs.readFileSync(path.join(repoDir, '.git', 'HEAD'), 'utf8').trim();
@@ -648,6 +673,9 @@ export async function runScoutDaemon(options = {}) {
     /** The in-flight fast-lane poll, awaited before this cycle's gap. */
     let kibbleFastLane = null;
 
+    /** Set when this cycle runs without a lease because the server is down. */
+    let writesSuppressed = false;
+
     try {
       if (lease) {
         // Acquire covers all three cases: unheld, expired, and already ours.
@@ -662,29 +690,33 @@ export async function runScoutDaemon(options = {}) {
           console.log(`[Lease] ${attempt.reason}`);
           appendAudit(config.auditLogPath, { event: 'lease_degraded', reason: attempt.reason });
         }
-        if (!attempt.acquired) {
+        const outcome = leaseOutcome(attempt);
+        if (outcome !== 'proceed') {
           // A blip and a genuine handover are different events and deserve
           // different words. Reporting an outage as "lost the race" sent the
           // first reader of this looking for a competing process that did not
-          // exist. A blip also retries quickly rather than sitting out a whole
-          // interval for no reason.
-          if (attempt.transient) {
-            console.log(`[Lease] Technocore unreachable — ${attempt.reason}. Retrying shortly.`);
-          } else {
-            console.log(`[Lease] Standing down — ${attempt.reason}.`);
-          }
+          // exist.
           appendAudit(config.auditLogPath, {
             event: attempt.transient ? 'lease_unreachable' : 'lease_declined',
             reason: attempt.reason,
             heldBy: attempt.heldBy ?? null
           });
-          // A scheduled run that does not get the lease has nothing to do:
-          // the holder is working. Waiting out an interval would just burn
-          // runner minutes to arrive at the same answer.
-          if (config.dryRun || config.once || !running) break;
-          const wait = attempt.transient ? Math.min(15_000, config.intervalMs) : config.intervalMs;
-          await new Promise((resolve) => setTimeout(resolve, wait));
-          continue;
+
+          if (outcome === 'stand_down') {
+            // Somebody else is working. A second writer would collide, and
+            // waiting out an interval to learn that again burns nothing useful.
+            console.log(`[Lease] Standing down — ${attempt.reason}.`);
+            if (config.dryRun || config.once || !running) break;
+            await new Promise((resolve) => setTimeout(resolve, config.intervalMs));
+            continue;
+          }
+
+          // Unreachable. Run the cycle for everything that is not a write —
+          // see leaseOutcome for why that is safe rather than merely useful.
+          sayOnce('lease:outage', `[Lease] Technocore unreachable — ${attempt.reason}. `
+            + 'Running read-only until it answers; nothing can be written by anyone meanwhile.');
+          writesSuppressed = true;
+          client.readOnly = true;
         }
       }
 
@@ -1102,6 +1134,11 @@ export async function runScoutDaemon(options = {}) {
       console.error('[Mesh Error]:', err.message);
       appendAudit(config.auditLogPath, { event: 'error', error: err.message });
       await writeHeartbeat('error', { action: `error: ${err.message}` });
+    } finally {
+      // Restore rather than clear: --dry-run sets this for the whole process,
+      // and a cycle that ran through an outage must not quietly re-enable
+      // writing for a run the operator asked to be silent.
+      if (writesSuppressed) client.readOnly = readOnly;
     }
 
     if (config.dryRun || config.once || !running) break;
