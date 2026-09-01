@@ -101,6 +101,40 @@ export class Lease {
   }
 
   /**
+   * Carry a lease we already hold across a restart.
+   *
+   * Without this, a restart during an outage strands the agent completely. The
+   * degraded path below only works when `currentValue` is set — it is the proof
+   * that the lease is ours — and a fresh process has none, so it can neither
+   * acquire (the server is down) nor continue (it has forgotten). Observed
+   * 2026-09-01: the daemon restarted into a 503, then logged lease_unreachable
+   * every eighteen seconds for twelve minutes without running a single cycle,
+   * while a lease it had held moments earlier was still valid.
+   *
+   * This is not a fiction about ownership. The value and its expiry were
+   * written by this holder id, which is itself persisted; if the clock says the
+   * lease has not expired, it has not, and an outage is no reason to pretend
+   * otherwise. Anything expired or malformed is ignored.
+   */
+  resume({ value, heldUntil } = {}) {
+    if (!value || typeof value !== 'string') return false;
+    const until = Number(heldUntil);
+    if (!Number.isFinite(until) || until <= this.now()) return false;
+    // Only ours: a value written by another holder is not one we may renew.
+    if (!value.includes(this.holder)) return false;
+    this.currentValue = value;
+    this.heldUntil = until;
+    return true;
+  }
+
+  /** What a caller should persist to make resume() possible after a restart. */
+  snapshot() {
+    return this.currentValue
+      ? { value: this.currentValue, heldUntil: this.heldUntil, holder: this.holder }
+      : null;
+  }
+
+  /**
    * Raw current value, as stored — not parsed, because `if=` needs it verbatim.
    *
    * Returns `reachable: false` rather than pretending the note is absent when

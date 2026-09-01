@@ -602,6 +602,38 @@ export async function runScoutDaemon(options = {}) {
     })
     : null;
 
+  /**
+   * A lease we still hold survives a restart.
+   *
+   * Without this the agent strands itself: the degraded path needs proof the
+   * lease is ours, a fresh process has none, and during an outage it can
+   * neither acquire nor continue. Observed 2026-09-01 — restarted into a 503,
+   * then twelve minutes of lease_unreachable every eighteen seconds and not one
+   * cycle run, while a lease held moments earlier was still valid.
+   */
+  const leaseStatePath = path.join(config.dataDir, 'lease-held.json');
+  if (lease) {
+    try {
+      const saved = JSON.parse(fs.readFileSync(leaseStatePath, 'utf8'));
+      if (lease.resume(saved)) {
+        const leftSec = Math.round((saved.heldUntil - Date.now()) / 1000);
+        console.log(`[Lease] Resumed the lease this machine already held — ${leftSec}s left on it.`);
+        appendAudit(config.auditLogPath, { event: 'lease_resumed', secondsLeft: leftSec });
+      }
+    } catch { /* no saved lease, or unreadable: acquire from scratch */ }
+  }
+
+  /** Written after every successful acquire or renew, so a restart can resume. */
+  const rememberLease = () => {
+    if (!lease) return;
+    const snap = lease.snapshot();
+    if (!snap) return;
+    try {
+      fs.mkdirSync(path.dirname(leaseStatePath), { recursive: true });
+      fs.writeFileSync(leaseStatePath, JSON.stringify(snap), 'utf8');
+    } catch { /* losing this costs a restart's worth of cover, never a cycle */ }
+  };
+
   do {
     /**
      * The top of the cycle, held outside the try so the sleep below can subtract
@@ -616,6 +648,9 @@ export async function runScoutDaemon(options = {}) {
       if (lease) {
         // Acquire covers all three cases: unheld, expired, and already ours.
         const attempt = await lease.acquire();
+        // Remember it while it is ours, so a restart mid-outage resumes rather
+        // than standing down until the server comes back.
+        if (attempt.acquired) rememberLease();
         if (attempt.acquired && attempt.degraded) {
           // Working on trust rather than on a fresh read. Recorded, because
           // "we kept going" and "we confirmed we could" are different facts and

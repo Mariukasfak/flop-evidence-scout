@@ -432,3 +432,66 @@ describe('a renewal that does not reach the server', () => {
     assert.equal(attempt.acquired, false, 'a takeover that never landed is not a takeover');
   });
 });
+
+describe('a lease survives a restart', () => {
+  // Observed 2026-09-01: the daemon restarted into a 503 and then logged
+  // lease_unreachable every eighteen seconds for twelve minutes without running
+  // a single cycle, while a lease it had held moments earlier was still valid.
+  // The degraded path needs proof the lease is ours and a fresh process has
+  // none, so it could neither acquire nor continue.
+  const make = (holder) => new Lease({
+    client: { async readNote() { return { reachable: false, error: 'HTTP 503' }; } },
+    name: 'scout-cycle', holder, ttlMs: 300_000
+  });
+
+  test('resumes a lease this holder still has time on', () => {
+    const lease = make('local-abc');
+    const ok = lease.resume({ value: 'local-abc|1234', heldUntil: Date.now() + 200_000 });
+    assert.equal(ok, true);
+    assert.equal(lease.currentValue, 'local-abc|1234');
+  });
+
+  test('and then keeps working through an outage on it', async () => {
+    // The whole point: with the lease restored, an unreachable server is a
+    // reason to carry on rather than to stand down.
+    const lease = make('local-abc');
+    lease.resume({ value: 'local-abc|1234', heldUntil: Date.now() + 200_000 });
+    const attempt = await lease.acquire();
+    assert.equal(attempt.acquired, true);
+    assert.equal(attempt.degraded, true);
+  });
+
+  test('refuses an expired one', () => {
+    const lease = make('local-abc');
+    assert.equal(lease.resume({ value: 'local-abc|1', heldUntil: Date.now() - 1000 }), false);
+    assert.equal(lease.currentValue, null);
+  });
+
+  test('refuses one written by somebody else', () => {
+    // Resuming another holder's lease would be a claim about ownership we have
+    // no right to make, which is a different thing from surviving a restart.
+    const lease = make('local-abc');
+    assert.equal(lease.resume({ value: 'cloud-xyz|1', heldUntil: Date.now() + 200_000 }), false);
+  });
+
+  test('refuses nonsense rather than throwing', () => {
+    const lease = make('local-abc');
+    assert.equal(lease.resume({}), false);
+    assert.equal(lease.resume({ value: 'local-abc|1', heldUntil: 'soon' }), false);
+    assert.equal(lease.resume(), false);
+  });
+
+  test('snapshot round-trips through resume', () => {
+    const a = make('local-abc');
+    a.currentValue = 'local-abc|99';
+    a.heldUntil = Date.now() + 100_000;
+
+    const b = make('local-abc');
+    assert.equal(b.resume(a.snapshot()), true);
+    assert.equal(b.currentValue, a.currentValue);
+  });
+
+  test('a lease we do not hold has nothing to save', () => {
+    assert.equal(make('local-abc').snapshot(), null);
+  });
+});
