@@ -222,6 +222,27 @@ function main() {
       + `, pralaimeta lenktyniu: ${totals.lost}${OFF}`);
   }
 
+  /**
+   * The one line worth interrupting someone for.
+   *
+   * The surface watcher prints a banner to the daemon log, and nobody reads a
+   * daemon log. The operator reads this. A published document naming a faucet,
+   * a task route or a completion proof is the single event this project is
+   * waiting on, so it belongs above the fold rather than in scrollback.
+   */
+  const surface = lastMatching(AUDIT, /"agent":"surface"/);
+  if (surface) {
+    const when = fmtAgo(minutesAgo(surface.timestamp));
+    if (surface.action === 'capability_signal') {
+      console.log('\n----------------------------------------------------------------');
+      console.log(`  ${RED}!! SERVERIS PASKELBE KAZKA NAUJA${OFF}  ${DIM}(${surface.surface}, ${when})${OFF}`);
+      for (const line of surface.signals || []) console.log(`     ${line.slice(0, 70)}`);
+      console.log(`  ${DIM}Pasakyk Claude: "patikrink ka serveris paskelbe".${OFF}`);
+    } else if (surface.action === 'changed') {
+      console.log(`\n  ${DIM}Serverio dokumentacija keitesi: ${surface.surface} (${when}), nieko svarbaus.${OFF}`);
+    }
+  }
+
   console.log('\n================================================================');
   console.log(`${DIM}  Visi skaiciai perskaityti is ${AUDIT} ka tik.${OFF}`);
   console.log('================================================================\n');
