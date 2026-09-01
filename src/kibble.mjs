@@ -527,6 +527,36 @@ export function attestUsefulLine(jobId, resultHash, reason) {
  * function applies here unchanged: never our own delivery, never a job we
  * posted, never one we have already attested.
  */
+/**
+ * A delivery on a job WE posted, still waiting for our word.
+ *
+ * The one role we had excluded ourselves from. pickThinDelivery skips anything
+ * we posted, correctly, because the spec keeps poster, worker and validator
+ * apart — but it says just as plainly that the poster "may ACCEPT (useful) or
+ * reject" after delivery, worth 1 and needing no franchise. That is not the
+ * three-party rule being bent; it is a fourth seat at the same table.
+ *
+ * It also happens to be the honest thing to do. We asked seven real questions
+ * and the answers came back as boilerplate — one of them drew five deliveries,
+ * none of which fetched the URL the question named. Saying so is what a poster
+ * is for, and leaving it unsaid is how a board fills up with unanswered
+ * questions marked delivered.
+ *
+ * Only ever about our own jobs, never our own deliveries, and never twice.
+ */
+export function pickOwnJobDelivery(jobs, { posterDid, excludeDids = [], skipJobIds = new Set() } = {}) {
+  for (const job of [...jobs.values()].sort((a, b) => (b.postedSeq ?? 0) - (a.postedSeq ?? 0))) {
+    if (skipJobIds.has(job.jobId)) continue;
+    if (!job.known) continue;
+    if (!job.poster || !sameDid(job.poster, posterDid)) continue;      // only ours
+    if (job.attests.some((a) => isOneOfOurs(a.from, posterDid, excludeDids))) continue;
+
+    const delivery = job.results.find((r) => !isOneOfOurs(r.from, posterDid, excludeDids));
+    if (delivery) return { job, delivery };
+  }
+  return null;
+}
+
 export function pickRealDelivery(jobs, { selfDid, excludeDids = [], skipJobIds = new Set(), minBodyChars = 80 } = {}) {
   for (const job of [...jobs.values()].sort((a, b) => (b.postedSeq ?? 0) - (a.postedSeq ?? 0))) {
     if (skipJobIds.has(job.jobId)) continue;

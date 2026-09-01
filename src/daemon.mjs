@@ -892,6 +892,16 @@ export async function runScoutDaemon(options = {}) {
             console.log(`[Kibble/Worker] Skipped — ${err.message}`);
           }
           try {
+            const ownVerdict = await timed('kibbleOwnVerdict',
+              () => kibbleEngine.runPosterVerdictTurn({ backend, real, ledgerPath }));
+            if (ownVerdict.action === 'rejected_own_job_delivery') {
+              console.log(`[Kibble/Poster] rejected a non-answer to our own question — ${ownVerdict.jobId}`);
+              appendAudit(config.auditLogPath, { agent: 'kibble-own-verdict', ...ownVerdict });
+            }
+          } catch (err) {
+            console.log(`[Kibble/Poster] Verdict skipped — ${err.message}`);
+          }
+          try {
             const kibbleBrief = await timed('kibbleBrief', () => kibbleEngine.runBriefTurn());
             if (kibbleBrief.action === 'brief_posted') {
               console.log(`[Kibble/Brief] ${kibbleBrief.headline}`);

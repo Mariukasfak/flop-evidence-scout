@@ -7,7 +7,7 @@ import {
   parseKibbleLine, reconstructBoard, pickJob, pickThinDelivery, pickRealDelivery,
   isThinDelivery, sameDid, claimLine, resultLine, attestNotLine,
   attestUsefulLine, resultHashFor, thinDeliveryReason, successCondition,
-  isBootstrapJob, KIBBLE_HOST_DID
+  isBootstrapJob, KIBBLE_HOST_DID, pickOwnJobDelivery
 } from '../src/kibble.mjs';
 
 /**
@@ -427,5 +427,52 @@ describe('the on-ramp the board keeps open, and we never took', () => {
       line('k00000000a8', 'Newer ordinary job', OUTSIDER, 99)
     ]);
     assert.equal(pickJob(jobs, { selfDid: SELF }).jobId, 'k00000000a8');
+  });
+});
+
+describe('the fourth seat: answering the answers to our own questions', () => {
+  // The spec keeps poster, worker and validator apart, so pickThinDelivery
+  // skips anything we posted. But it says just as plainly that the poster "may
+  // ACCEPT (useful) or reject" after delivery, worth 1 and needing no
+  // franchise. We had excluded ourselves from a seat we were entitled to —
+  // while one of our seven questions collected five deliveries and no answer.
+  const SCRIBE = 'did:key:z6MkScribeAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+  const OUTSIDER = 'did:key:z6MkOutsiderGGGGGGGGGGGGGGGGGGGGGGGGGGGGG';
+  const jobLine = (id, from) =>
+    ({ text: `JOB v1 | ${id} | research | Q | A long enough body to be a real question here.`, from, seq: 1 });
+
+  test('finds a stranger delivery on a job we posted', () => {
+    const jobs = reconstructBoard([
+      jobLine('k00000000b1', SELF),
+      { text: 'DELIVER v1 | k00000000b1 | Completed work on Q successfully.', from: OUTSIDER, seq: 2 }
+    ]);
+    const found = pickOwnJobDelivery(jobs, { posterDid: SELF, excludeDids: [SCRIBE] });
+    assert.equal(found.job.jobId, 'k00000000b1');
+  });
+
+  test('ignores jobs somebody else posted', () => {
+    // Those belong to the validator lane, which keeps the three parties apart.
+    const jobs = reconstructBoard([
+      jobLine('k00000000b2', OUTSIDER),
+      { text: 'DELIVER v1 | k00000000b2 | Completed work on Q successfully.', from: OUTSIDER, seq: 2 }
+    ]);
+    assert.equal(pickOwnJobDelivery(jobs, { posterDid: SELF, excludeDids: [SCRIBE] }), null);
+  });
+
+  test('never judges a delivery from either of our own keys', () => {
+    const jobs = reconstructBoard([
+      jobLine('k00000000b3', SELF),
+      { text: 'DELIVER v1 | k00000000b3 | Completed work on Q successfully.', from: SCRIBE, seq: 2 }
+    ]);
+    assert.equal(pickOwnJobDelivery(jobs, { posterDid: SELF, excludeDids: [SCRIBE] }), null);
+  });
+
+  test('says nothing twice about the same job', () => {
+    const jobs = reconstructBoard([
+      jobLine('k00000000b4', SELF),
+      { text: 'DELIVER v1 | k00000000b4 | Completed work on Q successfully.', from: OUTSIDER, seq: 2 },
+      { text: 'ATTEST v1 | k00000000b4 | not | already said so, at length', from: SELF, seq: 3 }
+    ]);
+    assert.equal(pickOwnJobDelivery(jobs, { posterDid: SELF, excludeDids: [SCRIBE] }), null);
   });
 });

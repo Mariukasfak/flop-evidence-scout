@@ -40,7 +40,7 @@ import { sayOnce } from './log-once.mjs';
 import {
   reconstructBoard, pickJob, pickThinDelivery, pickRealDelivery, sameDid,
   claimLine, resultLine, attestNotLine, attestUsefulLine, resultHashFor,
-  thinDeliveryReason, isAboutFlop
+  thinDeliveryReason, isAboutFlop, pickOwnJobDelivery, isThinDelivery
 } from './kibble.mjs';
 import { FACTS } from './flop-facts.mjs';
 import { nextQuestion, jobLine, jobIdFor } from './kibble-jobs.mjs';
@@ -230,6 +230,8 @@ export class KibbleEngine {
      * participation; more would be the farming this file avoids elsewhere.
      */
     briefGuardrails = new Guardrails({ maxPerHour: 3, minCooldownMs: 18 * 60_000 }),
+    /** Only our own seven questions can produce these, so this never runs hot. */
+    posterVerdictGuardrails = new Guardrails({ maxPerHour: 6, minCooldownMs: 60_000 }),
     stateKey = null,
     /** The scoring host. Only ever asked whether the worker is franchised. */
     kibbleApiUrl = 'https://flop-kibble.onrender.com',
@@ -253,6 +255,7 @@ export class KibbleEngine {
     this.validatorGuardrails = validatorGuardrails;
     this.posterGuardrails = posterGuardrails;
     this.briefGuardrails = briefGuardrails;
+    this.posterVerdictGuardrails = posterVerdictGuardrails;
     this.stateKey = stateKey || getStateKey(workerIdentity.did, 'kibble');
     this.kibbleApiUrl = String(kibbleApiUrl).replace(/\/+$/, '');
     this.fetchFn = fetchFn;
@@ -699,6 +702,72 @@ export class KibbleEngine {
     this.localState.briefsPosted = (this.localState.briefsPosted || 0) + 1;
     await this.saveRemoteState();
     return { action: 'brief_posted', key: brief.key, headline: brief.headline };
+  }
+
+  /**
+   * Answer the answers to our own questions.
+   *
+   * The fourth seat, and the one we had left empty. The spec keeps poster,
+   * worker and validator apart, so pickThinDelivery skips anything we posted —
+   * but it also says the poster "may ACCEPT (useful) or reject" after delivery,
+   * worth 1 and needing no franchise. Different seat, same table.
+   *
+   * It is also just honest. We asked seven real questions and got boilerplate
+   * back; one drew five deliveries and not one of them fetched the URL the
+   * question named. A question nobody answered, sitting there marked delivered,
+   * is worse for the board than a plain no.
+   *
+   * Only ever `not`, and only on the templates. Whether an answer to our own
+   * question was genuinely good is a judgement with our own interest on both
+   * sides of it, and that is not a call to make automatically.
+   */
+  async runPosterVerdictTurn({ backend, real, ledgerPath } = {}) {
+    await this.loadRemoteState();
+
+    let jobs;
+    try {
+      jobs = await this.readBoard();
+    } catch (err) {
+      return { action: 'read_failed', error: err.message };
+    }
+
+    const found = pickOwnJobDelivery(jobs, {
+      posterDid: this.workerIdentity.did,
+      excludeDids: [this.validatorIdentity.did]
+    });
+    if (!found) return { action: 'no_own_delivery' };
+    if (!isThinDelivery(found.delivery.summary)) return { action: 'own_delivery_not_thin' };
+
+    let why = thinDeliveryReason(found.job, found.delivery);
+    if (real && backend) {
+      try {
+        const task = buildTask('kibble-reason', {
+          title: found.job.title, body: found.job.body, delivery: found.delivery.summary
+        });
+        const { receipt, completion } = await runSession(task, { backend, identity: this.workerIdentity });
+        try { appendReceipt(receipt, ledgerPath); } catch { /* a ledger write must never lose the run */ }
+        const written = String(completion || '').trim().replace(/\s+/g, ' ');
+        if (task.validate(written)) why = written;
+      } catch { /* the composed sentence is the fallback */ }
+    }
+
+    const reason = `${why} Asked by: ${didCardUrl(this.client, this.workerIdentity)}`;
+    const line = attestNotLine(found.job.jobId, reason, resultHashFor(found.delivery.summary));
+
+    const check = this.posterVerdictGuardrails.canSendMessage(line);
+    if (!check.allowed) return { action: `paced: ${check.reason}`, jobId: found.job.jobId };
+
+    try {
+      await this.client.postMessage(this.room, line, this.workerIdentity);
+    } catch (err) {
+      sayOnce('kibble:poster-verdict', `[Kibble] Poster verdict failed: ${err.message}`);
+      return { action: 'post_failed', jobId: found.job.jobId, error: err.message };
+    }
+
+    this.posterVerdictGuardrails.recordSent(line);
+    this.localState.posterVerdicts = (this.localState.posterVerdicts || 0) + 1;
+    await this.saveRemoteState();
+    return { action: 'rejected_own_job_delivery', jobId: found.job.jobId };
   }
 
   /** Forget claims too old to answer honestly. */
