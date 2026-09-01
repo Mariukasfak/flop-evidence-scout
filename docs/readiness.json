@@ -1,60 +1,60 @@
 {
-  "checkedAt": "2026-09-01T05:11:18.827Z",
+  "checkedAt": "2026-09-01T10:08:18.803Z",
   "summary": {
-    "ready": 2,
-    "action": 10,
+    "ready": 1,
+    "action": 4,
     "blocked": 2,
-    "unreachable": 0
+    "unreachable": 7
   },
   "checks": [
     {
       "id": "did-scout",
       "label": "Scout identity published",
-      "state": "ACTION",
-      "detail": "/kv/did-a9/cf0724fc4e30b8 → 404",
-      "fix": "Run the daemon once so it republishes its DID note."
+      "state": "UNREACHABLE",
+      "detail": "/kv/did-6f/b2ca5028be7d4e → 503",
+      "fix": "Nothing to do: the server would not answer, so the note was never checked."
     },
     {
       "id": "did-scribe",
       "label": "Scribe identity published",
-      "state": "ACTION",
-      "detail": "/kv/did-1e/18a0e6dee2668e → 404",
-      "fix": "Run the daemon once so it republishes its DID note."
+      "state": "UNREACHABLE",
+      "detail": "/kv/did-d7/c82f7eb6afe8b2 → 503",
+      "fix": "Nothing to do: the server would not answer, so the note was never checked."
     },
     {
       "id": "state-size",
       "label": "State note fits the server limit",
-      "state": "ACTION",
-      "detail": "no state note readable",
-      "fix": "answeredAuthors is pruned by cooldown age on every save. If this is near the cap, something else in the state is growing without bound."
+      "state": "UNREACHABLE",
+      "detail": "could not be read — the server returned HTTP 503",
+      "fix": "Nothing to do here: this says the server is unwell, not that the note is wrong."
     },
     {
       "id": "collaboration",
-      "label": "Collaboration on record — but only between our own two keys",
-      "state": "ACTION",
-      "detail": "0 verified, 0 rejected; every counterparty is one of our own two DIDs",
+      "label": "Collaboration record could not be read",
+      "state": "UNREACHABLE",
+      "detail": "Technocore unreachable — nothing checked",
       "fix": "Signatures prove key control, nothing more. Two DIDs held by one operator signing each other proves neither independence nor usefulness, and Flop Labs has published no rule for how such a pair is treated. Worth having; not worth counting as reach. An exchange with an agent we do not control is the thing this check is waiting for."
     },
     {
       "id": "state-persistence",
       "label": "State survives restarts",
-      "state": "ACTION",
-      "detail": "no readable state note yet",
-      "fix": "The daemon must complete at least two turns and write state to /kv/."
+      "state": "UNREACHABLE",
+      "detail": "could not be read — the server returned HTTP 503",
+      "fix": "Nothing to do here: the history is in a note the server would not hand over."
     },
     {
       "id": "room-d-flop-facts",
       "label": "Room /r/d-flop-facts",
-      "state": "READY",
-      "detail": "claimed, exists",
-      "fix": "Room creation is refused while the service-wide room cap is full; the daemon retries."
+      "state": "UNREACHABLE",
+      "detail": "ownership unreadable, existence not checked — server returned 503",
+      "fix": "Technocore was unreachable. Re-run when it answers; nothing here is ours to fix."
     },
     {
       "id": "room-d-scout-telemetry",
       "label": "Room /r/d-scout-telemetry",
-      "state": "READY",
-      "detail": "claimed, exists",
-      "fix": "Room creation is refused while the service-wide room cap is full; the daemon retries."
+      "state": "UNREACHABLE",
+      "detail": "ownership unreadable, existence not checked — server returned 503",
+      "fix": "Technocore was unreachable. Re-run when it answers; nothing here is ours to fix."
     },
     {
       "id": "inference-backend",
@@ -66,9 +66,9 @@
     {
       "id": "ledger",
       "label": "Spend ledger is intact",
-      "state": "ACTION",
-      "detail": "0 receipts across 0 ledger(s), 0 counted, 0 simulated, 0 rejected, 0 malformed — official FLOP spent: 0 (no paid endpoint exists yet)",
-      "fix": "Run the agent, or tools/inference-bench.mjs, to start the ledger."
+      "state": "READY",
+      "detail": "1 receipts across 1 ledger(s), 1 counted, 0 simulated, 0 rejected, 0 malformed — official FLOP spent: 0 (no paid endpoint exists yet)",
+      "fix": "Investigate rejected or malformed receipts before trusting the total."
     },
     {
       "id": "source-watch",
@@ -81,7 +81,7 @@
       "id": "faucet-route",
       "label": "Faucet / session route published",
       "state": "BLOCKED",
-      "detail": "none among 28 documented paths",
+      "detail": "none among 0 documented paths",
       "fix": "Waiting on Flop Labs. auth.md asks that nobody probe for unpublished paths, so this watches openapi.json rather than guessing. A route cannot ship without appearing there."
     },
     {
