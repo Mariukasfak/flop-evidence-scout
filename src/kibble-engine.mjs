@@ -2,16 +2,27 @@
  * The daemon-facing half of kibble.mjs: actually posting, not just deciding what to post.
  *
  * kibble.mjs and tools/kibble-preview.mjs already answer "what would we do?" — this
- * answers "who does it, how often, and what happens after". Two identities, two jobs,
- * on purpose: the spec requires poster, worker and validator to be three different
- * parties, so the same DID can never claim a job and then judge one. Scout works,
- * Scribe validates.
+ * answers "who does it, how often, and what happens after".
+ *
+ * SIX LANES, TWO KEYS. Scout claims and answers; Scribe judges other people's
+ * work. They are separate because the spec keeps poster, worker and validator
+ * apart, and both are excluded from every picker so our own two keys can never
+ * end up on both ends of one job.
+ *
+ *   runFastLane          claims on sight, no inference — the race is won or
+ *                        lost in about a second and thinking first loses it
+ *   runWorkerTurn        answers what we already hold, after checking we won
+ *   runValidatorTurn     judges other people's template deliveries, in threes
+ *   runPosterVerdictTurn rejects non-answers to questions WE asked — a seat the
+ *                        spec gives the poster and we had left empty
+ *   runBriefTurn         publishes measurements, to the board and to our room
+ *   runPosterTurn        asks one of seven real questions, then stops
  *
  * Bootstrapping matters here specifically: the board's own scorer only counts a
  * "useful" ATTEST once the attesting side has a scored RESULT behind it — a
- * franchise that opens on the first genuine delivery. Until then the only honest
- * attestation available is `not`, which the spec exempts from that requirement,
- * and that is the only kind this file writes while unfranchised.
+ * franchise that opens on the first genuine delivery. Until that lands, `not`
+ * is the only attestation that scores, which the spec exempts, and it is what
+ * these lanes write.
  *
  * Both attestation lanes are here now. The `not` lane is regex-decided and
  * covers only the do-nothing templates, because a template is a pattern.
@@ -795,10 +806,22 @@ export class KibbleEngine {
           title: found.job.title, body: found.job.body, delivery: found.delivery.summary
         });
         const { receipt, completion } = await runSession(task, { backend, identity: this.workerIdentity });
-        try { appendReceipt(receipt, ledgerPath); } catch { /* a ledger write must never lose the run */ }
+        try { appendReceipt(receipt, ledgerPath); }
+    catch (err) {
+      // The ledger is the one asset the teaser actually scores — 51,374 receipts
+      // of real inference. Losing the run over a failed write would be worse, but
+      // losing it silently is how we would find out weeks late that a full disk
+      // had been quietly dropping the record of every session.
+      sayOnce('ledger:write', `[Ledger] Receipt write failed: ${err.message}`);
+    }
         const written = String(completion || '').trim().replace(/\s+/g, ' ');
         if (task.validate(written)) why = written;
-      } catch { /* the composed sentence is the fallback */ }
+      } catch (err) {
+        // Falling back is correct; doing it silently is not. A model that has
+        // stopped answering collapses reason variety, and the guard below would
+        // then stop this lane with no visible cause.
+        sayOnce('kibble:reason-model', `[Kibble] Reason model unavailable: ${err.message}`);
+      }
     }
 
     const reason = `${why} Asked by: ${didCardUrl(this.client, this.workerIdentity)}`;
@@ -906,7 +929,14 @@ export class KibbleEngine {
       category: job.category, title: job.title, body: job.body, facts
     });
     const { receipt, completion } = await runSession(task, { backend, identity: this.workerIdentity });
-    try { appendReceipt(receipt, ledgerPath); } catch { /* a ledger write must never lose the run */ }
+    try { appendReceipt(receipt, ledgerPath); }
+    catch (err) {
+      // The ledger is the one asset the teaser actually scores — 51,374 receipts
+      // of real inference. Losing the run over a failed write would be worse, but
+      // losing it silently is how we would find out weeks late that a full disk
+      // had been quietly dropping the record of every session.
+      sayOnce('ledger:write', `[Ledger] Receipt write failed: ${err.message}`);
+    }
 
     const answer = String(completion || '').trim();
     const release = () => {
@@ -1049,7 +1079,14 @@ export class KibbleEngine {
       body: found.job.body, delivery: found.delivery.summary
     });
     const { receipt, completion } = await runSession(task, { backend, identity: this.validatorIdentity });
-    try { appendReceipt(receipt, ledgerPath); } catch { /* a ledger write must never lose the run */ }
+    try { appendReceipt(receipt, ledgerPath); }
+    catch (err) {
+      // The ledger is the one asset the teaser actually scores — 51,374 receipts
+      // of real inference. Losing the run over a failed write would be worse, but
+      // losing it silently is how we would find out weeks late that a full disk
+      // had been quietly dropping the record of every session.
+      sayOnce('ledger:write', `[Ledger] Receipt write failed: ${err.message}`);
+    }
 
     const answer = String(completion || '').trim();
     if (!task.validate(answer)) return { action: 'useful_refused', jobId: found.job.jobId };
@@ -1180,10 +1217,19 @@ export class KibbleEngine {
           title: found.job.title, body: found.job.body, delivery: found.delivery.summary
         });
         const { receipt, completion } = await runSession(task, { backend, identity: this.validatorIdentity });
-        try { appendReceipt(receipt, ledgerPath); } catch { /* never lose the run over a ledger write */ }
+        try { appendReceipt(receipt, ledgerPath); }
+    catch (err) {
+      // The ledger is the one asset the teaser actually scores — 51,374 receipts
+      // of real inference. Losing the run over a failed write would be worse, but
+      // losing it silently is how we would find out weeks late that a full disk
+      // had been quietly dropping the record of every session.
+      sayOnce('ledger:write', `[Ledger] Receipt write failed: ${err.message}`);
+    }
         const written = String(completion || '').trim().replace(/\s+/g, ' ');
         if (task.validate(written)) why = written;
-      } catch { /* fall back to the composed sentence */ }
+      } catch (err) {
+        sayOnce('kibble:reason-model', `[Kibble] Reason model unavailable: ${err.message}`);
+      }
     }
     const reason = `${why} Verified by: ${didCardUrl(this.client, this.validatorIdentity)}`;
     // Bound to the exact delivery we judged. Jobs here carry several, and an
