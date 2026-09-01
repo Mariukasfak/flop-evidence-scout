@@ -131,13 +131,6 @@ const ABANDON_HEADROOM = 0.10;
 const NOT_USEFUL_BACKOFF = 0.60;
 
 /**
- * How many of our own reasons to keep, and how varied they must stay.
- *
- * The room's median validator runs at 0.07 — one sentence for fourteen
- * verdicts. Ours is at 0.90. The floor is not a target, it is the line below
- * which we would be adding to a pile the board already discards.
- */
-/**
  * How many verdicts one cycle may post.
  *
  * The batch was bounded only by the clock, which produced runs of six to twelve
@@ -153,6 +146,13 @@ const NOT_USEFUL_BACKOFF = 0.60;
  */
 const MAX_ATTESTS_PER_CYCLE = 3;
 
+/**
+ * How many of our own reasons to keep, and how varied they must stay.
+ *
+ * The room's median validator runs at 0.07 — one sentence for fourteen
+ * verdicts. Ours is at 0.90. The floor is not a target, it is the line below
+ * which we would be adding to a pile the board already discards.
+ */
 const REASON_WINDOW = 12;
 const MIN_REASON_VARIETY = 0.5;
 
@@ -286,6 +286,8 @@ export class KibbleEngine {
       claimsLost: 0
     };
     this.lastStateError = null;
+    /** One board read shared by every lane in a cycle. See readBoard. */
+    this.boardCache = null;
 
     /**
      * Whether the remote note has been merged yet.
@@ -357,9 +359,27 @@ export class KibbleEngine {
     }
   }
 
-  async readBoard() {
+  /**
+   * The board, read once a cycle rather than once a lane.
+   *
+   * Three lanes wanted it — the worker, the validator and the poster's verdict
+   * — and each fetched its own copy of the same 200 messages. That is three
+   * requests where one would do, three chances to hit a 503 instead of one, and
+   * on a server measured at 51 read failures in 600 audit records it is the
+   * single cheapest thing to stop doing. The lanes run inside one cycle, so a
+   * copy a few seconds old is the same board.
+   *
+   * Short by design. Long enough that one cycle shares one read, far too short
+   * to carry stale claims into the next.
+   */
+  async readBoard({ maxAgeMs = 20_000, now = () => Date.now() } = {}) {
+    if (this.boardCache && now() - this.boardCache.at < maxAgeMs) {
+      return this.boardCache.jobs;
+    }
     const { messages } = await this.client.readRoom(this.room, { limit: READ_WINDOW });
-    return reconstructBoard(messages);
+    const jobs = reconstructBoard(messages);
+    this.boardCache = { jobs, at: now() };
+    return jobs;
   }
 
   /**
@@ -909,9 +929,23 @@ export class KibbleEngine {
     const withCard = `${answer}\n\n(verified worker: ${didCardUrl(this.client, this.workerIdentity)})`;
     const line = resultLine(job.jobId, withCard);
 
-    // The real gate — content safety, length, dedup — against the actual line.
-    const finalCheck = this.workerGuardrails.canSendMessage(line);
-    if (!finalCheck.allowed) return { action: `blocked: ${finalCheck.reason}`, jobId: job.jobId };
+    /**
+     * Content and dedup, but deliberately NOT the rate limit.
+     *
+     * The cooldown belongs on claiming, and that is where it already sits —
+     * runFastLane checks it before every claim. Applying it again here paced
+     * the wrong thing: delivering is not a new initiative, it is settling a
+     * debt on a claim already made in public. Holding that back is strictly
+     * worse than posting it, because an unanswered claim blocks the job for
+     * everyone else while the board ignores any later claimant.
+     *
+     * Measured before this changed: the worker generated an answer, was blocked
+     * by the cooldown, and retried the same job on the next cycle — k64e591871e
+     * three times, k240b16bc47 twice, a model session burned on each. That is
+     * the "waiting everywhere" the operator was looking at.
+     */
+    const safety = this.workerGuardrails.validateContent(line);
+    if (!safety.valid) return { action: `blocked: ${safety.reason}`, jobId: job.jobId };
 
     // The CLAIM already went out in the fast lane; posting it again here would
     // be the competing claim we are trying not to file.

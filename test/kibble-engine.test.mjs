@@ -715,6 +715,41 @@ describe('keeping our own room alive', () => {
   });
 });
 
+describe('one board read per cycle, not one per lane', () => {
+  // Three lanes each fetched their own copy of the same 200 messages: three
+  // requests where one would do, and three chances to hit a 503 rather than
+  // one. Measured 51 read failures in 600 audit records, so this is the
+  // cheapest thing available to stop doing.
+  test('a second read inside the window reuses the first', async () => {
+    const client = makeClient({ roomMessages: [] });
+    let reads = 0;
+    const wrapped = { ...client, async readRoom(...a) { reads += 1; return client.readRoom(...a); } };
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client: wrapped
+    });
+
+    await engine.readBoard();
+    await engine.readBoard();
+    await engine.readBoard();
+    assert.equal(reads, 1, 'three lanes, one request');
+  });
+
+  test('and a later cycle reads again rather than serving a stale board', async () => {
+    const client = makeClient({ roomMessages: [] });
+    let reads = 0;
+    const wrapped = { ...client, async readRoom(...a) { reads += 1; return client.readRoom(...a); } };
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client: wrapped
+    });
+
+    let t = 0;
+    await engine.readBoard({ now: () => t });
+    t = 60_000;
+    await engine.readBoard({ now: () => t });
+    assert.equal(reads, 2, 'a minute later is a different board');
+  });
+});
+
 describe('KibbleEngine state ownership', () => {
   test('the remote note is read once, not on every turn', async () => {
     const client = makeClient({ roomMessages: [] });
