@@ -875,9 +875,16 @@ export async function runScoutDaemon(options = {}) {
             console.log(`[Kibble/Poster] Skipped — ${err.message}`);
           }
           try {
-            const kibbleValidator = await timed('kibbleValidator', () => kibbleEngine.runValidatorTurn({ backend, real, ledgerPath }));
+            // Whatever this cycle can still spare, so the batch is bounded by the
+            // clock rather than by a number anybody chose.
+            const validatorMs = Math.max(3_000,
+              config.intervalMs - (Date.now() - cycleTop) - MIN_LANE_MARGIN_MS - 8_000);
+            const kibbleValidator = await timed('kibbleValidator',
+              () => kibbleEngine.runValidatorTurn({ backend, real, ledgerPath, maxMs: validatorMs }));
             if (kibbleValidator.action !== 'no_target') {
-              console.log(`[Kibble/Validator] ${kibbleValidator.action}${kibbleValidator.jobId ? ` — ${kibbleValidator.jobId}` : ''}`);
+              console.log(`[Kibble/Validator] ${kibbleValidator.action}`
+                + `${kibbleValidator.posted ? ` ×${kibbleValidator.posted}` : ''}`
+                + `${kibbleValidator.jobId ? ` — ${kibbleValidator.jobId}` : ''}`);
             }
             appendAudit(config.auditLogPath, { agent: 'kibble-validator', ...kibbleValidator });
           } catch (err) {

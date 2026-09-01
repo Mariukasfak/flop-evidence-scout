@@ -158,7 +158,10 @@ export class KibbleEngine {
      */
     workerGuardrails = new Guardrails({ maxPerHour: 6, minCooldownMs: 5 * 60_000 }),
     /**
-     * Raised to 12/hour against the room's own distribution.
+     * A safety net rather than the pacing: runValidatorTurn batches until the
+     * room or the clock stops it, and this only exists so a bug in that loop
+     * cannot become a thousand posts an hour. Set well above anything the batch
+     * should reach on its own.
      *
      * This is our largest scoring term and the only one with no race, no claim
      * to abandon and no answer of ours to be judged — `attestations_given` is
@@ -189,7 +192,7 @@ export class KibbleEngine {
      * that volume — which is visible in our own score, once we are inside the
      * top 48 the board actually publishes.
      */
-    validatorGuardrails = new Guardrails({ maxPerHour: 30, minCooldownMs: 90_000 }),
+    validatorGuardrails = new Guardrails({ maxPerHour: 120, minCooldownMs: 0 }),
     /**
      * Slow on purpose. The bank holds seven real questions, and a board that
      * gets all of them inside an hour is being spammed, not asked.
@@ -930,7 +933,26 @@ export class KibbleEngine {
    * is the one thing this file can do from the very first cycle, before the worker
    * has ever delivered anything.
    */
-  async runValidatorTurn({ backend, real, ledgerPath } = {}) {
+  /**
+   * Judge as many template deliveries as the room offers and the clock allows.
+   *
+   * This used to do exactly one per cycle behind a rate I had picked, and I
+   * picked it wrong four times running — 3, then 6, then 12, then 30, each
+   * raised because measurement showed the last one was leaving work on the
+   * floor. The number was never the problem; choosing it by judgement was.
+   *
+   * So the batch is not capped by a figure. It stops when the room runs out of
+   * template deliveries we may honestly judge, or when the time this cycle can
+   * spare runs out — a physical limit rather than an opinion. Measured supply
+   * at the time of writing: 1,113 unattested template deliveries in one export,
+   * arriving at roughly 445 an hour, against a cap of 12.
+   *
+   * What still bounds it, and should: only the four literal templates, never
+   * our own two keys, never the same job twice, and every reason written by a
+   * model about that specific delivery. Volume without those is the farming
+   * this board discards — its own policy_skipped counter stood at 42,862.
+   */
+  async runValidatorTurn({ backend, real, ledgerPath, maxMs = 20_000, now = () => Date.now() } = {}) {
     await this.loadRemoteState();
     this.localState.totalValidatorTurns += 1;
 
@@ -941,18 +963,28 @@ export class KibbleEngine {
       return { action: 'read_failed', error: err.message };
     }
 
+    const deadline = now() + maxMs;
+    // Jobs settled inside this batch. Our own attestation is not on the board
+    // we are holding, so without this the next pass picks the same job again.
+    const done = new Set();
+    let posted = 0;
+    let lastJobId = null;
+
+    for (;;) {
     const found = pickThinDelivery(jobs, {
       selfDid: this.validatorIdentity.did,
-      excludeDids: [this.workerIdentity.did]
+      excludeDids: [this.workerIdentity.did],
+      skipJobIds: done
     });
     if (!found) {
       // Nothing plainly empty to call out. The room is short of validators
       // either way, so spend the turn judging something real instead.
+      if (posted) break;
       return this.attemptUsefulAttest({ backend, real, ledgerPath, jobs });
     }
 
     const paced = this.validatorGuardrails.canSendMessage(`kibble-attest-probe-${found.job.jobId}`);
-    if (!paced.allowed) return { action: `paced: ${paced.reason}`, jobId: found.job.jobId };
+    if (!paced.allowed) { if (posted) break; return { action: `paced: ${paced.reason}`, jobId: found.job.jobId }; }
 
     // Written by the model about this delivery, because a skeleton with slots
     // filled in is still one sentence wearing different clothes. The composed
@@ -976,12 +1008,13 @@ export class KibbleEngine {
     const line = attestNotLine(found.job.jobId, reason, resultHashFor(found.delivery.summary));
 
     const finalCheck = this.validatorGuardrails.canSendMessage(line);
-    if (!finalCheck.allowed) return { action: `blocked: ${finalCheck.reason}`, jobId: found.job.jobId };
+    if (!finalCheck.allowed) { done.add(found.job.jobId); if (now() < deadline) continue; break; }
 
     try {
       await this.client.postMessage(this.room, line, this.validatorIdentity);
     } catch (err) {
       sayOnce('kibble:validator-post', `[Kibble] Validator post failed: ${err.message}`);
+      if (posted) break;
       return { action: 'post_failed', jobId: found.job.jobId, error: err.message };
     }
 
@@ -989,8 +1022,20 @@ export class KibbleEngine {
     this.localState.attestsPosted += 1;
     this.localState.lastAttestJobId = found.job.jobId;
     this.localState.lastAttestAt = new Date().toISOString();
-    await this.saveRemoteState();
+    done.add(found.job.jobId);
+    posted += 1;
+    lastJobId = found.job.jobId;
 
-    return { action: 'attested_not', jobId: found.job.jobId, attestsPosted: this.localState.attestsPosted };
+    if (now() >= deadline) break;
+    }
+
+    if (!posted) return { action: 'no_target' };
+    // One save for the batch rather than per attestation: it is the same object
+    // either way, and a note write each time would spend the cycle on bookkeeping.
+    await this.saveRemoteState();
+    return {
+      action: 'attested_not', posted, jobId: lastJobId,
+      attestsPosted: this.localState.attestsPosted
+    };
   }
 }

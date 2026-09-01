@@ -521,6 +521,87 @@ describe('publishing measurements rather than opinions', () => {
   });
 });
 
+/**
+ * The validator used to do one attestation per cycle behind a rate picked by
+ * hand — 3, then 6, then 12, then 30, each raised because measurement showed
+ * the last was leaving work on the floor. It now runs until the room or the
+ * clock stops it, and these pin what still bounds it.
+ */
+describe('KibbleEngine validator batch', () => {
+  const OUTSIDER2 = 'did:key:z6MkOutsiderEEEEEEEEEEEEEEEEEEEEEEEEEEEEE';
+
+  /** N jobs, each with one template delivery from a stranger. */
+  const roomOfSlop = (n) => Array.from({ length: n }, (_, i) => {
+    const id = 'k000000' + String(i).padStart(4, '0');
+    return [
+      { text: `JOB v1 | ${id} | explain | T ${i} | A long enough body to be a real question here.`, from: OUTSIDER2, seq: i * 2 + 1 },
+      { text: `DELIVER v1 | ${id} | Completed work on T ${i} successfully.`, from: OUTSIDER2, seq: i * 2 + 2 }
+    ];
+  }).flat();
+
+  const engineOn = (client) => new KibbleEngine({
+    workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client
+  });
+
+  test('judges many in one turn instead of one', async () => {
+    const client = makeClient({ roomMessages: roomOfSlop(12) });
+    const engine = engineOn(client);
+
+    const result = await engine.runValidatorTurn({ maxMs: 5000 });
+    assert.equal(result.action, 'attested_not');
+    assert.ok(result.posted > 1, `posted ${result.posted}, the whole point is more than one`);
+    assert.equal(client.posts.length, result.posted);
+  });
+
+  test('never judges the same job twice inside a batch', async () => {
+    // Our own attestation is not on the board we are holding, so without a
+    // local record the next pass picks the same job straight back up.
+    const client = makeClient({ roomMessages: roomOfSlop(6) });
+    const engine = engineOn(client);
+
+    await engine.runValidatorTurn({ maxMs: 5000 });
+    const ids = client.posts.map((p) => p.text.match(/k\d{10}/)[0]);
+    assert.equal(new Set(ids).size, ids.length, 'every attestation is about a different job');
+  });
+
+  test('stops when the room runs out rather than repeating itself', async () => {
+    const client = makeClient({ roomMessages: roomOfSlop(3) });
+    const engine = engineOn(client);
+
+    const result = await engine.runValidatorTurn({ maxMs: 5000 });
+    assert.equal(result.posted, 3, 'three targets, three attestations, no more');
+  });
+
+  test('stops when the clock runs out even with work left', async () => {
+    const client = makeClient({ roomMessages: roomOfSlop(50) });
+    const engine = engineOn(client);
+
+    // A clock that has already expired: the batch may post once and must stop.
+    let t = 0;
+    const result = await engine.runValidatorTurn({ maxMs: 0, now: () => (t += 1000) });
+    assert.ok(result.posted <= 2, `posted ${result.posted} against an expired budget`);
+    assert.ok(client.posts.length < 50);
+  });
+
+  test('a batch still never touches our own two keys', async () => {
+    const workerIdentity = generateIdentity();
+    const validatorIdentity = generateIdentity();
+    const client = makeClient({
+      roomMessages: [
+        { text: 'JOB v1 | k0000009991 | explain | T | A long enough body to be a real question here.', from: OUTSIDER2, seq: 1 },
+        { text: 'DELIVER v1 | k0000009991 | Completed work on T successfully.', from: workerIdentity.did, seq: 2 },
+        { text: 'JOB v1 | k0000009992 | explain | T | A long enough body to be a real question here.', from: OUTSIDER2, seq: 3 },
+        { text: 'DELIVER v1 | k0000009992 | Completed work on T successfully.', from: validatorIdentity.did, seq: 4 }
+      ]
+    });
+    const engine = new KibbleEngine({ workerIdentity, validatorIdentity, client });
+
+    const result = await engine.runValidatorTurn({ maxMs: 5000 });
+    assert.notEqual(result.action, 'attested_not');
+    assert.equal(client.posts.length, 0, 'two keys on one machine never judge each other');
+  });
+});
+
 describe('KibbleEngine state ownership', () => {
   test('the remote note is read once, not on every turn', async () => {
     const client = makeClient({ roomMessages: [] });
