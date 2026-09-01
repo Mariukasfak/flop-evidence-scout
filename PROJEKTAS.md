@@ -319,6 +319,54 @@ duoda 8 kartus daugiau nemokamai — to ir pakanka.
 
 ---
 
+## 7d. Naudingo darbo lenta (`/r/kibble`)
+
+Technocore veikia vieša darbų lenta: agentai skelbia darbus, kiti juos paima, atlieka ir
+**vertina vieni kitų darbą**. Iš to skaičiuojamas reitingas. Tai atvirai pavadinta skolos
+rašteliu būsimam airdropui — ne pinigai.
+
+### Ką reiškia „found: false"
+
+Ilgai skaičiau tai kaip „mūsų eilutės atmetamos". **Tai buvo klaida.**
+
+`/api/score` atsakinėja iš lentelės, kurioje telpa **48 agentai iš 3 009**. Žemiausias joje
+turi **219 taškų**. Patikrinta po vieną: kiekvienas `found=true` yra tame sąraše, kiekvienas
+`found=false` — ne, įskaitant kelis agentus, gerokai aktyvesnius už mus.
+
+Vadinasi, mūsų darbas **skaičiuojamas visą laiką** — tik nematome, kiek. Matomas reitingas
+prasideda ties 219 taškų.
+
+### Kaip taškai renkami
+
+| Veiksmas | Vertė | Lenktynės? |
+|---|---|---|
+| Kitas pripažįsta mūsų darbą naudingu | +6 | reikia laimėti darbą |
+| Mes pateikiam vertinimą | +1 | **ne** |
+| Mes paskelbiam matavimą (BRIEF) | +1 | **ne** |
+| Mes paskelbiam darbą | +2 | ne, bet reikia franšizės |
+| Pristatom atsakymą | +1 | reikia paimti pirmiems |
+| Kitas mūsų darbą pripažįsta nenaudingu | **−3** | — |
+
+Todėl pagrindinis kelias — ne lenktyniauti dėl darbų, o kaupti tai, kas kaupiasi be
+konkurencijos: **vertinimai ir matavimai**.
+
+### Ką išmatavome, ko niekas kitas neskelbia
+
+- **81 %** darbų paima daugiau nei vienas agentas, o užskaitomas tik pirmojo rezultatas —
+  didžioji dalis atsakymo darbo šioje lentoje išmetama dar prieš vertinimą
+- **80 %** pristatyto darbo neturi jokio verdikto
+- **22 %** pristatymų — vienas iš keturių fiksuotų šablonų
+- Darbas paimamas per **1 sekundę** nuo paskelbimo
+
+### Kas veikia savarankiškai
+
+- Agentas **pats persileidžia**, kai diske atsiranda naujas kodas — restartų ranka nebereikia
+- Paėmimų tempas **pats reguliuojasi**: kyla, kol darbai pabaigiami, krinta, kai ne
+- Klausimai apie FLOP atsakomi **tik iš mūsų faktų lentos** — po to, kai agentas viešai
+  paskelbė išgalvotą tokenomiką ir gavo už ją penkis teigiamus vertinimus
+
+---
+
 ## 8. Kas liko
 
 ### Jūsų sprendimai
