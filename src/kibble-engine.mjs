@@ -44,6 +44,7 @@ import {
 } from './kibble.mjs';
 import { FACTS } from './flop-facts.mjs';
 import { nextQuestion, jobLine, jobIdFor } from './kibble-jobs.mjs';
+import { boardBriefs, instrumentBriefs, nextBrief, briefLine } from './kibble-briefs.mjs';
 
 /** How many refused job ids to remember, so a bad answer is not regenerated forever. */
 const MAX_REMEMBERED = 200;
@@ -163,6 +164,12 @@ export class KibbleEngine {
      * gets all of them inside an hour is being spammed, not asked.
      */
     posterGuardrails = new Guardrails({ maxPerHour: 1, minCooldownMs: 45 * 60_000 }),
+    /**
+     * In line with the room rather than above it: 73 agents posted 409 briefs
+     * in one 2.2-hour window, a median of 6 each. Three an hour is ordinary
+     * participation; more would be the farming this file avoids elsewhere.
+     */
+    briefGuardrails = new Guardrails({ maxPerHour: 3, minCooldownMs: 18 * 60_000 }),
     stateKey = null,
     /** The scoring host. Only ever asked whether the worker is franchised. */
     kibbleApiUrl = 'https://flop-kibble.onrender.com',
@@ -185,6 +192,7 @@ export class KibbleEngine {
     this.workerGuardrails = workerGuardrails;
     this.validatorGuardrails = validatorGuardrails;
     this.posterGuardrails = posterGuardrails;
+    this.briefGuardrails = briefGuardrails;
     this.stateKey = stateKey || getStateKey(workerIdentity.did, 'kibble');
     this.kibbleApiUrl = String(kibbleApiUrl).replace(/\/+$/, '');
     this.fetchFn = fetchFn;
@@ -365,9 +373,8 @@ export class KibbleEngine {
         ...(this.localState.refusedJobIds || []),
         ...(this.localState.heldJobs || []).map((h) => h.jobId)
       ]);
-      const job = pickJob(reconstructBoard(messages), {
-        selfDid: this.workerIdentity.did, skipJobIds
-      });
+      const jobsInBatch = reconstructBoard(messages);
+      const job = pickJob(jobsInBatch, { selfDid: this.workerIdentity.did, skipJobIds });
       if (!job) continue;
 
       const paced = this.workerGuardrails.canSendMessage(`kibble-claim-${job.jobId}`);
@@ -386,6 +393,25 @@ export class KibbleEngine {
         { jobId: job.jobId, category: job.category, title: job.title, body: job.body, claimedAt: now() }
       ];
       claimed += 1;
+
+      /**
+       * How long after posting somebody first claimed this job.
+       *
+       * Both timestamps come from the server, never from our clock, which is
+       * about four seconds adrift from it — an earlier measurement of "latency"
+       * came out negative for exactly that reason and was thrown away. Kept
+       * because it is the one figure on this board nobody can recompute from
+       * the tape alone; see instrumentBriefs.
+       */
+      const posted = job.ts ? new Date(job.ts).getTime() : null;
+      const firstClaim = jobsInBatch.get(job.jobId)?.claims?.[0]?.ts;
+      if (posted && firstClaim) {
+        const latency = new Date(firstClaim).getTime() - posted;
+        if (latency >= 0 && latency < 600_000) {
+          this.localState.claimLatencies =
+            [...(this.localState.claimLatencies || []), latency].slice(-200);
+        }
+      }
     }
 
     await this.saveRemoteState();
@@ -575,6 +601,44 @@ export class KibbleEngine {
     await this.saveRemoteState();
 
     return { action: 'job_posted', jobId: jobIdFor(question.key), key: question.key };
+  }
+
+  /**
+   * Publish one measurement, or nothing.
+   *
+   * The only lane here with no race to lose, no claim to abandon and no answer
+   * of ours to be judged — and the one that is simply what this project does.
+   * Every number is counted from the board we already hold or read off our own
+   * instruments, and each brief is posted once: when there is nothing new to
+   * report, this reports nothing.
+   */
+  async runBriefTurn({ jobs = null } = {}) {
+    await this.loadRemoteState();
+
+    const board = jobs || (await this.fetchVerdictBoard({ ttlMs: 20 * 60_000 }));
+    const candidates = [
+      ...instrumentBriefs({ claimLatencies: this.localState.claimLatencies || [] }),
+      ...(board ? boardBriefs(board) : [])
+    ];
+    const brief = nextBrief(candidates, this.localState.postedBriefKeys || []);
+    if (!brief) return { action: 'nothing_new_to_report' };
+
+    const line = briefLine(brief.headline, brief.body);
+    const paced = this.briefGuardrails.canSendMessage(line);
+    if (!paced.allowed) return { action: `paced: ${paced.reason}` };
+
+    try {
+      await this.client.postMessage(this.room, line, this.validatorIdentity);
+    } catch (err) {
+      sayOnce('kibble:brief-post', `[Kibble] Brief post failed: ${err.message}`);
+      return { action: 'post_failed', error: err.message };
+    }
+
+    this.briefGuardrails.recordSent(line);
+    this.localState.postedBriefKeys = [...(this.localState.postedBriefKeys || []), brief.key];
+    this.localState.briefsPosted = (this.localState.briefsPosted || 0) + 1;
+    await this.saveRemoteState();
+    return { action: 'brief_posted', key: brief.key, headline: brief.headline };
   }
 
   /** Forget claims too old to answer honestly. */

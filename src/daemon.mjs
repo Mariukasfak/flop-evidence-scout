@@ -857,6 +857,15 @@ export async function runScoutDaemon(options = {}) {
             console.log(`[Kibble/Worker] Skipped — ${err.message}`);
           }
           try {
+            const kibbleBrief = await timed('kibbleBrief', () => kibbleEngine.runBriefTurn());
+            if (kibbleBrief.action === 'brief_posted') {
+              console.log(`[Kibble/Brief] ${kibbleBrief.headline}`);
+              appendAudit(config.auditLogPath, { agent: 'kibble-brief', ...kibbleBrief });
+            }
+          } catch (err) {
+            console.log(`[Kibble/Brief] Skipped — ${err.message}`);
+          }
+          try {
             const kibblePoster = await timed('kibblePoster', () => kibbleEngine.runPosterTurn());
             if (kibblePoster.action === 'job_posted') {
               console.log(`[Kibble/Poster] asked ${kibblePoster.key} (${kibblePoster.jobId})`);

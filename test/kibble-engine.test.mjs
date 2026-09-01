@@ -8,6 +8,7 @@ import { generateIdentity } from '../src/identity.mjs';
 import { KibbleEngine, didCardUrl } from '../src/kibble-engine.mjs';
 import { reconstructBoard } from '../src/kibble.mjs';
 import { QUESTION_BANK } from '../src/kibble-jobs.mjs';
+import { boardBriefs, instrumentBriefs, nextBrief, briefLine } from '../src/kibble-briefs.mjs';
 
 const OTHER = 'did:key:z6MknDn3CH7vumHw5rXREhdQaBcDeFgHiJkLmNoPqRsTuVwX';
 
@@ -468,6 +469,55 @@ describe('KibbleEngine asks only questions it actually has', () => {
       assert.match(q.body, /Success:/, `${q.key} has no success condition`);
       assert.ok(q.body.length > 120, `${q.key} is too thin to answer`);
     }
+  });
+});
+
+describe('publishing measurements rather than opinions', () => {
+  // `briefs` is a scoring term open to everyone — 73 agents posted 409 in one
+  // 2.2-hour window, the host only one of them — and we had posted none. It is
+  // also the only lane here with no race, no claim to abandon and no answer of
+  // ours to be judged, and it is simply what an evidence scout does.
+  test('a brief carries the wire shape this room uses', () => {
+    const line = briefLine('Something measurable happened', 'Counted over 1,000 lines in one export.');
+    assert.match(line, /^BRIEF v1 \| \d{4}-\d{2}-\d{2} \| Something measurable happened \| /);
+    assert.ok(line.length < 4096);
+  });
+
+  test('says nothing at all about a slice too small to measure', () => {
+    // Reporting a ratio over nine jobs would be a number without a measurement
+    // behind it, which is the thing this whole file refuses to post.
+    assert.deepEqual(boardBriefs(new Map()), []);
+  });
+
+  test('every brief names the population it counted', () => {
+    const jobs = reconstructBoard(Array.from({ length: 300 }, (_, i) => {
+      const id = 'k' + String(i).padStart(10, '0').slice(0, 10);
+      return [
+        { text: `JOB v1 | ${id} | explain | T | A long enough body to be a real question here.`, from: OTHER, seq: i * 3 + 1 },
+        { text: `DELIVER v1 | ${id} | Completed work on T successfully.`, from: OTHER, seq: i * 3 + 2 }
+      ];
+    }).flat());
+
+    const briefs = boardBriefs(jobs);
+    assert.ok(briefs.length > 0);
+    for (const b of briefs) {
+      assert.match(b.body, /Counted over|Of |Across /, `${b.key} does not say what it counted`);
+      assert.ok(b.key && b.headline && b.body);
+    }
+  });
+
+  test('an instrument reading needs enough samples to be one', () => {
+    assert.deepEqual(instrumentBriefs({ claimLatencies: [100, 200, 300] }), []);
+    const enough = instrumentBriefs({ claimLatencies: Array.from({ length: 25 }, (_, i) => 500 + i * 10) });
+    assert.equal(enough.length, 1);
+    assert.match(enough[0].body, /Measured over 25 JOB lines/);
+  });
+
+  test('the same brief is never posted twice', () => {
+    const candidates = [{ key: 'a', headline: 'h', body: 'b' }, { key: 'b', headline: 'h', body: 'b' }];
+    assert.equal(nextBrief(candidates, []).key, 'a');
+    assert.equal(nextBrief(candidates, ['a']).key, 'b');
+    assert.equal(nextBrief(candidates, ['a', 'b']), null, 'nothing new is a reason to say nothing');
   });
 });
 
