@@ -99,6 +99,28 @@ export function collect(audit) {
   };
 }
 
+/**
+ * What is already established, so a watcher does not report it as news.
+ *
+ * On the channel's first evening the watcher sent the same facts three times —
+ * Technocore 0.11.4, the tclk repo, no faucet — each time worded differently,
+ * which is precisely what the identical-note filter cannot catch. That is not
+ * a fault in the bot: it has no way to know what we already hold. So the brief
+ * it reads before every report now says so, and the version comes from the
+ * source watcher's own last check rather than a number typed in here, which
+ * would go stale the day it changed.
+ */
+function baseline() {
+  const watch = readJson(path.resolve('docs/watch/state.json')) || {};
+  const version = watch.sources?.['agent-json']?.summary || 'nežinoma';
+  return [
+    `Technocore: ${version} (mūsų sekiklis tikrino ${watch.checkedAt || '—'})`,
+    'flop-labs repozitorijos: technocore-chat ir tclk — abi žinomos, tclk/1 juosta pas mus veikia nuo 2026-09-02',
+    'Joks atsiskaitymo bėgis nelaiko vertės; oficialaus faucet nėra',
+    'kibble = IOU juosta, ne oficialus FLOP skaičiavimas; mūsų kelias — vertinimai ir matavimai, ne lenktynės dėl darbų'
+  ];
+}
+
 async function main() {
   const audit = tailAudit(path.join(DATA, 'scout-audit.jsonl'), 4000);
   const stats = collect(audit);
@@ -172,6 +194,15 @@ ${models.up ? `veikia, modeliai: ${models.models.join(', ') || '—'}` : `neatsa
 
 ## tclk sandoris
 ${deal ? `${deal.status}, sutartis \`${String(deal.contract).slice(0, 18)}…\`, mokėtojas \`…${String(deal.payer || '').slice(-8)}\`, terminas ${new Date(deal.claimByMs).toISOString()}` : 'nėra vykstančio'}
+
+---
+
+## Ką jau žinome — šito pranešti nereikia
+
+${baseline().map((f) => `- ${f}`).join('\n')}
+
+Verta pranešimo tik **nukrypimas** nuo šito: nauja versija, naujas repozitorijas,
+atsiradęs faucet, bėgis su tikra verte, arba kas nors, kas prieštarauja aukščiau.
 
 ---
 
