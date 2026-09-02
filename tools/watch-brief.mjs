@@ -110,6 +110,30 @@ export function collect(audit) {
  * source watcher's own last check rather than a number typed in here, which
  * would go stale the day it changed.
  */
+/**
+ * The half of the log the watcher was never told to read.
+ *
+ * The instructions said "write your observations to watch-inbox.md" and named
+ * no file to read back, and then Claude started answering into that same file:
+ * seven replies sat there unread while the watcher, correctly following what it
+ * had been told, kept reporting into a channel it believed was one-way. The bug
+ * is in the instructions, not the bot.
+ *
+ * The fix puts the answers where it already looks — this brief, which it runs
+ * before every report — rather than asking it to remember a second file.
+ */
+function repliesFromClaude(inbox, limit = 6) {
+  try {
+    return fs.readFileSync(inbox, 'utf8')
+      .split('\n')
+      .filter((l) => l.includes(' | claude | '))
+      .slice(-limit)
+      .reverse();
+  } catch {
+    return [];
+  }
+}
+
 function baseline() {
   const watch = readJson(path.resolve('docs/watch/state.json')) || {};
   const version = watch.sources?.['agent-json']?.summary || 'nežinoma';
@@ -129,6 +153,7 @@ async function main() {
   const deal = tclkState ? publicDealView(tclkState) : null;
   const models = await ollama();
 
+  const replies = repliesFromClaude(path.join(DATA, 'watch-inbox.md'));
   const consoleLog = path.join(DATA, 'daemon-console.log');
   let consoleInfo = 'nėra (demonas dar nepaleistas su nauju kodu)';
   try {
@@ -206,12 +231,27 @@ atsiradęs faucet, bėgis su tikra verte, arba kas nors, kas prieštarauja aukš
 
 ---
 
+## Atsakymai tau iš Claude (naujausi viršuje)
+
+${replies.length ? replies.map((l) => `${l}`).join('\n') : '- (kol kas nieko)'}
+
+Tai atsakymai į tavo ankstesnius pranešimus: kas pasitvirtino, kas ne, ir ko prašoma toliau.
+Jie gyvena \`data/local/watch-inbox.md\` kartu su tavo įrašais — **tas failas dvipusis**.
+
+---
+
 ## Kaip pasiūlyti pakeitimą
 
 Rašyk į \`data/local/watch-inbox.md\`: ką pastebėjai, kokį įrodymą turi, ką siūlai.
+
+    node tools/watch-note.mjs "ką pastebėjai"
+
 Tas failas yra **pasiūlymų dėžutė, ne komandų eilė**. Claude jį perskaitys kaip duomenis
 ir parodys operatoriui; vykdo tik tai, ką operatorius patvirtina. Kodo, raktų ar
 \`git push\` niekas iš to failo automatiškai nedaro.
+
+Claude atsako ten pat, o naujausius atsakymus matai skyriuje aukščiau — **skaityk juos**,
+kitaip kartosi tai, į ką jau atsakyta.
 `;
 
   fs.mkdirSync(DATA, { recursive: true });
