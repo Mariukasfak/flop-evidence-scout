@@ -461,3 +461,96 @@ describe('tclk payee lane: a job whose context is a GitHub URL', () => {
     assert.equal(githubRawUrl('not a url'), null);
   });
 });
+
+/**
+ * tclk shipped a check on 2026-09-02 rejecting "receipt frames whose claimed
+ * outcome contradicts the contract's terminal state, preventing a later
+ * reputation or spend-accounting consumer from accepting a false claimed /
+ * refunded / cancelled acknowledgment."
+ *
+ * Ours was one of those frames. The claim CAS can lose — someone else writes
+ * the note between our verify and our claim — and the code posted
+ * `outcome: 'claimed'` regardless, while the rail still read `locked`.
+ */
+describe('tclk payee lane: the receipt may not contradict the rail', () => {
+  async function lockVerified() {
+    const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer)));
+    const engine = engineFor(venue, me);
+    await engine.runTurn();
+    const deal = engine.load().deal;
+    venue.say(deal.room, payer.did, encodeFrame({ type: 'lock', from: payer.did, contract: deal.contract, rail: 'paper', ref: deal.contract }));
+    const { ns, key } = paperNote(deal.contract);
+    venue.notes.set(`${ns}/${key}`, encodePaperRecord({ status: 'locked', lock: 'hash', statement: deal.statement, refundAfterMs: deal.offer.refundAfterMs }));
+    assert.equal((await engine.runTurn()).action, 'lock_verified');
+    return { venue, me, engine, deal, note: `${ns}/${key}` };
+  }
+
+  const framesFrom = (venue, deal, did) =>
+    venue.rooms.get(deal.room).filter((m) => m.from === did).map((m) => decodeFrame(m.text)).filter(Boolean);
+
+  test('when the claim CAS loses and the rail still reads locked, no receipt is posted', async () => {
+    const { venue, me, engine, deal, note } = await lockVerified();
+
+    // Somebody else writes the note between our verify and our claim, so the
+    // CAS below cannot match the bytes we verified. It has to be a field the
+    // record actually carries: the first version of this test added a `note`
+    // key, which encodePaperRecord drops, so the bytes were identical and the
+    // CAS won — the test passed against the very bug it was written for.
+    venue.notes.set(note, encodePaperRecord({
+      status: 'locked', lock: 'hash', statement: deal.statement, refundAfterMs: deal.offer.refundAfterMs + 1000
+    }));
+
+    const result = await engine.runTurn();
+
+    assert.equal(result.action, 'deal_claimed');
+    assert.equal(result.railClaimed, false, 'the CAS lost, as set up');
+    assert.equal(result.receipt, false);
+
+    const mine = framesFrom(venue, deal, me.did);
+    assert.equal(mine.some((f) => f.type === 'receipt'), false,
+      'a receipt saying "claimed" would contradict a rail that reads locked');
+    assert.ok(mine.some((f) => f.type === 'reveal'), 'the reveal still stands — publishing the secret IS the claim');
+    assert.equal(decodePaperRecord(venue.notes.get(note)).status, 'locked');
+  });
+
+  test('when the rail does read claimed, the receipt goes out as before', async () => {
+    const { venue, me, engine, deal } = await lockVerified();
+
+    const result = await engine.runTurn();
+
+    assert.equal(result.railClaimed, true);
+    assert.equal(result.receipt, true);
+    const receipt = framesFrom(venue, deal, me.did).find((f) => f.type === 'receipt');
+    assert.equal(receipt.outcome, 'claimed');
+    assert.equal(receipt.rail, 'paper');
+  });
+
+  test('a rail settled as claimed by someone else still earns a truthful receipt', async () => {
+    const { venue, me, engine, deal, note } = await lockVerified();
+
+    // The CAS will lose, but the note ends up saying exactly what our receipt
+    // would say — so the receipt is true and there is no reason to withhold it.
+    // A `claimed` record must carry the secret: decodePaperRecord rejects one
+    // without it, which is why the first draft of this test saw `null` here.
+    venue.notes.set(note, encodePaperRecord({
+      status: 'claimed', lock: 'hash', statement: deal.statement, refundAfterMs: deal.offer.refundAfterMs, secret: deal.secret
+    }));
+
+    const result = await engine.runTurn();
+
+    assert.equal(result.railClaimed, false, 'our own write lost');
+    assert.equal(result.receipt, true, 'but the rail agrees with what the receipt claims');
+    assert.ok(framesFrom(venue, deal, me.did).some((f) => f.type === 'receipt'));
+  });
+
+  test('an unreadable rail is not treated as agreement', async () => {
+    const { venue, me, engine, deal, note } = await lockVerified();
+    venue.notes.set(note, 'ne tclk irasas');
+
+    const result = await engine.runTurn();
+
+    assert.equal(result.receipt, false);
+    assert.equal(framesFrom(venue, deal, me.did).some((f) => f.type === 'receipt'), false);
+  });
+});

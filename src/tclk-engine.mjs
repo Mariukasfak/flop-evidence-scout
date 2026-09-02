@@ -343,19 +343,61 @@ export class TclkEngine {
       sayOnce('tclk:claim-cas', `[tclk] paper claim CAS lost: ${err.message}`);
     }
 
-    await this.#post(deal.room, {
-      type: 'receipt', from: this.identity.did, contract: deal.contract, outcome: 'claimed', rail: 'paper', ref: deal.contract
-    });
-    try {
-      const { ns, key } = statePointer(deal.contract);
-      await this.client.setKv(ns, key, stateNoteValue('claimed', 'paper'));
-    } catch { /* courtesy pointer */ }
+    /**
+     * The receipt says what the rail says, not what we meant to do.
+     *
+     * This posted `outcome: 'claimed'` unconditionally — including on the path
+     * right above where the CAS lost and the note therefore still reads
+     * `locked`. tclk added a check on 2026-09-02 rejecting exactly that:
+     * "receipt frames whose claimed outcome contradicts the contract's
+     * terminal state, preventing a later reputation or spend-accounting
+     * consumer from accepting a false claimed / refunded / cancelled
+     * acknowledgment". Ours would have been one of those frames.
+     *
+     * So the rail is re-read and the receipt goes out only if it agrees. The
+     * reveal is untouched by any of this: publishing the secret IS the claim,
+     * it is already on the tape, and it stands whether or not the bookkeeping
+     * note caught up. A missing receipt costs a courtesy; a false one is the
+     * kind of thing this lane exists not to do.
+     */
+    const settled = await this.#railStatus(deal.contract);
+    if (settled === 'claimed') {
+      await this.#post(deal.room, {
+        type: 'receipt', from: this.identity.did, contract: deal.contract, outcome: 'claimed', rail: 'paper', ref: deal.contract
+      });
+      try {
+        const { ns, key } = statePointer(deal.contract);
+        await this.client.setKv(ns, key, stateNoteValue('claimed', 'paper'));
+      } catch { /* courtesy pointer */ }
+    } else {
+      sayOnce('tclk:receipt-withheld',
+        `[tclk] receipt withheld: the rail reads ${settled ?? 'unreadable'}, not claimed — the reveal stands on its own`);
+    }
 
     this.#close(deal, 'completed', railClaimed ? 'claimed' : 'claimed (rail CAS lost)');
-    return { action: 'deal_claimed', contract: deal.contract, room: deal.room, railClaimed, work: work.slice(0, 120) };
+    return {
+      action: 'deal_claimed',
+      contract: deal.contract,
+      room: deal.room,
+      railClaimed,
+      receipt: settled === 'claimed',
+      work: work.slice(0, 120)
+    };
   }
 
   /* ---------------------------------------------------------- helpers --- */
+
+  /** What the paper rail actually records for this contract, or null. */
+  async #railStatus(contract) {
+    try {
+      const { ns, key } = paperNote(contract);
+      const raw = await this.client.readNote(ns, key);
+      const value = typeof raw === 'string' ? raw : (raw?.value ?? null);
+      return decodePaperRecord(value)?.status ?? null;
+    } catch {
+      return null;
+    }
+  }
 
   /**
    * The task text behind an offer's `job`, if it can be read at all.
