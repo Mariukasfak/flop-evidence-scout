@@ -137,7 +137,22 @@ function main() {
 
   if (last) {
     console.log(`  Ciklo trukme:        ${(last.cycleMs / 1000).toFixed(1)} s ${DIM}(is ${(last.intervalMs / 1000)} s tarpo)${OFF}`);
-    console.log(`  Modelio seansai:     ${last.sessions}/${last.planned}`);
+    /**
+   * A simulated session is not a smaller session, it is not a session.
+   *
+   * This line read "20/20" all the way through an Ollama outage on 2026-09-02
+   * while every one of those twenty was the simulator, whose receipts can never
+   * be evidence of anything. The count was true and the impression it gave was
+   * false, which is the failure this whole status tool exists to prevent.
+   */
+  const fake = lastMatching(AUDIT, /"action":"(skipped_no_real_model|franchise_waiting_for_model)"/);
+  const realWork = lastMatching(AUDIT, /"action":"(delivered|attested_useful|franchise_delivered)"/);
+  const modelDown = fake && (!realWork || fake.timestamp > realWork.timestamp);
+  console.log(`  Modelio seansai:     ${last.sessions}/${last.planned}`
+    + (modelDown ? `  ${RED}<- BET MODELIO NERA, sie seansai neskaiciuojami${OFF}` : ''));
+  if (modelDown) {
+    console.log(`  ${RED}Paleisk Ollama${OFF} ${DIM}(be jos agentas dirba tusciai: atsakymu neduoda, tik atmetimus)${OFF}`);
+  }
   }
 
   // Cycles in the last full hour, against the theoretical maximum.
