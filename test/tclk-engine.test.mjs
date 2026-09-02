@@ -43,6 +43,16 @@ function makeVenue() {
 const T0 = 1_800_000_000_000;
 const HOUR = 3_600_000;
 
+/** A real-enough answer: over the eighty-character floor, no template phrase, no refusal. */
+const GOOD_ANSWER = 'A hash time-locked contract guarantees the payee that funds locked under the '
+  + 'statement cannot be pulled back before the refund deadline and are claimable by revealing the '
+  + 'preimage; it guarantees the payer nothing about whether any work arrives, because the secret is '
+  + 'a payment condition and not evidence of delivery.';
+
+function makeBackend(text) {
+  return { id: 'test-backend', simulated: false, async generate() { return { text, modelId: 'test' }; } };
+}
+
 function payerOffer(payer, { job, claimByMs = T0 + HOUR, refundAfterMs = T0 + 2 * HOUR, rails = ['flop-htlc', 'paper'], lock = 'hash', role = 'payer' } = {}) {
   const fields = {
     amount: '250', asset: 'FLOP', claimByMs, expiresMs: T0 + HOUR, from: payer.did,
@@ -319,6 +329,10 @@ describe('tclk payee lane: a job whose context is a note path', () => {
     await engine.runTurn({ backend, real: true });
     assert.ok(prompted.includes('forty character floor'));
     const work = venue.rooms.get(deal.room).filter((m) => m.from === me.did).map((m) => m.text).find((t) => t.startsWith('tclk-work | '));
+    // The first version of this assertion passed while the model path was
+    // throwing: the fallback line also says "(inline)". Both halves, always.
     assert.ok(work.includes('(inline)'));
+    assert.ok(work.includes(GOOD_ANSWER.slice(0, 40)), 'the answer, not the fallback, is what went out');
+    assert.equal(work.includes('could not be answered'), false);
   });
 });
