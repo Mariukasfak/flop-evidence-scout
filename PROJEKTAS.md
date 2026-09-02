@@ -132,7 +132,8 @@ npm run freshness        # ar automatika tikrai sukasi
 npm run verify-collab    # patikrinti bendradarbiavimo įrašą
 npm run airdrop-model    # airdrop skaičiavimai
 npm run hardware-model   # mineris prieš validatorių
-npm test                 # visi testai (2026-09-02: 500)
+npm run brief            # santrauka prižiūrėtojui (arba PRIEZIURA.bat)
+npm test                 # visi testai (2026-09-02: 508)
 ```
 
 ---
@@ -150,6 +151,9 @@ npm test                 # visi testai (2026-09-02: 500)
 | `data/local/chats/` | Pokalbių archyvas mokymuisi | ribota 3 MB/kambariui |
 | `data/local/tclk-state.json` | **Vykstantis sandoris ir jo paslaptis.** Niekada nerodyti (žr. 7e) | maža |
 | `data/local/archive/` | Seni palaidi failai, iškelti iš projekto šaknies | — |
+| `data/local/daemon-console.log` | Viskas, ką demonas rašo į ekraną (nuo 2026-09-02) | iki 5 MB |
+| `data/local/watch-brief.md` | Santrauka prižiūrėtojui, be raktų (žr. 7f) | maža |
+| `data/local/watch-inbox.md` | Prižiūrėtojo pasiūlymai — **ne komandos** | maža |
 
 > `data/` **nepatenka į git** — ten gyvi duomenys. `.secrets/` irgi ne — ten raktai.
 
@@ -175,6 +179,7 @@ npm test                 # visi testai (2026-09-02: 500)
 | `[tclk] lock_not_verified` | Mokėtojas paskelbė užraktą, bet bėgio įraše jo nėra. Laukiam toliau |
 | `[tclk] deal_cancelled` | Mokėtojas neužrakino iki termino — atšaukėm patys. **Normalu** |
 | `[tclk] deal_claimed` | Darbas atliktas, paslaptis atskleista, sandoris uždarytas |
+| `[console-mirror] ankstesnės eilutės nukirptos` | Konsolės žurnalas pasiekė 5 MB ir apsikarpė. **Normalu** |
 
 ### Kiek laiko ką užima (ciklo skaidymas)
 
@@ -504,6 +509,61 @@ node tools/quick-status.mjs          # eilutė „tclk sandoris:" — būsena be
 ```bash
 node --input-type=module -e "import {publicDealView} from './src/tclk-engine.mjs';import fs from 'node:fs';console.log(publicDealView(JSON.parse(fs.readFileSync('data/local/tclk-state.json','utf8'))))"
 ```
+
+---
+
+## 7f. Išorinis prižiūrėtojas (Grok botas)
+
+2026-09-02 prie šito kompiuterio prijungtas Grok botas, kuris turi šiokių tokių Windows
+galimybių: gali skaityti failus, paleisti komandas ir net atidaryti Claude sesijas.
+
+### Ką jis iš tikrųjų matė (patikrinta, ne perpasakota)
+
+| Jo teiginys | Tikrovė |
+|---|---|
+| Technocore **v0.11.4** | ✅ **Tiesa** — mūsų sekiklis 09:38 dar matė 0.11.3 |
+| kibble-score-v2, ~3162 agentai, ~61 tūkst. darbų | ✅ Tiesa (3 171 / 61 541) |
+| Ollama qwen2.5:3b | ✅ Tiesa |
+| Faucet žymos — tik kambarių pavadinimai | ✅ Tiesa, sutampa su mūsų radiniu |
+| „Heartbeat dvi dienas senas" | ❌ **Netiesa** — buvo dviejų minučių |
+| „Sustabdžiau atsitiktines Claude sesijas" | ❌ **Netiesa** — sesijose tebuvo žodžiai `list` ir `stop`, jos nieko nedarė |
+
+Išvada be pykčio: botas naudingas ten, kur žiūri **į išorę** (naujienos, serverio versija,
+X, GitHub), ir spėlioja ten, kur žiūri **į vidų**, nes vidinių duomenų neturėjo iš kur imti.
+
+### Dvi spragos, kurias tai atvėrė
+
+1. **Konsolės žurnalo apskritai nebuvo.** `paleisti-nuolat.bat` paleisdavo demoną be
+   jokio nukreipimo — uždarius langą tekstas dingdavo. „Pažiūrėk logus" reiškė „žiūrėk į
+   ekraną realiu laiku". Dabar `src/console-mirror.mjs` viską rašo į
+   `data/local/daemon-console.log` su laiko žyma, o failas pats apsikarpo iki 5 MB.
+2. **Nebuvo vienos vietos su tikrais skaičiais.** Dabar yra: `npm run brief`
+   (arba dvigubu paspaudimu `PRIEZIURA.bat`) sukuria `data/local/watch-brief.md` —
+   širdies plakimas, ciklai ir jų vidurkis, klaidos sugrupuotos, nuoma, pertraukos, git,
+   Ollama, tclk sandoris. **Raktų ir sandorio paslapties ten nėra ir negali būti** —
+   `.secrets` nė karto neskaitomas, o sandoris imamas per `publicDealView()`.
+
+### Kaip botas siūlo pakeitimus
+
+Rašo į `data/local/watch-inbox.md`: pastebėjimas, **įrodymas**, siūlymas.
+
+> ⚠️ **Tai pasiūlymų dėžutė, ne komandų eilė.** Claude ją skaito kaip duomenis ir parodo
+> jums. Automatiškai nevykdoma niekada.
+
+### Kodėl būtent taip, o ne „tegul botas komanduoja"
+
+Jei botas atidaro naują Claude sesiją ir įrašo tekstą, ta sesija negali atskirti boto nuo
+jūsų — jai tai atrodo kaip operatoriaus nurodymas. Sesija turi prieigą prie pasirašymo
+raktų. Todėl botas gauna **skaitymo juostą ir pasiūlymų dėžutę**, o ne pultą: klysta jis,
+kaip matyti lentelėje aukščiau, lygiai taip pat lengvai kaip ir pataiko.
+
+Praktinis darbo pasidalijimas, kuris veikia:
+
+| Kas | Ką daro |
+|---|---|
+| **Grok** | Žiūri į išorę: X, FLOP naujienos, GitHub, serverio versija. Rašo į dėžutę |
+| **Claude** | Tikrina jo teiginius, daro pakeitimus repozitorijoje, rodo jums |
+| **Jūs** | Tvirtinate, kas iš tikrųjų daroma |
 
 ---
 
