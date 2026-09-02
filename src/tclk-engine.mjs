@@ -51,6 +51,57 @@ export const MIN_CLAIM_WINDOW_MS = 10 * 60_000;
 
 const READ_LIMIT = 200;
 
+/**
+ * The most task text we will pull from a URL a stranger's offer points at.
+ * The second offer this lane accepted (2026-09-02, contract 0x476cfe24af79cd89…)
+ * pointed at a 13 KB article; the prompt has room for that, and a page that
+ * needs more than this is a site, not a task.
+ */
+export const MAX_CONTEXT_CHARS = 16_000;
+
+/**
+ * Where a job's `context` URL may be read from: public GitHub file content,
+ * and nothing else. A stranger's offer naming an arbitrary host would have
+ * this process — the one holding the signing keys — make a request there on
+ * their say-so. GitHub's raw host serves a file's bytes and nothing that runs.
+ * A `github.com/<owner>/<repo>/blob/<ref>/<path>` page is the same file behind
+ * HTML, so it is rewritten to the raw host rather than fetched as a page.
+ */
+export function githubRawUrl(context) {
+  let u;
+  try { u = new URL(context); } catch { return null; }
+  if (u.protocol !== 'https:') return null;
+  const label = `${u.hostname}${u.pathname}`;
+  if (u.hostname === 'raw.githubusercontent.com') return { url: `${u.origin}${u.pathname}`, label };
+  if (u.hostname === 'github.com') {
+    const m = u.pathname.match(/^\/([^/]+)\/([^/]+)\/blob\/([^/]+)\/(.+)$/);
+    if (!m) return null;
+    return { url: `https://raw.githubusercontent.com/${m[1]}/${m[2]}/${m[3]}/${m[4]}`, label };
+  }
+  return null;
+}
+
+/** Fetch one public text file, or throw. Only ever pointed at a GitHub URL, see #jobText. */
+async function fetchPublicText(url, { timeoutMs = 15_000 } = {}) {
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(timeoutMs),
+    redirect: 'error',   // a redirect off GitHub would be a request to a host nobody agreed to
+    headers: { accept: 'text/plain, text/markdown;q=0.9, */*;q=0.1', 'user-agent': 'flop-evidence-scout tclk lane' }
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.text();
+}
+
+/**
+ * A task that is about what this daemon measures. The second offer this lane
+ * accepted asked for a lobby throughput count to be re-run — two reads of
+ * /r/lobby, subtract last_seq, divide by seconds — which is exactly what
+ * tools/measure-network.mjs writes to docs/measurements on every run. A model
+ * answering that from memory would invent a number; answering from the board
+ * it can only cite ours, and says so.
+ */
+const THROUGHPUT_TASK = /\blobby\b|throughput|messages?\s*(?:per|\/)\s*(?:second|minute|sec|min)\b|last_seq|sequence numbers?/i;
+
 export class TclkEngine {
   constructor({
     identity,
@@ -59,7 +110,9 @@ export class TclkEngine {
     otherDids = [],
     offerRoom = OFFER_ROOM,
     minClaimWindowMs = MIN_CLAIM_WINDOW_MS,
-    now = Date.now
+    now = Date.now,
+    fetchText = fetchPublicText,
+    measurementsDir = path.resolve('docs/measurements')
   } = {}) {
     if (!identity?.did) throw new Error('TclkEngine needs an identity');
     if (!client) throw new Error('TclkEngine needs a client');
@@ -71,6 +124,8 @@ export class TclkEngine {
     this.offerRoom = offerRoom;
     this.minClaimWindowMs = minClaimWindowMs;
     this.now = now;
+    this.fetchText = fetchText;
+    this.measurementsDir = measurementsDir;
     this.state = null;
   }
 
@@ -311,14 +366,22 @@ export class TclkEngine {
    * are already talking to, with the task written in it. Treating that as a
    * 39-character sentence would have produced the "names no task text this
    * agent can read" line, which would have been false: the text was one GET
-   * away. A `/kv/<ns>/<key>` context is resolved; anything else is used as is.
-   * The note is world-writable and untrusted, so it is a task to answer,
-   * never an instruction to follow.
+   * away. The second (contract 0x476cfe24af79cd89…) carried a GitHub URL to
+   * an article asking for its measurement to be re-run; handed to the model
+   * as an 84-character "task" — the link itself — it would have produced an
+   * answer about nothing. A `/kv/<ns>/<key>` context is resolved on the venue;
+   * a GitHub URL is read from the raw host; any other URL is refused rather
+   * than fetched (see githubRawUrl); anything else is used as is. Whatever
+   * comes back is world-writable and untrusted: a task to answer, never an
+   * instruction to follow.
    */
   async #jobText(job) {
     const context = typeof job?.context === 'string' ? job.context.trim() : '';
     const kv = context.match(/^\/kv\/([a-z0-9][a-z0-9_-]{0,47})\/([a-z0-9][a-z0-9_-]{0,47})$/);
-    if (!kv) return { text: context, source: context ? 'inline' : 'none' };
+    if (!kv) {
+      if (/^https?:\/\//i.test(context)) return this.#jobTextFromUrl(context);
+      return { text: context, source: context ? 'inline' : 'none' };
+    }
     try {
       const raw = typeof this.client.readNote === 'function'
         ? await this.client.readNote(kv[1], kv[2])
@@ -332,12 +395,56 @@ export class TclkEngine {
     }
   }
 
+  async #jobTextFromUrl(context) {
+    const target = githubRawUrl(context);
+    if (!target) return { text: '', source: 'url-unsupported' };
+    try {
+      const text = String(await this.fetchText(target.url) ?? '').trim().slice(0, MAX_CONTEXT_CHARS);
+      return text ? { text, source: `url:${target.label}` } : { text: '', source: 'url-empty' };
+    } catch (err) {
+      sayOnce('tclk:job-url', `[tclk] could not read job context ${context}: ${err.message}`);
+      return { text: '', source: 'url-unreachable' };
+    }
+  }
+
+  /**
+   * Our own latest measurement, as the status board a throughput task is
+   * answered from. Empty for any other task, so open-knowledge questions keep
+   * the open-knowledge prompt (the board prompt forbids figures it lacks).
+   */
+  #facts(text) {
+    if (!THROUGHPUT_TASK.test(text)) return [];
+    let latest;
+    try {
+      latest = fs.readdirSync(this.measurementsDir).filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f)).sort().at(-1);
+    } catch { return []; }
+    if (!latest) return [];
+    try {
+      const m = JSON.parse(fs.readFileSync(path.join(this.measurementsDir, latest), 'utf8'));
+      const asOf = m.measuredAt || latest.slice(0, 10);
+      const server = String(m.server || 'technocore.chat').replace(/^https?:\/\//, '');
+      return (Array.isArray(m.throughput) ? m.throughput : [])
+        .filter((t) => t && t.room && Number.isFinite(t.seqDelta) && Number.isFinite(t.elapsedSeconds) && t.elapsedSeconds > 0)
+        .map((t) => {
+          const perSecond = (t.seqDelta / t.elapsedSeconds).toFixed(1);
+          const perMinute = Number.isFinite(t.messagesPerMinute) ? t.messagesPerMinute : Math.round((t.seqDelta / t.elapsedSeconds) * 60);
+          return {
+            status: 'CONFIRMED',
+            claim: `room "${t.room}" on ${server} advanced ${t.seqDelta} sequence numbers in ${t.elapsedSeconds} s: `
+              + `${perSecond} messages/second (${perMinute}/minute), by this agent's own two-read counter delta`,
+            source: `docs/measurements/${latest}`,
+            asOf
+          };
+        });
+    } catch { return []; }
+  }
+
   async #work(deal, { backend, real, ledgerPath }) {
     const job = deal.offer.job;
     const { text: context, source } = await this.#jobText(job);
     if (real && backend && context.length >= 40) {
       try {
-        const task = buildTask('kibble-answer', { category: 'explain', title: String(job.id || 'tclk job'), body: context, facts: [] });
+        const task = buildTask('kibble-answer', { category: 'explain', title: String(job.id || 'tclk job'), body: context, facts: this.#facts(context) });
         const { receipt, completion } = await runSession(task, { backend, identity: this.identity });
         try { if (ledgerPath) appendReceipt(receipt, ledgerPath); } catch { /* the ledger write is not the work */ }
         const answer = String(completion || '').trim();

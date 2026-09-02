@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { generateIdentity } from '../src/identity.mjs';
-import { TclkEngine, publicDealView, secretOpens } from '../src/tclk-engine.mjs';
+import { TclkEngine, publicDealView, secretOpens, githubRawUrl, MAX_CONTEXT_CHARS } from '../src/tclk-engine.mjs';
 import {
   encodeFrame, decodeFrame, offerId, contractId, dealRoom, paperNote, encodePaperRecord,
   decodePaperRecord, opensStatement, OFFER_ROOM
@@ -61,9 +61,9 @@ function payerOffer(payer, { job, claimByMs = T0 + HOUR, refundAfterMs = T0 + 2 
   return { ...fields, id: offerId(fields) };
 }
 
-function engineFor(venue, identity, { otherDids = [], now = () => T0 } = {}) {
+function engineFor(venue, identity, { otherDids = [], now = () => T0, ...rest } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tclk-'));
-  return new TclkEngine({ identity, client: venue, statePath: path.join(dir, 'tclk-state.json'), otherDids, now });
+  return new TclkEngine({ identity, client: venue, statePath: path.join(dir, 'tclk-state.json'), otherDids, now, ...rest });
 }
 
 describe('tclk payee lane: accepting', () => {
@@ -334,5 +334,130 @@ describe('tclk payee lane: a job whose context is a note path', () => {
     assert.ok(work.includes('(inline)'));
     assert.ok(work.includes(GOOD_ANSWER.slice(0, 40)), 'the answer, not the fallback, is what went out');
     assert.equal(work.includes('could not be answered'), false);
+  });
+});
+
+/**
+ * The second offer this lane accepted (2026-09-02, contract 0x476cfe24af79cd89…)
+ * pointed at https://github.com/<owner>/<repo>/blob/main/lobby-analysis.md — an
+ * article asking for its lobby throughput count to be re-run. Before this block
+ * the lane would have handed the model the link as an 84-character task.
+ */
+describe('tclk payee lane: a job whose context is a GitHub URL', () => {
+  const BLOB = 'https://github.com/o/r/blob/main/lobby-analysis.md';
+  const RAW = 'https://raw.githubusercontent.com/o/r/main/lobby-analysis.md';
+  const ARTICLE = 'Read /r/lobby?format=json twice, subtract the last_seq values, divide by the time between '
+    + 'reads. That is the whole method. If your numbers disagree with mine, publish them.';
+
+  function measurementsDirWith(measurement) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tclk-measurements-'));
+    if (measurement) fs.writeFileSync(path.join(dir, '2026-09-02.json'), JSON.stringify(measurement));
+    return dir;
+  }
+
+  async function lockedDealWithUrlJob(context, engineOpts = {}) {
+    const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
+    const offer = payerOffer(payer, { job: { proto: 'a2a', id: 'lobby-throughput-replication', context } });
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(offer));
+    const engine = engineFor(venue, me, { measurementsDir: measurementsDirWith(null), ...engineOpts });
+    await engine.runTurn();
+    const deal = engine.load().deal;
+    venue.say(deal.room, payer.did, encodeFrame({ type: 'lock', from: payer.did, contract: deal.contract, rail: 'paper', ref: deal.contract }));
+    const { ns, key } = paperNote(deal.contract);
+    venue.notes.set(`${ns}/${key}`, encodePaperRecord({ status: 'locked', lock: 'hash', statement: deal.statement, refundAfterMs: deal.offer.refundAfterMs }));
+    await engine.runTurn();
+    return { venue, me, engine, deal };
+  }
+
+  function workLine(venue, me, deal) {
+    return venue.rooms.get(deal.room).filter((m) => m.from === me.did).map((m) => m.text).find((t) => t.startsWith('tclk-work | '));
+  }
+
+  function recordingBackend() {
+    const seen = { prompt: '' };
+    const backend = { id: 'test', simulated: false, async generate({ prompt }) { seen.prompt = String(prompt || ''); return { text: GOOD_ANSWER }; } };
+    return { backend, seen };
+  }
+
+  test('a github.com page URL is read from the raw host, and the model sees the article, not the link', async () => {
+    const fetched = [];
+    const { venue, me, engine, deal } = await lockedDealWithUrlJob(BLOB, { fetchText: async (url) => { fetched.push(url); return ARTICLE; } });
+    const { backend, seen } = recordingBackend();
+
+    const result = await engine.runTurn({ backend, real: true });
+
+    assert.equal(result.action, 'deal_claimed');
+    assert.deepEqual(fetched, [RAW], 'the page is rewritten to the raw file and fetched once');
+    assert.ok(seen.prompt.includes('subtract the last_seq values'), 'the model saw the article text');
+    assert.equal(seen.prompt.includes(BLOB), false, 'and not the link as the task');
+    const work = workLine(venue, me, deal);
+    assert.ok(work.includes('(url:github.com/o/r/blob/main/lobby-analysis.md)'), work);
+    assert.ok(work.includes(GOOD_ANSWER.slice(0, 40)), 'the answer, not the fallback, is what went out');
+    assert.equal(work.includes('could not be answered'), false);
+  });
+
+  test('a throughput task is answered from our own measurement, named as the board', async () => {
+    const measurementsDir = measurementsDirWith({
+      measuredAt: '2026-09-02T09:38:42.777Z', server: 'https://technocore.chat',
+      throughput: [{ room: 'lobby', seqDelta: 958, elapsedSeconds: 22.1, messagesPerMinute: 2596.9 }]
+    });
+    const { engine } = await lockedDealWithUrlJob(RAW, { fetchText: async () => ARTICLE, measurementsDir });
+    const { backend, seen } = recordingBackend();
+
+    await engine.runTurn({ backend, real: true });
+
+    assert.ok(seen.prompt.includes('STATUS BOARD'), 'the grounded prompt, not the open-knowledge one');
+    assert.ok(seen.prompt.includes('room "lobby" on technocore.chat advanced 958 sequence numbers in 22.1 s: 43.3 messages/second (2596.9/minute)'), seen.prompt);
+    assert.ok(seen.prompt.includes('source: docs/measurements/2026-09-02.json'));
+  });
+
+  test('a task about something else gets no board, so the open-knowledge prompt still applies', async () => {
+    const measurementsDir = measurementsDirWith({ measuredAt: '2026-09-02T09:38:42.777Z', throughput: [{ room: 'lobby', seqDelta: 1, elapsedSeconds: 1 }] });
+    const essay = 'Explain in two sentences what a hash time-locked contract guarantees to the payee and what it does not guarantee to the payer.';
+    const { engine } = await lockedDealWithUrlJob(RAW, { fetchText: async () => essay, measurementsDir });
+    const { backend, seen } = recordingBackend();
+
+    await engine.runTurn({ backend, real: true });
+
+    assert.equal(seen.prompt.includes('STATUS BOARD'), false);
+    assert.ok(seen.prompt.includes('hash time-locked contract'));
+  });
+
+  test('a host that is not GitHub is never fetched, and the work line says so', async () => {
+    let calls = 0;
+    const { venue, me, engine, deal } = await lockedDealWithUrlJob('https://example.com/task.txt', { fetchText: async () => { calls += 1; return ARTICLE; } });
+
+    const result = await engine.runTurn({ backend: makeBackend(GOOD_ANSWER), real: true });
+
+    assert.equal(result.action, 'deal_claimed');
+    assert.equal(calls, 0);
+    assert.ok(workLine(venue, me, deal).includes('task (url-unsupported) could not be answered'));
+  });
+
+  test('a file that cannot be read is said to be unreachable, not dressed as a job with no text', async () => {
+    const { venue, me, engine, deal } = await lockedDealWithUrlJob(BLOB, { fetchText: async () => { throw new Error('HTTP 404'); } });
+    await engine.runTurn({ backend: makeBackend(GOOD_ANSWER), real: true });
+    assert.ok(workLine(venue, me, deal).includes('task (url-unreachable) could not be answered'));
+  });
+
+  test('a page longer than the cap is cut at the cap, not refused', async () => {
+    const long = ARTICLE + ' x'.repeat(MAX_CONTEXT_CHARS);
+    const { engine } = await lockedDealWithUrlJob(RAW, { fetchText: async () => long });
+    const { backend, seen } = recordingBackend();
+
+    await engine.runTurn({ backend, real: true });
+
+    assert.ok(seen.prompt.includes('subtract the last_seq values'));
+    assert.ok(seen.prompt.length < MAX_CONTEXT_CHARS + 4000, `the prompt is the cap plus the template, not the page (${seen.prompt.length})`);
+  });
+
+  test('githubRawUrl accepts only https GitHub file URLs', () => {
+    assert.equal(githubRawUrl(BLOB).url, RAW);
+    assert.equal(githubRawUrl(RAW).url, RAW);
+    assert.equal(githubRawUrl('http://github.com/o/r/blob/main/x.md'), null);
+    assert.equal(githubRawUrl('https://github.com/o/r'), null);
+    assert.equal(githubRawUrl('https://github.com.evil.example/o/r/blob/main/x.md'), null);
+    assert.equal(githubRawUrl('https://example.com/x.md'), null);
+    assert.equal(githubRawUrl('not a url'), null);
   });
 });
