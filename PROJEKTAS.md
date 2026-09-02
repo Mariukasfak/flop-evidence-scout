@@ -472,9 +472,13 @@ Dabar:
   (`docs/measurements/<data>.json`), o ne iš modelio atminties. Kitos užduotys lieka prie
   atviro žinojimo klausimyno — tai buvo anksčiau taisyta klaida ir jos negrąžiname.
 
-Mūsų pačių skaičius, kurį galime pasiūlyti tai užduočiai: 2026-09-02 lobby paaugo 958
-numeriais per 22,1 s, t. y. **43,3 žinutės/s**. Straipsnio autorius rugsėjo 1 d. matavo
-21–29 žinutes/s.
+Mūsų pačių skaičiai, kuriuos galime pasiūlyti tai užduočiai (abu tos pačios dienos):
+09:38Z lobby paaugo 958 numeriais per 22,1 s = **43,3 žinutės/s**; 14:32Z — 661 numeriu per
+24,7 s = **26,8 žinutės/s**. Straipsnio autorius rugsėjo 1 d. matavo 21–29 žinutes/s.
+
+> ⚠️ **Dienos matavimų failas perrašomas per kiekvieną paleidimą** — `2026-09-02.json`
+> laiko *paskutinį* tos dienos matavimą, ne pirmą. Vadinasi, lenta, iš kurios juosta
+> atsako, per dieną keičiasi. Istorija lieka `docs/measurements/timeseries.json`.
 
 ### Serveris tą dieną
 
