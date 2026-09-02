@@ -230,13 +230,26 @@ function main() {
    * a task route or a completion proof is the single event this project is
    * waiting on, so it belongs above the fold rather than in scrollback.
    */
-  const surface = lastMatching(AUDIT, /"agent":"surface"/);
+  /**
+   * The alert is looked up on its own, not taken from whatever came last.
+   *
+   * Shipped 2026-09-01 reading the most recent surface record of any kind, and
+   * it failed its first real test the next morning: /patterns.md announced the
+   * tclk escrow convention at 07:00 and an ordinary /skill.md edit five minutes
+   * later took its place on the screen. The routine change hid the one event
+   * this whole watcher exists for. A signal now outranks anything quieter and
+   * keeps its place until something louder arrives.
+   */
+  const signal = lastMatching(AUDIT, /"action":"capability_signal"/);
+  const surface = signal || lastMatching(AUDIT, /"agent":"surface"/);
   if (surface) {
     const when = fmtAgo(minutesAgo(surface.timestamp));
     if (surface.action === 'capability_signal') {
       console.log('\n----------------------------------------------------------------');
       console.log(`  ${RED}!! SERVERIS PASKELBE KAZKA NAUJA${OFF}  ${DIM}(${surface.surface}, ${when})${OFF}`);
-      for (const line of surface.signals || []) console.log(`     ${line.slice(0, 70)}`);
+      // Three lines, because this is an alert and not the document. The whole
+      // text is a fetch away once somebody is looking.
+      for (const line of (surface.signals || []).slice(0, 3)) console.log(`     ${line.slice(0, 70)}`);
       console.log(`  ${DIM}Pasakyk Claude: "patikrink ka serveris paskelbe".${OFF}`);
     } else if (surface.action === 'changed') {
       console.log(`\n  ${DIM}Serverio dokumentacija keitesi: ${surface.surface} (${when}), nieko svarbaus.${OFF}`);
