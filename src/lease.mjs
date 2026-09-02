@@ -215,7 +215,19 @@ export class Lease {
           reason: `server unreachable (${state.error || 'unknown'}), but our lease runs for another ${Math.ceil(remainingMs / 1000)}s`
         };
       }
-      return { acquired: false, transient: true, reason: `server unreachable (${state.error || 'unknown'})` };
+      /**
+       * Say how much was left. On 2026-09-02 a stand-down right after a restart
+       * read "renewal did not reach the server" and nothing else, and it took
+       * four reads of two files and the audit to reconstruct that the note had
+       * under a third of its TTL left and the rule had applied correctly. The
+       * number that decided it belongs in the sentence that reports it.
+       */
+      return {
+        acquired: false, transient: true,
+        reason: `server unreachable (${state.error || 'unknown'}); `
+          + `${this.currentValue ? `only ${Math.max(0, Math.ceil(remainingMs / 1000))}s remain on ours` : 'we hold no lease'}, `
+          + `below the ${Math.ceil(this.ttlMs / 3000)}s floor for working on trust`
+      };
     }
 
     const existing = state.value;
@@ -289,7 +301,9 @@ export class Lease {
         // server" while we already held the lease sent the first reader of this
         // log looking for a competitor that was not there.
         const verb = isMine ? 'renewal' : 'takeover';
-        return { acquired: false, transient: true, reason: `${verb} did not reach the server (${err.message})` };
+        // Same rule as the read path: the seconds that decided it go in the sentence.
+        const left = isMine ? `; only ${Math.max(0, Math.ceil(remainingMs / 1000))}s remain on ours, below the ${Math.ceil(this.ttlMs / 3000)}s floor` : '';
+        return { acquired: false, transient: true, reason: `${verb} did not reach the server (${err.message})${left}` };
       }
       return { acquired: false, reason: 'lost the race; the value changed under us' };
     }

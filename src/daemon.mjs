@@ -407,6 +407,8 @@ export async function runScoutDaemon(options = {}) {
   let running = true;
   /** Which published surface this cycle checks; see the rotation in surface-watch.mjs. */
   let surfaceIndex = 0;
+  /** The tclk lane's last outcome, so a quiet outcome is audited once rather than every cycle. */
+  let lastTclkAction = null;
   const stop = () => {
     if (!running) return;
     console.log('\n[Dual Agent Mesh] Shutting down gracefully...');
@@ -737,6 +739,7 @@ export async function runScoutDaemon(options = {}) {
             + 'Running read-only until it answers; nothing can be written by anyone meanwhile.');
           writesSuppressed = true;
           client.readOnly = true;
+          client.readOnlyReason = `writes suppressed this cycle, lease unconfirmed (${attempt.reason})`;
         }
       }
 
@@ -1065,8 +1068,21 @@ export async function runScoutDaemon(options = {}) {
              * secret is never in any of it.
              */
             const tclk = await timed('tclk', () => tclkEngine.runTurn({ backend, real, ledgerPath }));
-            if (!['no_acceptable_offer', 'waiting_for_lock', 'lock_not_verified', 'read_failed'].includes(tclk.action)) {
-              console.log(`[tclk] ${tclk.action}${tclk.contract ? ` — ${tclk.contract.slice(0, 18)}` : ''}`);
+            /**
+             * Quiet outcomes are audited when they change, failures always.
+             *
+             * The first version audited neither, and the lane's second live
+             * cycle taught why that is wrong: the step took exactly 15,008 ms
+             * — the client's read timeout — returned read_failed, and left no
+             * trace. Thirteen acceptable offers sat in the room and the audit
+             * looked identical to "nothing to do". A lane that cannot read and
+             * a lane with nothing to read must not write the same silence.
+             */
+            const quiet = ['no_acceptable_offer', 'waiting_for_lock', 'lock_not_verified'];
+            const changed = tclk.action !== lastTclkAction;
+            lastTclkAction = tclk.action;
+            if (!quiet.includes(tclk.action) || changed) {
+              console.log(`[tclk] ${tclk.action}${tclk.contract ? ` — ${tclk.contract.slice(0, 18)}` : ''}${tclk.error ? ` (${tclk.error})` : ''}`);
               appendAudit(config.auditLogPath, { agent: 'tclk', ...tclk });
             }
           } catch (err) {
@@ -1222,7 +1238,7 @@ export async function runScoutDaemon(options = {}) {
       // Restore rather than clear: --dry-run sets this for the whole process,
       // and a cycle that ran through an outage must not quietly re-enable
       // writing for a run the operator asked to be silent.
-      if (writesSuppressed) client.readOnly = readOnly;
+      if (writesSuppressed) { client.readOnly = readOnly; client.readOnlyReason = null; }
     }
 
     if (config.dryRun || config.once || !running) break;

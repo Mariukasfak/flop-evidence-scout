@@ -140,9 +140,17 @@ export class TechnocoreClient {
     this.readOnly = readOnly;
   }
 
-  /** The one place a write is refused, so no caller can forget to ask. */
+  /**
+   * The one place a write is refused, so no caller can forget to ask.
+   *
+   * It names the reason, because "dry run" was the only word it had and it was
+   * wrong most of the time it was used: a cycle that runs read-only while the
+   * lease cannot be confirmed is not a dry run, and an audit full of
+   * "post_failed: dry run" on a live agent sent its reader looking for a flag
+   * nobody had set. The daemon sets `readOnlyReason` beside `readOnly`.
+   */
   assertWritable(what) {
-    if (this.readOnly) throw new Error(`dry run: refusing to ${what}`);
+    if (this.readOnly) throw new Error(`refusing to ${what}: ${this.readOnlyReason || 'dry run'}`);
   }
 
   async readRoom(room = 'lobby', { since = null, wait = 0, limit = 50, format = 'text' } = {}) {
