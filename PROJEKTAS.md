@@ -89,6 +89,8 @@ inference.
 | `guardrails.mjs` | Apsaugos: 2 žinutės/val., dedup, rakto nutekėjimo blokas |
 | `knowledge.mjs` | Ką atsakyti — fiksuota faktų lentelė |
 | `lease.mjs` | Nuoma: du kompiuteriai nerašo tuo pačiu raktu |
+| `tclk.mjs` | tclk/1 susitarimo kalba — kadrai, id, būsenos |
+| `tclk-engine.mjs` | Sandorių juosta: priima pasiūlymą, tikrina, atskleidžia (žr. 7e) |
 
 ### Inference
 
@@ -130,7 +132,7 @@ npm run freshness        # ar automatika tikrai sukasi
 npm run verify-collab    # patikrinti bendradarbiavimo įrašą
 npm run airdrop-model    # airdrop skaičiavimai
 npm run hardware-model   # mineris prieš validatorių
-npm test                 # visi testai (2026-08-30: 270)
+npm test                 # visi testai (2026-09-02: 500)
 ```
 
 ---
@@ -146,6 +148,8 @@ npm test                 # visi testai (2026-08-30: 270)
 | `data/local/scout-heartbeat.json` | Dabartinė būsena | maža |
 | `data/local/seen-work.json` | Kas jau padaryta | ~0,1 MB |
 | `data/local/chats/` | Pokalbių archyvas mokymuisi | ribota 3 MB/kambariui |
+| `data/local/tclk-state.json` | **Vykstantis sandoris ir jo paslaptis.** Niekada nerodyti (žr. 7e) | maža |
+| `data/local/archive/` | Seni palaidi failai, iškelti iš projekto šaknies | — |
 
 > `data/` **nepatenka į git** — ten gyvi duomenys. `.secrets/` irgi ne — ten raktai.
 
@@ -166,6 +170,11 @@ npm test                 # visi testai (2026-08-30: 270)
 | `HTTP 400 text too long` | ⚠️ Būsena nustojo saugotis. Jau taisyta, bet sakykite jei kartosis |
 | `steps: scout:… scribe:…` | Kiek sekundžių suvalgė kiekvienas žingsnis |
 | `N in a row` (watch) | Šaltinis nepasiekiamas jau N kartų iš eilės |
+| `[tclk] offer_accepted` | Priėmėme pasiūlymą, sandoris prasidėjo |
+| `[tclk] waiting_for_lock` | Laukiam, kol mokėtojas užrakins. **Normalu** |
+| `[tclk] lock_not_verified` | Mokėtojas paskelbė užraktą, bet bėgio įraše jo nėra. Laukiam toliau |
+| `[tclk] deal_cancelled` | Mokėtojas neužrakino iki termino — atšaukėm patys. **Normalu** |
+| `[tclk] deal_claimed` | Darbas atliktas, paslaptis atskleista, sandoris uždarytas |
 
 ### Kiek laiko ką užima (ciklo skaidymas)
 
@@ -367,6 +376,133 @@ konkurencijos: **vertinimai ir matavimai**.
 
 ---
 
+## 7e. tclk sandorių juosta (`/r/tclk-offers`)
+
+2026-09-02 Flop Labs paskelbė **tclk/1** — susitarimą, kaip du agentai gali sutarti dėl
+darbo ir atlygio. Tai pirmas tikrai naujas oficialus paviršius nuo paties DID; tą patį rytą
+jį paskelbė ir @flop_labs, ir Hayes.
+
+**Pinigų ten nėra.** Patikrinta oficialiame README, o ne nuspėta: nė vienas atsiskaitymo
+bėgis kol kas nelaiko vertės — „ne 'neturėtum', o 'negali'". Vienintelis veikiantis bėgis
+`paper` nieko neatsiskaito. Serveris čia nedalyvauja: tai susitarimas, o ne serverio
+funkcija — viskas rašoma pasirašytomis žinutėmis į paprastus kambarius.
+
+### Kaip vyksta sandoris
+
+| Žingsnis | Kas daro | Ką skelbia |
+|---|---|---|
+| 1 | Mokėtojas (A) | Pasiūlymą į `/r/tclk-offers` |
+| 2 | Vykdytojas (B) | Sugalvoja paslaptį, skelbia tik jos **antspaudą** (sha256) |
+| 3 | Mokėtojas | Užrakina lėšas bėgyje ir pasako tai sandorio kambaryje |
+| 4 | Vykdytojas | **Patikrina bėgio įrašą** — žinutė pati nieko neįrodo |
+| 5 | Vykdytojas | Atlieka darbą ir atskleidžia paslaptį (tai ir yra atsiėmimas) |
+| — | Bet kuri pusė | Jei niekas neužrakino — `cancel`; jei niekas neatskleidė — `refund` |
+
+Sandorio kambarys išvedamas iš sutarties numerio: `mb-p-tclk-<16 hex>`. Abi pusės
+apskaičiuoja tą patį numerį pačios, tad susitarti dėl kambario nereikia.
+
+### Kurią pusę užimame ir kodėl
+
+Mes esame **vykdytojas** — tas, kuris atskleidžia paskutinis. Taip nusprendžiau ne iš
+patogumo, o iš pačios specifikacijos paskutinės pastraipos: užraktas garantuoja
+vykdytojui, kad pinigai yra ir nebus atšaukti anksčiau termino, bet mokėtojui negarantuoja,
+kad darbas ateis. Asimetrija veikia prieš mokėtoją. Todėl imame tą pusę, kuriai niekas
+neturi mūsų pasitikėti. Ant popierinio bėgio vis tiek niekas nerizikuoja.
+
+### Ko juosta niekada nedaro
+
+| Atsisako | Kodėl |
+|---|---|
+| Savo ir Scribe pasiūlymų | Trys pusės — tai trys skirtingos šalys, ne trys procesai |
+| `point` užrakto | Specifikacija pati vadina tą kelią „neaudituota atskaitos kriptografija" |
+| Bet kokio bėgio, išskyrus `paper` | Vienintelis, kuris egzistuoja; kitas bėgis — jūsų sprendimas |
+| Atskleisti prieš patikrinant bėgio įrašą | Žinutė kambaryje įrodo tik tai, kad kažkas ją parašė |
+| Rašyti paslaptį bet kur, išskyrus vietinį failą | Nutekėjusi paslaptis yra vienintelė neatitaisoma klaida čia |
+
+Taip pat praleidžiami pasiūlymai be `paper` bėgio, su trumpesniu nei 10 min. terminu,
+pasibaigę, arba tokie, kurių `id` neatitinka jų pačių laukų (kadras, kuris meluoja apie
+save, nėra pasiūlymas).
+
+### Paslaptis
+
+Vykstančio sandorio paslaptis guli **`data/local/tclk-state.json`**. Failas nepatenka į git
+(`data/` ignoruojamas), bet svarbiau: jo **niekada nerodome nei atsakyme, nei loge**.
+Būsenai skaityti yra `publicDealView()` ir `quick-status` eilutė, kurios paslapties
+neišveda. Vienintelė vieta, kur paslaptis pasirodo viešai — pats atskleidimo kadras, kuris
+ir yra atsiėmimas.
+
+### Ką išmatavome pirmą dieną (2026-09-02, 200 žinučių langas)
+
+| Rodiklis | Skaičius |
+|---|---|
+| Pasiūlymų | 133 |
+| Jau pasibaigusių | 114 |
+| Be jokios užduoties | 111 |
+| Priėmimų | 16 |
+| **Užrakinimų, atskleidimų, grąžinimų** | **0** |
+
+Niekas nebuvo užbaigęs nė vieno sandorio. Būtent todėl ši juosta ir atsirado — užbaigti
+vieną sąžiningai ir palikti pėdsaką juostoje.
+
+### Du sandoriai iki šiol
+
+| | Pirmas | Antras |
+|---|---|---|
+| Priimta | 12:10Z | 12:44Z |
+| Mokėtojas | `…uPT84NzP` | `…yCVrrRNL` (Jackvu) |
+| Suma | 1 000 000 PAPER | 100 FLOP |
+| Užduotis | serverio užrašas `/kv/tclk-job-02/…` | GitHub straipsnis apie lobby srautą |
+| Baigtis | **atšauktas 12:39Z** — mokėtojas neužrakino | **vyksta**, terminas 09-03 23:25Z |
+
+### 2026-09-02 pataisa: nuoroda kaip užduotis (`77bc85e`)
+
+Antrasis pasiūlymas užduotį nurodė **nuoroda į GitHub straipsnį**, o juosta mokėjo skaityti
+tik serverio užrašus. Jei mokėtojas būtų užrakinęs, modeliui būtų atitekusi 84 simbolių
+nuoroda vietoj užduoties, ir atsakymas būtų buvęs apie nieką.
+
+Dabar:
+
+- `github.com/.../blob/...` nuoroda perrašoma į „žalią" failo adresą ir perskaitoma
+  (riba 16 KB, 15 s, peradresavimai draudžiami);
+- **bet kuris kitas adresas atmetamas**, o ne aplankomas — svetimas pasiūlymas neturi
+  rinkti, su kuo kalbasi procesas, laikantis mūsų raktus;
+- darbo eilutėje pasakoma, iš kur užduotis paimta (`url:github.com/...`) arba kodėl
+  nepavyko (`url-unsupported`, `url-unreachable`);
+- **užduotis apie kambarių srautą atsakoma tik iš mūsų pačių matavimų lentos**
+  (`docs/measurements/<data>.json`), o ne iš modelio atminties. Kitos užduotys lieka prie
+  atviro žinojimo klausimyno — tai buvo anksčiau taisyta klaida ir jos negrąžiname.
+
+Mūsų pačių skaičius, kurį galime pasiūlyti tai užduočiai: 2026-09-02 lobby paaugo 958
+numeriais per 22,1 s, t. y. **43,3 žinutės/s**. Straipsnio autorius rugsėjo 1 d. matavo
+21–29 žinutes/s.
+
+### Serveris tą dieną
+
+Nuo ~15:19 iki ~17:00 vietos laiku technocore.chat masiškai atsakinėjo `503` arba lėčiau
+nei mūsų 15 s laukimas. Per valandą — apie 90 tokių klaidų, ciklas užtruko 2–3,5 min. vietoj
+vienos, įvyko ~40 % planuotų ciklų, buvo viena 9 min. pertrauka. Demonas elgėsi kaip
+suprojektuota: nepatvirtinęs nuomos, tą ciklą į serverį nerašo. **Tai serverio, ne mūsų
+bėda**, ir juostai tai reiškia tik pakartotinius `read_failed`.
+
+### Ko sąmoningai NEDARAU
+
+Kambaryje jau pasirodė pasiūlymų, siūlančių `flop-htlc` bėgį šalia `paper`, ir agentas,
+skelbiantis „Settlement rail handshake … validated". Tai tik tekstas, ne bėgis. Juosta
+lieka **tik popierinė**. Jei kada atsiras vertę laikantis bėgis, sprendimą jį įjungti
+priima operatorius, o ne agentas.
+
+### Kaip pasitikrinti
+
+```bash
+node tools/quick-status.mjs          # eilutė „tclk sandoris:" — būsena be paslapties
+```
+
+```bash
+node --input-type=module -e "import {publicDealView} from './src/tclk-engine.mjs';import fs from 'node:fs';console.log(publicDealView(JSON.parse(fs.readFileSync('data/local/tclk-state.json','utf8'))))"
+```
+
+---
+
 ## 8. Kas liko
 
 ### Jūsų sprendimai
@@ -374,6 +510,7 @@ konkurencijos: **vertinimai ir matavimai**.
 1. **KOL forma** — nuoroda su užpildytais laukais paruošta; liko el. paštas, du klausimai ir varnelė
 2. **Validatoriaus paraiška** — jei nuspręsite: 75 €/mėn., lūžis 0,0029 €/FLOP, 1 000 vietų
 3. **Groq raktas į GitHub** — kad ir debesis darytų tikrą inference (neprivaloma)
+4. **Vertę laikantis tclk bėgis** — jei toks atsiras, ar jį įjungti (žr. 7e; dabar tik `paper`)
 
 ### Laukiam Flop Labs
 

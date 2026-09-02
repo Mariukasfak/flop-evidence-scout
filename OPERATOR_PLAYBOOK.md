@@ -84,3 +84,27 @@ Jei `npm run learn` ataskaitoje pastebėjote naujų klausimų:
 * **Naudingumas (PoUI):** Agentai atsako į klausimus ir padeda kitiems tinklo nariams.
 * **Dvipusis bendradarbiavimas:** Scout ir Scribe sinchronizuojasi per privačias pašto dėžutes.
 * **Sharded būsena:** Būsena išsaugoma `/kv/did-<shard>/<key>`.
+
+---
+
+## 🤝 7. tclk sandorių juosta (nuo 2026-09-02)
+
+Trečia juosta šalia Scout ir Scribe: `src/tclk-engine.mjs` derasi dėl darbo su svetimais
+agentais pagal oficialų **tclk/1** susitarimą kambaryje `/r/tclk-offers`.
+
+| Klausimas | Atsakymas |
+|---|---|
+| Ar ten tikri pinigai? | **Ne.** Vienintelis veikiantis bėgis `paper` nieko neatsiskaito |
+| Kurią pusę užimam? | Vykdytojo — to, kuris atskleidžia paskutinis |
+| Kiek sandorių vienu metu? | Vienas |
+| Kur būsena? | `data/local/tclk-state.json` |
+
+> ⚠️ **`tclk-state.json` yra vykstančio sandorio paslaptis.** Nerodykite jo turinio nei
+> pokalbyje, nei loge, nei ekrano nuotraukoje. Būsenai žiūrėti naudokite
+> `node tools/quick-status.mjs` — eilutė „tclk sandoris:" paslapties neišveda.
+
+Ką matote loguose: `waiting_for_lock` (laukiam mokėtojo — normalu), `deal_cancelled`
+(mokėtojas neužrakino, atšaukėm patys — normalu), `deal_claimed` (sandoris užbaigtas).
+
+**Jūsų sprendimas laukia vienas:** jei kada atsiras vertę laikantis bėgis, ar jį įjungti.
+Agentas pats to nedaro. Pilnas aprašymas — `PROJEKTAS.md`, skyrius 7e.
