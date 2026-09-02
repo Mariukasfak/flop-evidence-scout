@@ -338,3 +338,91 @@ export function railsFromNote(noteText) {
   const match = String(noteText ?? '').match(/tclk1:([a-z0-9_,-]+)/i);
   return match ? match[1].split(',').filter(Boolean) : [];
 }
+
+/* ---------------------------------------------------------------- rails --- */
+
+/**
+ * The paper rail's record, read off the reference `src/paper-rail.ts`.
+ *
+ * `tclkpaper1 <status> <lock> <statement> <refundAfterMs> [secret]` in a note
+ * at `tclk-paper-<2 hex>/<14 hex>`. It "backs it with nothing at all": a
+ * world-writable line anyone can overwrite. What it is good for is exactly
+ * what the reference says — the predicates a real rail must enforce (one lock
+ * per contract, claim only with the opening secret and only before the refund
+ * deadline) are enforced here too, so a client written against it is written
+ * correctly. That is the rehearsal, and it is the whole reason we can do this
+ * with nothing at stake.
+ */
+export const PAPER_RECORD_PREFIX = 'tclkpaper1';
+export const PAPER_STATUSES = ['locked', 'claimed', 'refunded'];
+
+export function paperNote(contract) {
+  if (!isContractId(contract)) throw new Error('tclk: paperNote needs a contract id');
+  return { ns: `tclk-paper-${contract.slice(2, 4)}`, key: contract.slice(4, 18) };
+}
+
+export function encodePaperRecord({ status, lock, statement, refundAfterMs, secret }) {
+  const head = `${PAPER_RECORD_PREFIX} ${status} ${lock} ${statement} ${refundAfterMs}`;
+  return secret === undefined ? head : `${head} ${secret}`;
+}
+
+/** Null on anything malformed — every read here is anonymous input. */
+export function decodePaperRecord(value) {
+  if (typeof value !== 'string') return null;
+  const parts = value.trim().split(' ');
+  if (parts.length < 5 || parts.length > 6) return null;
+  const [prefix, status, lock, statement, refundAfter, secret] = parts;
+  if (prefix !== PAPER_RECORD_PREFIX) return null;
+  if (!PAPER_STATUSES.includes(status)) return null;
+  if (lock !== 'hash' && lock !== 'point') return null;
+  if (lock === 'hash' && !isStatement(statement)) return null;
+  const refundAfterMs = Number(refundAfter);
+  if (!Number.isSafeInteger(refundAfterMs) || refundAfterMs <= 0) return null;
+  if ((status === 'claimed') !== (secret !== undefined)) return null;
+  return { status, lock, statement, refundAfterMs, ...(secret === undefined ? {} : { secret }) };
+}
+
+/* -------------------------------------------------------- state pointer --- */
+
+export const STATUSES = ['proposed', 'accepted', 'locked', 'claimed', 'refunded', 'cancelled'];
+
+/** `<status>` or `<status> <railRef>` — the coordination note's whole vocabulary. */
+export function stateNoteValue(status, railRef) {
+  if (!STATUSES.includes(status)) throw new Error(`tclk: unknown status ${status}`);
+  if (railRef === undefined) return status;
+  if (!/^[\x21-\x7e]{1,256}$/.test(railRef)) throw new Error('tclk: rail ref must be printable ASCII');
+  return `${status} ${railRef}`;
+}
+
+export function parseStateNoteValue(value) {
+  if (typeof value !== 'string') return null;
+  const [status, railRef, ...rest] = value.trim().split(' ');
+  if (rest.length > 0 || !STATUSES.includes(status)) return null;
+  return railRef === undefined ? { status } : { status, railRef };
+}
+
+/* --------------------------------------------------------------- frames --- */
+
+/** 16 hex chars, which is what the spec's own examples use. */
+export function randomNonce() {
+  return crypto.randomBytes(8).toString('hex');
+}
+
+/**
+ * The accept frame for an offer, contract id included.
+ *
+ * `paymentKey` is left undefined on purpose: it is required for point locks,
+ * which this file refuses, and canonicalJson drops an undefined key — so the
+ * contract id we compute is the one the reference computes for the same five
+ * fields.
+ */
+export function acceptFrameFor(offer, { from, statement, nonce = randomNonce() }) {
+  const core = { from, ref: offer.id, statement, paymentKey: undefined, nonce };
+  const contract = contractId(offer, core);
+  return { type: 'accept', from, ref: offer.id, statement, nonce, contract };
+}
+
+/** Is this offer's `id` the hash of its own fields? A frame that lies about itself is not an offer. */
+export function offerIdMatches(offer) {
+  try { return isContractId(offer?.id) && offerId(offer) === offer.id; } catch { return false; }
+}

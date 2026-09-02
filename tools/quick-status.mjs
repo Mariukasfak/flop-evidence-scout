@@ -255,6 +255,21 @@ function main() {
    * this whole watcher exists for. A signal now outranks anything quieter and
    * keeps its place until something louder arrives.
    */
+  /**
+   * The escrow lane, in one line. A deal in flight shows its stage; otherwise
+   * the tally. Nothing here ever prints the secret — the state file holds it
+   * and this reads only the public view.
+   */
+  try {
+    const tclk = JSON.parse(fs.readFileSync(path.join(DATA, 'tclk-state.json'), 'utf8'));
+    const done = (tclk.completed || []).length, dropped = (tclk.abandoned || []).length;
+    if (tclk.deal) {
+      console.log(`\n  tclk sandoris:       ${YEL}${tclk.deal.status}${OFF} ${DIM}(${tclk.deal.room}, mokėtojas ${String(tclk.deal.offer?.from || '').slice(-8)})${OFF}`);
+    } else if (done || dropped) {
+      console.log(`\n  tclk sandoriai:      ${done ? GREEN : DIM}${done} užbaigti${OFF}${dropped ? `, ${dropped} nutrūko` : ''}`);
+    }
+  } catch { /* no deals yet is not a fault */ }
+
   const signal = lastMatching(AUDIT, /"action":"capability_signal"/);
   const surface = signal || lastMatching(AUDIT, /"agent":"surface"/);
   if (surface) {

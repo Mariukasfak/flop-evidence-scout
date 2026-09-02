@@ -22,6 +22,7 @@ import { analyzeChatArchives, getLatestLearningReport } from './learning-engine.
 import { sayOnce, clearOnce } from './log-once.mjs';
 import { checkOneSurface } from './surface-watch.mjs';
 import { OFFER_ROOM as TCLK_OFFER_ROOM } from './tclk.mjs';
+import { TclkEngine } from './tclk-engine.mjs';
 
 /**
  * Every writable path the daemon owns, derived from one base directory.
@@ -41,6 +42,7 @@ export function deriveFrom(o) {
     auditLogPath: o.auditLogPath || path.join(dataDir, 'scout-audit.jsonl'),
     faucetAlertPath: o.faucetAlertPath || path.join(dataDir, 'faucet-alert.json'),
     surfaceStatePath: o.surfaceStatePath || path.join(dataDir, 'surface-state.json'),
+    tclkStatePath: o.tclkStatePath || path.join(dataDir, 'tclk-state.json'),
     heartbeatPath: o.heartbeatPath || path.join(dataDir, 'scout-heartbeat.json'),
     feedStatePath: o.feedStatePath || path.join(dataDir, 'feed-state.json'),
     feedPath: o.feedPath || path.join(docsDir, 'feed.json'),
@@ -371,6 +373,10 @@ export async function runScoutDaemon(options = {}) {
   // and validator to be three different parties, so this is never one identity
   // doing both jobs. See src/kibble-engine.mjs for why.
   const kibbleEngine = new KibbleEngine({ workerIdentity: scoutIdentity, validatorIdentity: scribeIdentity, client });
+  // Scout takes the deals; Scribe's key is named so its offers are never ours to accept.
+  const tclkEngine = new TclkEngine({
+    identity: scoutIdentity, client, statePath: config.tclkStatePath, otherDids: [scribeIdentity.did]
+  });
 
   // The DID note has advertised a mailbox from the start; this is what finally
   // reads it. Its own guardrails budget, so an inbound question cannot eat the
@@ -1051,6 +1057,20 @@ export async function runScoutDaemon(options = {}) {
             }
           } catch (err) {
             console.log(`[Kibble/Franchise] skipped — ${err.message}`);
+          }
+          try {
+            /**
+             * One tclk deal at a time, payee side, paper rail. Quiet while it
+             * waits; every step that posts something is audited, and the
+             * secret is never in any of it.
+             */
+            const tclk = await timed('tclk', () => tclkEngine.runTurn({ backend, real, ledgerPath }));
+            if (!['no_acceptable_offer', 'waiting_for_lock', 'lock_not_verified', 'read_failed'].includes(tclk.action)) {
+              console.log(`[tclk] ${tclk.action}${tclk.contract ? ` — ${tclk.contract.slice(0, 18)}` : ''}`);
+              appendAudit(config.auditLogPath, { agent: 'tclk', ...tclk });
+            }
+          } catch (err) {
+            sayOnce('tclk:lane', `[tclk] lane failed: ${err.message}`);
           }
           try {
             const kibbleBrief = await timed('kibbleBrief', () => kibbleEngine.runBriefTurn());
