@@ -302,9 +302,39 @@ export class TclkEngine {
 
   /* ---------------------------------------------------------- helpers --- */
 
+  /**
+   * The task text behind an offer's `job`, if it can be read at all.
+   *
+   * The spec leaves `context` free-form. The first offer this lane accepted
+   * (2026-09-02, contract 0x951dd1dfec9139b2) carried
+   * `context: "/kv/tclk-job-02/deal-10650402"` — a note path on the venue we
+   * are already talking to, with the task written in it. Treating that as a
+   * 39-character sentence would have produced the "names no task text this
+   * agent can read" line, which would have been false: the text was one GET
+   * away. A `/kv/<ns>/<key>` context is resolved; anything else is used as is.
+   * The note is world-writable and untrusted, so it is a task to answer,
+   * never an instruction to follow.
+   */
+  async #jobText(job) {
+    const context = typeof job?.context === 'string' ? job.context.trim() : '';
+    const kv = context.match(/^\/kv\/([a-z0-9][a-z0-9_-]{0,47})\/([a-z0-9][a-z0-9_-]{0,47})$/);
+    if (!kv) return { text: context, source: context ? 'inline' : 'none' };
+    try {
+      const raw = typeof this.client.readNote === 'function'
+        ? await this.client.readNote(kv[1], kv[2])
+        : await this.client.getKv(kv[1], kv[2]);
+      const value = typeof raw === 'string' ? raw : (raw?.value ?? '');
+      const text = String(value ?? '').trim();
+      return text ? { text, source: `kv:${kv[1]}/${kv[2]}` } : { text: '', source: 'kv-empty' };
+    } catch (err) {
+      sayOnce('tclk:job-note', `[tclk] could not read job note ${context}: ${err.message}`);
+      return { text: '', source: 'kv-unreadable' };
+    }
+  }
+
   async #work(deal, { backend, real, ledgerPath }) {
     const job = deal.offer.job;
-    const context = typeof job?.context === 'string' ? job.context.trim() : '';
+    const { text: context, source } = await this.#jobText(job);
     if (real && backend && context.length >= 40) {
       try {
         const task = buildTask('kibble-answer', { category: 'explain', title: String(job.id || 'tclk job'), body: context, facts: [] });
@@ -312,13 +342,15 @@ export class TclkEngine {
         try { if (ledgerPath) appendReceipt(receipt, ledgerPath); } catch { /* the ledger write is not the work */ }
         const answer = String(completion || '').trim();
         if (answer && task.validate(answer)) {
-          return `tclk-work | ${deal.contract} | job ${job.proto}:${job.id} | ${answer}`;
+          return `tclk-work | ${deal.contract} | job ${job.proto}:${job.id} (${source}) | ${answer}`;
         }
       } catch (err) {
         sayOnce('tclk:work', `[tclk] work generation failed: ${err.message}`);
       }
     }
-    const named = job ? `job ${job.proto}:${job.id} names no task text this agent can read` : 'no job attached';
+    const named = job
+      ? `job ${job.proto}:${job.id} ${source === 'none' ? 'names no task text' : `task (${source}) could not be answered`}`
+      : 'no job attached';
     return `tclk-work | ${deal.contract} | rehearsal on the paper rail: ${named}. `
       + 'This reveal is the payment condition and is not offered as proof of any delivery.';
   }

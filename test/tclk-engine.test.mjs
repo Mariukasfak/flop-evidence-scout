@@ -255,3 +255,70 @@ describe('tclk payee lane: lock, verify, reveal', () => {
     assert.equal((await again.runTurn()).action, 'waiting_for_lock');
   });
 });
+
+/**
+ * The first offer this lane accepted carried `context: "/kv/tclk-job-02/deal-10650402"`
+ * - a note path with the task in it. Read it, answer it, and say where it came from.
+ */
+describe('tclk payee lane: a job whose context is a note path', () => {
+  const TASK = 'Explain in two sentences what a hash time-locked contract guarantees to the payee and what it does not guarantee to the payer.';
+
+  async function lockedDealWithKvJob() {
+    const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
+    venue.notes.set('tclk-job-02/deal-1', TASK);
+    const offer = payerOffer(payer, { job: { proto: 'a2a', id: 'deal-1', context: '/kv/tclk-job-02/deal-1' } });
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(offer));
+    const engine = engineFor(venue, me);
+    await engine.runTurn();
+    const deal = engine.load().deal;
+    venue.say(deal.room, payer.did, encodeFrame({ type: 'lock', from: payer.did, contract: deal.contract, rail: 'paper', ref: deal.contract }));
+    const { ns, key } = paperNote(deal.contract);
+    venue.notes.set(`${ns}/${key}`, encodePaperRecord({ status: 'locked', lock: 'hash', statement: deal.statement, refundAfterMs: deal.offer.refundAfterMs }));
+    await engine.runTurn();
+    return { venue, me, engine, deal };
+  }
+
+  test('the note is read as the task, answered by the model, and the source is named', async () => {
+    const { venue, me, engine, deal } = await lockedDealWithKvJob();
+    let prompted = '';
+    const backend = { id: 'test', simulated: false, async generate({ prompt }) { prompted = String(prompt || ''); return { text: GOOD_ANSWER }; } };
+
+    const result = await engine.runTurn({ backend, real: true });
+
+    assert.equal(result.action, 'deal_claimed');
+    assert.ok(prompted.includes('hash time-locked contract'), 'the model saw the task text from the note, not the path');
+    const work = venue.rooms.get(deal.room).filter((m) => m.from === me.did).map((m) => m.text).find((t) => t.startsWith('tclk-work | '));
+    assert.ok(work.includes('(kv:tclk-job-02/deal-1)'), 'the work line says where the task came from');
+    assert.ok(work.includes(GOOD_ANSWER.slice(0, 40)), 'and carries the answer');
+    assert.equal(work.includes('rehearsal'), false);
+  });
+
+  test('an unreadable note is said to be unreadable, not dressed as a rehearsal with no job', async () => {
+    const { venue, me, engine, deal } = await lockedDealWithKvJob();
+    venue.notes.delete('tclk-job-02/deal-1');
+    const result = await engine.runTurn({ backend: makeBackend(GOOD_ANSWER), real: true });
+    assert.equal(result.action, 'deal_claimed');
+    const work = venue.rooms.get(deal.room).filter((m) => m.from === me.did).map((m) => m.text).find((t) => t.startsWith('tclk-work | '));
+    assert.ok(work.includes('task (kv-empty) could not be answered'), work);
+  });
+
+  test('a context that is not a note path is used as inline text', async () => {
+    const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
+    const inline = 'Inline task text long enough to clear the forty character floor for a real answer.';
+    const offer = payerOffer(payer, { job: { proto: 'a2a', id: 'x', context: inline } });
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(offer));
+    const engine = engineFor(venue, me);
+    await engine.runTurn();
+    const deal = engine.load().deal;
+    venue.say(deal.room, payer.did, encodeFrame({ type: 'lock', from: payer.did, contract: deal.contract, rail: 'paper', ref: deal.contract }));
+    const { ns, key } = paperNote(deal.contract);
+    venue.notes.set(`${ns}/${key}`, encodePaperRecord({ status: 'locked', lock: 'hash', statement: deal.statement, refundAfterMs: deal.offer.refundAfterMs }));
+    await engine.runTurn();
+    let prompted = '';
+    const backend = { id: 'test', simulated: false, async generate({ prompt }) { prompted = String(prompt || ''); return { text: GOOD_ANSWER }; } };
+    await engine.runTurn({ backend, real: true });
+    assert.ok(prompted.includes('forty character floor'));
+    const work = venue.rooms.get(deal.room).filter((m) => m.from === me.did).map((m) => m.text).find((t) => t.startsWith('tclk-work | '));
+    assert.ok(work.includes('(inline)'));
+  });
+});
