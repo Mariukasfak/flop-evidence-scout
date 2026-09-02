@@ -20,7 +20,87 @@
 
 import fs from 'node:fs';
 
+import { spawn } from 'node:child_process';
+import path from 'node:path';
+import { sayOnce, clearOnce } from './log-once.mjs';
+
 const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
+
+/**
+ * Bring a dead local Ollama back, at most once every ten minutes.
+ *
+ * On 2026-09-02 Ollama stopped at 12:44 in the middle of a run — its own log
+ * shows the last /api/generate at 12:44:26 and nothing after — and the agent
+ * spent the next four hours generating nothing. Every lane that needs a model
+ * degraded exactly as designed, quietly: rejections but no answers, claims but
+ * no deliveries, the franchise lane holding a job it could not settle. The
+ * status screen said "start Ollama" in red, and nobody was looking at it.
+ *
+ * Only a loopback host is ours to start. OLLAMA_HOST pointing anywhere else is
+ * somebody else's server, and spawning `ollama serve` here would at best start
+ * a second, unused instance.
+ *
+ * Ten minutes, because startup is slow and must not be mistaken for failure:
+ * measured today, the freshly started server accepted TCP but hung requests
+ * for roughly fifty seconds, then answered /api/tags in 4 ms. A retry inside
+ * that window spawns a second server fighting the first for the port. Ten
+ * minutes is an order of magnitude above the warm-up and still six chances an
+ * hour against an install that is genuinely broken.
+ */
+export const OLLAMA_REVIVE_COOLDOWN_MS = 10 * 60_000;
+
+const reviveState = { lastAttemptAt: 0 };
+
+export function isLoopbackHost(host) {
+  try {
+    const { hostname } = new URL(host);
+    return ['127.0.0.1', 'localhost', '::1', '[::1]', '0.0.0.0'].includes(hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** Pure: should this call spawn a server? */
+export function shouldReviveOllama({ host = OLLAMA_HOST, lastAttemptAt = 0, now = Date.now() } = {}) {
+  if (!isLoopbackHost(host)) return { revive: false, reason: 'host is not local' };
+  if (now - lastAttemptAt < OLLAMA_REVIVE_COOLDOWN_MS) return { revive: false, reason: 'cooldown' };
+  return { revive: true };
+}
+
+/** Where the binary is, or null. OLLAMA_BIN wins; then the Windows installer path; then PATH. */
+export function findOllamaBinary({ env = process.env, platform = process.platform, exists = fs.existsSync } = {}) {
+  if (env.OLLAMA_BIN && exists(env.OLLAMA_BIN)) return env.OLLAMA_BIN;
+  if (platform === 'win32' && env.LOCALAPPDATA) {
+    const installed = path.join(env.LOCALAPPDATA, 'Programs', 'Ollama', 'ollama.exe');
+    if (exists(installed)) return installed;
+  }
+  return 'ollama';
+}
+
+export async function reviveOllama({
+  host = OLLAMA_HOST,
+  state = reviveState,
+  now = Date.now,
+  spawnFn = spawn,
+  binary = findOllamaBinary()
+} = {}) {
+  const decision = shouldReviveOllama({ host, lastAttemptAt: state.lastAttemptAt, now: now() });
+  if (!decision.revive) return { attempted: false, reason: decision.reason };
+
+  state.lastAttemptAt = now();
+  try {
+    const child = spawnFn(binary, ['serve'], { detached: true, stdio: 'ignore', windowsHide: true });
+    // Detached and unreferenced: the cycle must not wait on it, and a daemon
+    // restart must not take it down.
+    if (typeof child?.unref === 'function') child.unref();
+    sayOnce('ollama:revive', `[Ollama] Not answering at ${host}; started \`${binary} serve\`. It takes about a minute to warm up.`);
+    return { attempted: true, binary };
+  } catch (err) {
+    sayOnce('ollama:revive-failed', `[Ollama] Could not start it: ${err.message}. Start it by hand.`);
+    return { attempted: false, reason: err.message };
+  }
+}
+
 
 /**
  * A deterministic stand-in. NOT inference.
@@ -278,8 +358,12 @@ export async function selectBackend({ preferred = null, model } = {}) {
 
   for (const backend of candidates) {
     if (await backend.available()) {
+      if (backend.id === 'ollama') clearOnce('ollama:revive');
       return { backend, real: backend.simulated !== true };
     }
+    // The local model is the one we can do something about. Fire and forget:
+    // this cycle proceeds on whatever is next, and the next cycle re-probes.
+    if (backend.id === 'ollama') await reviveOllama({ host: backend.host });
   }
   return { backend: simulatedBackend, real: false };
 }
