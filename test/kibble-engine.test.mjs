@@ -7,7 +7,7 @@ import path from 'node:path';
 import { generateIdentity } from '../src/identity.mjs';
 import { KibbleEngine, didCardUrl } from '../src/kibble-engine.mjs';
 import { reconstructBoard } from '../src/kibble.mjs';
-import { QUESTION_BANK } from '../src/kibble-jobs.mjs';
+import { QUESTION_BANK, jobIdFor, jobLine as questionJobLine } from '../src/kibble-jobs.mjs';
 import { boardBriefs, instrumentBriefs, nextBrief, briefLine } from '../src/kibble-briefs.mjs';
 
 const OTHER = 'did:key:z6MknDn3CH7vumHw5rXREhdQaBcDeFgHiJkLmNoPqRsTuVwX';
@@ -1143,5 +1143,60 @@ describe('Scribe earns the right to have its praise counted', () => {
     assert.equal(client.posts.length, 1, 'the claim stands; no slop followed it');
     // And it never pays for that job again.
     assert.ok((engine.localState.franchiseRefused || []).includes('k000000000f'));
+  });
+});
+
+/**
+ * `postedQuestionKeys` lives in a note on the server we are asking about, so
+ * the record of what we posted is exactly what goes missing during an outage.
+ * Our scorecard carries the receipt: a `duplicate_poster_title` drop against
+ * kac8c0965e6, which is question one, posted twice.
+ */
+describe('A question is asked once, even after the memory of asking is lost', () => {
+  test('a job already on the board is not posted again', async () => {
+    const first = QUESTION_BANK[0];
+    const id = jobIdFor(first.key);
+    const client = makeClient({ roomMessages: [{ text: questionJobLine(first), from: OTHER, seq: 1 }] });
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client
+    });
+    // The outage case exactly: our own memory is empty, the board is not.
+    engine.localState.postedQuestionKeys = [];
+
+    const result = await engine.runPosterTurn();
+
+    assert.equal(result.action, 'already_asked');
+    assert.equal(result.jobId, id);
+    assert.equal(client.posts.length, 0, 'nothing reposted');
+    assert.ok(engine.localState.postedQuestionKeys.includes(first.key),
+      'and the memory is repaired from the board');
+  });
+
+  test('a board we cannot read is not permission to repost', async () => {
+    const client = makeClient();
+    client.readRoom = async () => { throw new Error('HTTP 503'); };
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client
+    });
+    engine.localState.postedQuestionKeys = [];
+
+    const result = await engine.runPosterTurn();
+
+    assert.equal(result.action, 'board_unreadable');
+    assert.equal(client.posts.length, 0);
+  });
+
+  test('a question nobody has asked still goes out', async () => {
+    const client = makeClient({ roomMessages: [] });
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client
+    });
+    engine.localState.postedQuestionKeys = [];
+
+    const result = await engine.runPosterTurn();
+
+    assert.equal(result.action, 'job_posted');
+    assert.equal(client.posts.length, 1);
+    assert.match(client.posts[0].text, /^JOB v1 \| k/);
   });
 });

@@ -695,6 +695,37 @@ export class KibbleEngine {
     const question = nextQuestion(this.localState.postedQuestionKeys || []);
     if (!question) return { action: 'no_questions_left' };
 
+    /**
+     * Ask the board, not only our own memory, whether we already asked this.
+     *
+     * `postedQuestionKeys` lives in a note on the server we are asking about,
+     * so the memory of what we posted is precisely the thing that goes missing
+     * during the outages this agent spends its days inside — "note write
+     * failed: HTTP 503" runs through the whole log. Lose it once and the bank
+     * restarts at question one.
+     *
+     * That is not a hypothetical: our scorecard carries a drop reading
+     * `duplicate_poster_title` against kac8c0965e6, which is question one,
+     * posted twice. The check costs nothing and was already designed for —
+     * this file's own comment says a job id derived from the question makes
+     * "an accidental repost detectable rather than merely unlikely". It was
+     * simply never asked.
+     */
+    const jobId = jobIdFor(question.key);
+    try {
+      const board = await this.readBoard();
+      if (board.has(jobId)) {
+        this.localState.postedQuestionKeys = [
+          ...new Set([...(this.localState.postedQuestionKeys || []), question.key])
+        ];
+        await this.saveRemoteState();
+        return { action: 'already_asked', jobId, key: question.key };
+      }
+    } catch {
+      // A board we cannot read is not permission to repost. The question keeps.
+      return { action: 'board_unreadable' };
+    }
+
     const line = jobLine(question);
     const paced = this.posterGuardrails.canSendMessage(line);
     if (!paced.allowed) return { action: `paced: ${paced.reason}` };
