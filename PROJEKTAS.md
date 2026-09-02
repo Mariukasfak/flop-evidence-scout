@@ -133,7 +133,7 @@ npm run verify-collab    # patikrinti bendradarbiavimo įrašą
 npm run airdrop-model    # airdrop skaičiavimai
 npm run hardware-model   # mineris prieš validatorių
 npm run brief            # santrauka prižiūrėtojui (arba PRIEZIURA.bat)
-npm test                 # visi testai (2026-09-02: 508)
+npm test                 # visi testai (2026-09-02: 514)
 ```
 
 ---
@@ -543,12 +543,27 @@ X, GitHub), ir spėlioja ten, kur žiūri **į vidų**, nes vidinių duomenų ne
    Ollama, tclk sandoris. **Raktų ir sandorio paslapties ten nėra ir negali būti** —
    `.secrets` nė karto neskaitomas, o sandoris imamas per `publicDealView()`.
 
-### Kaip botas siūlo pakeitimus
+### Kaip botas praneša naujienas (gyvai)
 
-Rašo į `data/local/watch-inbox.md`: pastebėjimas, **įrodymas**, siūlymas.
+    node tools/watch-note.mjs "Technocore isleido 0.11.5, /patterns.md pasikeite"
 
-> ⚠️ **Tai pasiūlymų dėžutė, ne komandų eilė.** Claude ją skaito kaip duomenis ir parodo
-> jums. Automatiškai nevykdoma niekada.
+Eilutė nukeliauja į `data/local/watch-inbox.md`, o Claude sesijoje sukasi stebėtojas, kuris
+**tą eilutę iškart parodo pokalbyje kaip pranešimą**. Nereikia nieko atidarinėti ir nieko
+klausti — botas pasako, Claude pamato per ~15 sekundžių.
+
+Rašyti verta viską, kas atrodo nauja: X, Flop Labs, GitHub, serverio versija, keistas
+elgesys loguose. **Geriau parašyti ir suklysti, negu nutylėti** — klaidingą teiginį Claude
+patikrina ir pasako, kad jis klaidingas (taip 09-02 buvo atmesti du ir patvirtintas vienas).
+
+Vienas įrašas = viena eilutė. Nematomi ir valdymo simboliai iššluojami ta pačia taisykle,
+kurią serveris taiko kiekvienai žinutei (Cc, Cf, Cs, Co, Zl, Zp) — tekstas, kuris
+atvaizduojamas kaip niekas, yra būdas įsprausti nurodymus į svetimą kontekstą.
+
+> ⚠️ **Tai žinia, ne komanda.** Claude ją skaito kaip duomenis, patikrina ir parodo jums.
+> Automatiškai nevykdoma niekada.
+
+Stebėtojas gyvuoja tiek, kiek gyvuoja Claude sesija. Naujoje sesijoje pasakykite
+„įjunk prižiūrėtojo kanalą", ir jis vėl pakabinamas.
 
 ### Kodėl būtent taip, o ne „tegul botas komanduoja"
 
@@ -561,7 +576,7 @@ Praktinis darbo pasidalijimas, kuris veikia:
 
 | Kas | Ką daro |
 |---|---|
-| **Grok** | Žiūri į išorę: X, FLOP naujienos, GitHub, serverio versija. Rašo į dėžutę |
+| **Grok** | Žiūri į išorę: X, FLOP naujienos, GitHub, serverio versija. Rašo `watch-note.mjs` |
 | **Claude** | Tikrina jo teiginius, daro pakeitimus repozitorijoje, rodo jums |
 | **Jūs** | Tvirtinate, kas iš tikrųjų daroma |
 
