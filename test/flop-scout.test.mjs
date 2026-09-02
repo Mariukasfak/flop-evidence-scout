@@ -1421,3 +1421,40 @@ describe('An outage suppresses writes, it does not stop the cycle', () => {
     assert.equal(leaseOutcome({}), 'stand_down');
   });
 });
+
+/**
+ * The archive of /r/kibble exists to answer questions about WHO, and the text
+ * view renders a writer as `<z6Mk…eaD4>`. Sixteen characters where a
+ * 56-character DID was. Within an hour of adding that archive the first
+ * question asked of it — who wrote the 24 not-useful verdicts against our
+ * deliveries, worth -72 — returned "0 found" against a full file.
+ */
+describe('The board archive keeps a writer identifiable', () => {
+  const FULL = 'did:key:z6MkvJAr8ZTs5n4d14e4SGVFAxo8nWndZTin8vc23Aks3zgn';
+
+  test('a record survives round-trip with its whole DID and signature', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kibble-archive-'));
+    resetArchiveIndex();
+
+    archiveRoomMessages('kibble', [{
+      seq: 1, ts: '2026-09-02T10:00:00Z', from: FULL,
+      text: 'ATTEST v1 | kaaaaaaaaaa | not | rh:0123456789abcdef | reason',
+      nonce: 7, sig: 'AAAA'
+    }], dir);
+
+    const line = fs.readFileSync(path.join(dir, 'kibble-archive.jsonl'), 'utf8').trim();
+    const back = JSON.parse(line);
+
+    assert.equal(back.from, FULL, 'the DID must survive whole, or nothing can be attributed');
+    assert.equal(back.sig, 'AAAA', 'the signature stays so the line re-verifies after the ring forgets it');
+    assert.equal(back.from.length, 56);
+  });
+
+  test('a truncated writer cannot be matched, which is why the format matters', () => {
+    // Exactly the failure. Kept as a test so the reason is not just a comment.
+    const truncated = 'z6Mk…c23Aks3zgn';
+    assert.notEqual(truncated, FULL);
+    assert.equal(FULL.startsWith(truncated), false,
+      'a rendered DID is not even a prefix of the real one — no match is recoverable from it');
+  });
+});

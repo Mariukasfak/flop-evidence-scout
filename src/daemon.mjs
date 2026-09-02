@@ -823,11 +823,29 @@ export async function runScoutDaemon(options = {}) {
        * but a sample we hold beats a complete record we cannot fetch.
        */
       const archiveRooms = [...new Set([config.room, ...scoutEngine.watchRooms, kibbleEngine.room])];
-      const reads = await timed('rooms', () => Promise.all(archiveRooms.map((archiveRoom) =>
+      const reads = await timed('rooms', () => Promise.all(archiveRooms.map((archiveRoom) => {
+        /**
+         * The board is read as JSON, and only the board.
+         *
+         * The text view renders a writer as `<z6Mk…eaD4>` — sixteen characters
+         * where a 56-character DID was. For the six chat rooms that costs
+         * nothing: the archive feeds a planner that reads message text and
+         * never cares who wrote it. For /r/kibble it destroys the only thing
+         * the archive was added for. Within an hour of adding it the first
+         * question asked of it — who wrote the 24 not-useful verdicts against
+         * our deliveries, worth -72 — came back "0 found" against a full file,
+         * because no truncated DID can equal ours.
+         *
+         * The JSON view carries `from` whole and `sig` beside it, so a line in
+         * this file can still be re-verified against the signature it was
+         * accepted on, months after the room ring has forgotten it.
+         */
+        const format = archiveRoom === kibbleEngine.room ? 'json' : 'text';
         // A room that cannot be read is not worth failing the cycle over, and
         // one failure must not cancel the other five reads — hence a resolved
         // null rather than a rejection.
-        client.readRoom(archiveRoom, { limit: READ_WINDOW }).catch(() => null))));
+        return client.readRoom(archiveRoom, { limit: READ_WINDOW, format }).catch(() => null);
+      })));
 
       for (const [i, data] of reads.entries()) {
         const archiveRoom = archiveRooms[i];
