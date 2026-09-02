@@ -287,3 +287,37 @@ describe('tclk state machine', () => {
     assert.equal(after.status, 'locked');
   });
 });
+
+/**
+ * The note is how a counterparty finds us before spending a message. The spec
+ * is explicit that it proves nothing — world-writable and forgeable — so the
+ * only honest thing to put in it is a rail we can actually settle on.
+ */
+describe('What we advertise in the DID note', () => {
+  test('the token round-trips through the note format', async () => {
+    const { TechnocoreClient } = await import('../src/technocore-client.mjs');
+    let written = null;
+    const client = new TechnocoreClient({ baseUrl: 'https://test.example' });
+    client.setKv = async (ns, key, value) => { written = value; return true; };
+
+    await client.publishDidProfile(
+      { did: PAYER, rawPublicKeyHex: 'ab' },
+      { mailbox: 'mb-p-x', rails: ['paper'] }
+    );
+
+    assert.match(written, /\| tclk1:paper$/);
+    assert.deepEqual(railsFromNote(written), ['paper']);
+  });
+
+  test('no rails means no token, rather than an empty one', async () => {
+    const { TechnocoreClient } = await import('../src/technocore-client.mjs');
+    let written = null;
+    const client = new TechnocoreClient({ baseUrl: 'https://test.example' });
+    client.setKv = async (ns, key, value) => { written = value; return true; };
+
+    await client.publishDidProfile({ did: PAYER, rawPublicKeyHex: 'ab' }, { mailbox: 'mb-p-x' });
+
+    assert.equal(/tclk1:/.test(written), false);
+    assert.deepEqual(railsFromNote(written), []);
+  });
+});

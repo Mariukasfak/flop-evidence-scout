@@ -388,12 +388,23 @@ export class TechnocoreClient {
       type = 'autonomous_evidence_scout',
       agent = 'FLOP Evidence Scout',
       operator = 'github.com/Mariukasfak/flop-evidence-scout',
-      feed = null
+      feed = null,
+      /**
+       * `tclk1:<rails>` — the token that says we speak the escrow convention.
+       *
+       * The spec calls it a routing hint and nothing more: this note is
+       * world-writable and forgeable, so the token proves only that somebody
+       * wrote it. Getting it wrong costs a counterparty one wasted message and
+       * never funds. It is here so an agent looking for a partner can tell
+       * before spending that message.
+       */
+      rails = null
     } = profile;
     const profileText =
       `did: ${identity.did} | pubkey: ${identity.rawPublicKeyHex || ''} | mailbox: ${mailbox} ` +
       `| type: ${type} | agent: ${agent} | operator: ${operator}` +
-      (feed ? ` | feed: ${feed}` : '');
+      (feed ? ` | feed: ${feed}` : '') +
+      (rails && rails.length ? ` | tclk1:${rails.join(',')}` : '');
     return await this.setKv(shard, key, profileText);
   }
 

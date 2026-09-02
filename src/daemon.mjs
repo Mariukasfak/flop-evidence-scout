@@ -21,6 +21,7 @@ import { updateDashboardFile } from './dashboard.mjs';
 import { analyzeChatArchives, getLatestLearningReport } from './learning-engine.mjs';
 import { sayOnce, clearOnce } from './log-once.mjs';
 import { checkOneSurface } from './surface-watch.mjs';
+import { OFFER_ROOM as TCLK_OFFER_ROOM } from './tclk.mjs';
 
 /**
  * Every writable path the daemon owns, derived from one base directory.
@@ -840,7 +841,10 @@ export async function runScoutDaemon(options = {}) {
          * this file can still be re-verified against the signature it was
          * accepted on, months after the room ring has forgotten it.
          */
-        const format = archiveRoom === kibbleEngine.room ? 'json' : 'text';
+        // tclk-offers joins the board for the same reason: a deal frame names
+        // its counterparty by DID, and a rendered `<z6Mk…eaD4>` names nobody.
+        const identityRooms = new Set([kibbleEngine.room, TCLK_OFFER_ROOM]);
+        const format = identityRooms.has(archiveRoom) ? 'json' : 'text';
         // A room that cannot be read is not worth failing the cycle over, and
         // one failure must not cancel the other five reads — hence a resolved
         // null rather than a rejection.

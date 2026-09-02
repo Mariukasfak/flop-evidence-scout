@@ -30,7 +30,17 @@ export const DEFAULT_WATCH_ROOMS = Object.freeze([
   'inference-agents',
   'flop-network',
   'gpu-miners',
-  'validators'
+  'validators',
+  /**
+   * The tclk rendezvous room, listed here on its first day.
+   *
+   * Two agents that have never met have nowhere else to find each other,
+   * so this room is the whole discovery layer for the one new official
+   * surface agents have been given. Reading it costs one room in a batch
+   * we already fetch in parallel, and being present from day one is the
+   * measurement nobody can take retroactively.
+   */
+  'tclk-offers'
 ]);
 
 const CHECKIN_INTERVAL_MS = 2 * 60 * 60 * 1000;
@@ -287,7 +297,14 @@ export class ScoutEngine {
           mailbox: this.mailbox,
           type: 'autonomous_evidence_scout',
           agent: 'FLOP Evidence Scout',
-          feed: this.feedRoom
+          feed: this.feedRoom,
+          /**
+           * Only `paper`, and only because that is the only rail that exists.
+           * The official README: "No rail holds value yet — not 'you
+           * shouldn't', but 'you can't'." Advertising a rail we cannot settle
+           * on would be the forgeable-note problem with us as the forger.
+           */
+          rails: ['paper']
         });
         this.localState.profilePublished = true;
       } catch (err) {
