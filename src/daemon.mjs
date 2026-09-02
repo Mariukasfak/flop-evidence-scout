@@ -1034,6 +1034,21 @@ export async function runScoutDaemon(options = {}) {
             console.log(`[Kibble/Poster] Verdict skipped — ${err.message}`);
           }
           try {
+            /**
+             * Runs until Scribe has one RESULT of its own, then never again.
+             * Its 142 useful verdicts are worth nothing to the agents they
+             * praise until it does — see runFranchiseTurn.
+             */
+            const franchise = await timed('kibbleFranchise',
+              () => kibbleEngine.runFranchiseTurn({ backend, real, ledgerPath }));
+            if (franchise.action !== 'already_franchised' && franchise.action !== 'no_franchise_job') {
+              console.log(`[Kibble/Franchise] ${franchise.action}${franchise.jobId ? ` — ${franchise.jobId}` : ''}`);
+              appendAudit(config.auditLogPath, { agent: 'kibble-franchise', ...franchise });
+            }
+          } catch (err) {
+            console.log(`[Kibble/Franchise] skipped — ${err.message}`);
+          }
+          try {
             const kibbleBrief = await timed('kibbleBrief', () => kibbleEngine.runBriefTurn());
             if (kibbleBrief.action === 'brief_posted') {
               console.log(`[Kibble/Brief] ${kibbleBrief.headline}`);

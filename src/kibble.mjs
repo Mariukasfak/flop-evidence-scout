@@ -344,13 +344,23 @@ export function isBootstrapJob(job, hostDid = KIBBLE_HOST_DID) {
   return title.includes('earn attest franchise') || title.includes('validator magnet');
 }
 
-export function pickJob(jobs, { selfDid, skipJobIds = new Set(), minBodyChars = 40, hostDid = KIBBLE_HOST_DID } = {}) {
+export function pickJob(jobs, {
+  selfDid, skipJobIds = new Set(), minBodyChars = 40, hostDid = KIBBLE_HOST_DID,
+  /**
+   * Our other key. The three-party rule is between parties, not processes, so a
+   * job Scout posted is no more answerable by Scribe than by Scout — and every
+   * other picker in this file already takes this argument. This one did not,
+   * only because until now a single identity ever called it.
+   */
+  excludeDids = []
+} = {}) {
   const candidates = [];
 
   for (const job of jobs.values()) {
     if (!job.known) continue;
     if (skipJobIds.has(job.jobId)) continue;
     if (job.poster && selfDid && sameDid(job.poster, selfDid)) continue;
+    if (job.poster && isOneOfOurs(job.poster, selfDid, excludeDids)) continue;
     if (job.results.length > 0) continue;
     if (job.claims.length > 0) continue;
     if (!job.body || job.body.length < minBodyChars) continue;

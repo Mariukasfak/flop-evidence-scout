@@ -49,7 +49,7 @@ import { runSession } from './inference.mjs';
 import { appendReceipt } from './inference-ledger.mjs';
 import { sayOnce } from './log-once.mjs';
 import {
-  reconstructBoard, pickJob, pickThinDelivery, pickRealDelivery, sameDid,
+  reconstructBoard, pickJob, pickThinDelivery, pickRealDelivery, sameDid, isBootstrapJob,
   claimLine, resultLine, attestNotLine, attestUsefulLine, resultHashFor,
   thinDeliveryReason, isAboutFlop, pickOwnJobDelivery, isThinDelivery
 } from './kibble.mjs';
@@ -871,11 +871,19 @@ export class KibbleEngine {
    * so a session spent answering a job we lost is a session spent on a line that
    * will be discarded. Checked before the model runs, never after.
    */
-  #wonClaim(jobs, jobId) {
+  /**
+   * Did the key that claimed this job get there first?
+   *
+   * The claimant is a parameter because two of our keys can hold claims now:
+   * Scout in the ordinary lane, Scribe while it earns its franchise. This
+   * assumed Scout, so Scribe's own won claim read as lost, and the franchise
+   * lane released a claim it had actually won — on every single pass.
+   */
+  #wonClaim(jobs, jobId, claimant = this.workerIdentity.did) {
     const job = jobs.get(jobId);
     if (!job || job.claims.length === 0) return null;   // not visible yet — decide later
     const first = [...job.claims].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))[0];
-    return sameDid(first.from, this.workerIdentity.did);
+    return sameDid(first.from, claimant);
   }
 
   /**
@@ -1107,6 +1115,134 @@ export class KibbleEngine {
    * attempt "not useful" on a 3B model's say-so is a judgement this project has
    * not earned the right to publish.
    */
+  /**
+   * Earn the validator key the right to have its praise counted. Once, ever.
+   *
+   * The board's rule, published at /api/stats and quoted in its own manual:
+   * "Peer useful only *scores* after the attestor has ≥1 scored RESULT
+   * (franchise); `not` ATTEST needs no franchise. Unfranchised useful still
+   * lands on the tape."
+   *
+   * Scribe has delivered nothing, ever — `results_delivered: 0` on its
+   * scorecard — because the split was Scout works, Scribe judges. So every
+   * useful verdict it has posted, 142 of them on the day this was written, is
+   * on the tape and worth nothing to the agent it praised. Our own score is
+   * unaffected either way: `attestations_given` pays 1 whether or not we are
+   * franchised. This lane exists so that our verdicts are worth something to
+   * the people who earned them, which is the only reason to be a validator.
+   *
+   * It stops the moment it succeeds. One result is the whole requirement, and a
+   * second worker is not what this agent needs — so `validatorFranchised`
+   * latches true and every later call returns immediately without a read.
+   *
+   * The host keeps a standing job for exactly this ("Earn attest franchise
+   * (bootstrap RESULT)"), pickJob sorts it first, and it is posted by the host
+   * rather than by us, so the three parties stay three.
+   */
+  async runFranchiseTurn({ backend, real, ledgerPath } = {}) {
+    if (this.localState.validatorFranchised) return { action: 'already_franchised' };
+    await this.loadRemoteState();
+    if (this.localState.validatorFranchised) return { action: 'already_franchised' };
+
+    let jobs;
+    try {
+      jobs = await this.readBoard();
+    } catch (err) {
+      return { action: 'read_failed', error: err.message };
+    }
+
+    // The tape is the authority on whether we are done here, exactly as it is
+    // for checkFranchise. A result of ours on the board ends this lane for good.
+    for (const job of jobs.values()) {
+      for (const result of job.results || []) {
+        if (sameDid(result.from, this.validatorIdentity.did)) {
+          this.localState.validatorFranchised = true;
+          this.localState.franchiseClaim = null;
+          await this.saveRemoteState();
+          return { action: 'franchise_earned', jobId: job.jobId };
+        }
+      }
+    }
+
+    const holding = this.localState.franchiseClaim;
+    if (holding) {
+      // Settle the claim we already made in public before making another.
+      const won = this.#wonClaim(jobs, holding.jobId, this.validatorIdentity.did);
+      if (won === false) {
+        this.localState.franchiseClaim = null;
+        await this.saveRemoteState();
+        return { action: 'franchise_claim_lost', jobId: holding.jobId };
+      }
+      if (!real) return { action: 'franchise_waiting_for_model', jobId: holding.jobId };
+
+      const job = jobs.get(holding.jobId);
+      if (!job) {
+        this.localState.franchiseClaim = null;
+        await this.saveRemoteState();
+        return { action: 'franchise_job_gone', jobId: holding.jobId };
+      }
+
+      const facts = isAboutFlop(job.title, job.body) ? FACTS : [];
+      const task = buildTask('kibble-answer', {
+        category: job.category, title: job.title, body: job.body, facts
+      });
+      const { receipt, completion } = await runSession(task, { backend, identity: this.validatorIdentity });
+      try { appendReceipt(receipt, ledgerPath); }
+      catch (err) { sayOnce('ledger:write', `[Ledger] Receipt write failed: ${err.message}`); }
+
+      const answer = String(completion || '').trim();
+      if (!answer || !task.validate(answer)) {
+        // The same rule the worker follows: an honest nothing beats a -3.
+        this.localState.franchiseClaim = null;
+        this.localState.franchiseRefused =
+          [...(this.localState.franchiseRefused || []), holding.jobId].slice(-MAX_REMEMBERED);
+        await this.saveRemoteState();
+        return { action: 'franchise_refused', jobId: holding.jobId };
+      }
+
+      const withCard = `${answer}\n\n(verified validator: ${didCardUrl(this.client, this.validatorIdentity)})`;
+      const line = resultLine(holding.jobId, withCard);
+      const safety = this.validatorGuardrails.validateContent(line);
+      if (!safety.valid) return { action: `blocked: ${safety.reason}`, jobId: holding.jobId };
+
+      try {
+        await this.client.postMessage(this.room, line, this.validatorIdentity);
+      } catch (err) {
+        sayOnce('kibble:franchise-post', `[Kibble] Franchise delivery failed: ${err.message}`);
+        return { action: 'post_failed', jobId: holding.jobId, error: err.message };
+      }
+
+      // Not franchised yet: the scorer counts a RESULT on the tape, and the
+      // next pass reads it back rather than trusting that this post landed.
+      this.localState.franchiseClaim = null;
+      this.localState.franchiseDelivered = holding.jobId;
+      await this.saveRemoteState();
+      return { action: 'franchise_delivered', jobId: holding.jobId };
+    }
+
+    const skip = new Set([
+      ...(this.localState.franchiseRefused || []),
+      ...(this.localState.heldJobs || []).map((h) => h.jobId)
+    ]);
+    const job = pickJob(jobs, {
+      selfDid: this.validatorIdentity.did,
+      excludeDids: [this.workerIdentity.did],
+      skipJobIds: skip
+    });
+    if (!job) return { action: 'no_franchise_job' };
+
+    try {
+      await this.client.postMessage(this.room, claimLine(job.jobId), this.validatorIdentity);
+    } catch (err) {
+      sayOnce('kibble:franchise-claim', `[Kibble] Franchise claim failed: ${err.message}`);
+      return { action: 'post_failed', jobId: job.jobId, error: err.message };
+    }
+
+    this.localState.franchiseClaim = { jobId: job.jobId, at: Date.now() };
+    await this.saveRemoteState();
+    return { action: 'franchise_claimed', jobId: job.jobId, bootstrap: isBootstrapJob(job) };
+  }
+
   /**
    * Stop before we become the thing we are calling out.
    *

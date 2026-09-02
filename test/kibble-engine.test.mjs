@@ -1033,3 +1033,115 @@ describe('Both verdict lanes stop when our reasons stop varying', () => {
       'a judgement counts toward the same window a rejection does');
   });
 });
+
+/**
+ * Scribe has judged 142 deliveries useful and delivered nothing itself, so the
+ * board counts none of that praise for the agents who earned it:
+ * "Peer useful only *scores* after the attestor has >=1 scored RESULT".
+ */
+describe('Scribe earns the right to have its praise counted', () => {
+  const HOST = 'did:key:z6MkpbZ3BTUqrjPgRZLnGRSkk69f7Qu1edi8qTUNdSro7iDF';
+
+  const bootstrapJob = (id, seq = 1) => ({
+    text: `JOB v1 | ${id} | explain | Earn attest franchise (bootstrap RESULT) | `
+      + 'Deliver one honest result so your attestations begin to count for the agents you judge.',
+    from: HOST, seq
+  });
+
+  test('a result of ours on the board ends the lane for good', async () => {
+    const validatorIdentity = generateIdentity();
+    const client = makeClient({
+      roomMessages: [
+        jobLine('k000000000a'),
+        deliverLine('k000000000a', GOOD_ANSWER, { from: validatorIdentity.did, seq: 2 })
+      ]
+    });
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity, client
+    });
+
+    const first = await engine.runFranchiseTurn({ backend: makeBackend(GOOD_ANSWER), real: true });
+    assert.equal(first.action, 'franchise_earned');
+    assert.equal(engine.localState.validatorFranchised, true);
+
+    // And it costs nothing from here on: no post, and not even a read.
+    const before = client.posts.length;
+    const again = await engine.runFranchiseTurn({ backend: makeBackend(GOOD_ANSWER), real: true });
+    assert.equal(again.action, 'already_franchised');
+    assert.equal(client.posts.length, before);
+  });
+
+  test("it claims the host's on-ramp job ahead of an ordinary one", async () => {
+    const validatorIdentity = generateIdentity();
+    const client = makeClient({
+      roomMessages: [jobLine('k000000000b', { title: 'An ordinary job' }), bootstrapJob('k000000000c', 2)]
+    });
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity, client
+    });
+
+    const result = await engine.runFranchiseTurn({ backend: makeBackend(GOOD_ANSWER), real: true });
+    assert.equal(result.action, 'franchise_claimed');
+    assert.equal(result.jobId, 'k000000000c');
+    assert.equal(result.bootstrap, true);
+    assert.equal(client.posts.length, 1);
+    assert.match(client.posts[0].text, /^CLAIM v1 \| k000000000c/);
+    assert.equal(client.posts[0].did, validatorIdentity.did, 'claimed with Scribe, not Scout');
+  });
+
+  test('a job our worker posted is not ours to answer either', async () => {
+    // The three-party rule is between parties, not processes. Both our keys sit
+    // on one machine, so a job Scout posted is no more answerable by Scribe.
+    const workerIdentity = generateIdentity();
+    const client = makeClient({
+      roomMessages: [{ ...jobLine('k000000000d'), from: workerIdentity.did }]
+    });
+    const engine = new KibbleEngine({
+      workerIdentity, validatorIdentity: generateIdentity(), client
+    });
+
+    const result = await engine.runFranchiseTurn({ backend: makeBackend(GOOD_ANSWER), real: true });
+    assert.equal(result.action, 'no_franchise_job');
+    assert.equal(client.posts.length, 0);
+  });
+
+  test('a claim it won is settled with a real answer, signed by Scribe', async () => {
+    const validatorIdentity = generateIdentity();
+    const client = makeClient({ roomMessages: [bootstrapJob('k000000000e')] });
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity, client
+    });
+
+    await engine.runFranchiseTurn({ backend: makeBackend(GOOD_ANSWER), real: true });
+    client.roomMessages.push({ text: 'CLAIM v1 | k000000000e | worker', from: validatorIdentity.did, seq: 5 });
+    engine.boardCache = null;
+
+    const delivered = await engine.runFranchiseTurn({ backend: makeBackend(GOOD_ANSWER), real: true });
+    assert.equal(delivered.action, 'franchise_delivered');
+
+    const result = client.posts[client.posts.length - 1];
+    assert.match(result.text, /^RESULT v1 \| k000000000e/);
+    assert.equal(result.did, validatorIdentity.did);
+    // Still not franchised: the next pass reads the tape rather than trusting
+    // that this post landed and was counted.
+    assert.notEqual(engine.localState.validatorFranchised, true);
+  });
+
+  test('an answer that fails our own validator is dropped, never posted', async () => {
+    const validatorIdentity = generateIdentity();
+    const client = makeClient({ roomMessages: [bootstrapJob('k000000000f')] });
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity, client
+    });
+
+    await engine.runFranchiseTurn({ backend: makeBackend(GOOD_ANSWER), real: true });
+    client.roomMessages.push({ text: 'CLAIM v1 | k000000000f | worker', from: validatorIdentity.did, seq: 5 });
+    engine.boardCache = null;
+
+    const refused = await engine.runFranchiseTurn({ backend: makeBackend(THIN_ANSWER), real: true });
+    assert.equal(refused.action, 'franchise_refused');
+    assert.equal(client.posts.length, 1, 'the claim stands; no slop followed it');
+    // And it never pays for that job again.
+    assert.ok((engine.localState.franchiseRefused || []).includes('k000000000f'));
+  });
+});
