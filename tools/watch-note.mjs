@@ -47,9 +47,57 @@ export function formatNote(text, { now = () => new Date(), source = 'watcher' } 
   return `- ${now().toISOString()} | ${source} | ${oneLine(text)}`;
 }
 
-export function appendNote(text, { inbox = INBOX, source = 'watcher', now = () => new Date() } = {}) {
+/** How long an identical note stays "already said". */
+export const REPEAT_WINDOW_MS = 2 * 60 * 60_000;
+
+const ENTRY = /^- (\S+) \| [^|]* \| (.*)$/;
+
+/**
+ * Has this exact note already been made recently?
+ *
+ * Within four minutes of the channel opening, the watcher sent the same kibble
+ * counters twice - `agents 3171, jobs 61581` both times. That is not a fault
+ * in the bot: steady state is genuinely what it found, and a watcher cannot
+ * know what it told us before. But every note becomes a notification in a live
+ * session, so an unchanged reading repeated every few minutes turns the useful
+ * channel into a channel nobody reads.
+ *
+ * The daemon already solves this for its own room messages ("Deduplikacija:
+ * identiškas pranešimas jau buvo išsiųstas"); the rule is the same here, and
+ * enforced at the writing end rather than asked for in a prompt, because a
+ * rule the tool keeps is one the caller cannot forget.
+ */
+export function isRepeat(lines, body, { now = () => new Date(), windowMs = REPEAT_WINDOW_MS } = {}) {
+  const cutoff = now().getTime() - windowMs;
+  const wanted = body.trim();
+  for (const line of lines) {
+    const m = String(line).match(ENTRY);
+    if (!m) continue;
+    const at = Date.parse(m[1]);
+    if (!Number.isFinite(at) || at < cutoff) continue;
+    if (m[2].trim() === wanted) return true;
+  }
+  return false;
+}
+
+/** The tail of the inbox, or nothing when it does not exist yet. */
+function recentLines(inbox, count = 200) {
+  try {
+    return fs.readFileSync(inbox, 'utf8').split('\n').slice(-count);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Append one note. Returns the line written, or `null` when it repeats one
+ * already made inside the window — the caller says so rather than failing,
+ * because repeating yourself is not an error, it just is not news.
+ */
+export function appendNote(text, { inbox = INBOX, source = 'watcher', now = () => new Date(), windowMs = REPEAT_WINDOW_MS } = {}) {
   const body = oneLine(text);
   if (!body) throw new Error('tuscias irasas - parasyk, ka pastebejai');
+  if (isRepeat(recentLines(inbox), body, { now, windowMs })) return null;
   const line = formatNote(body, { source, now });
   fs.mkdirSync(path.dirname(inbox), { recursive: true });
   fs.appendFileSync(inbox, `${line}\n`, 'utf8');
@@ -63,5 +111,6 @@ if (isDirectRun) {
     console.error('Naudojimas: node tools/watch-note.mjs "ka pastebejai"');
     process.exit(1);
   }
-  console.log(appendNote(text, { source: process.env.WATCH_SOURCE || 'watcher' }));
+  const written = appendNote(text, { source: process.env.WATCH_SOURCE || 'watcher' });
+  console.log(written ?? 'praleista: toks pat irasas jau buvo per pastarasias 2 val. Rasyk tik tai, kas pasikeite.');
 }

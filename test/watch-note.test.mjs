@@ -59,3 +59,47 @@ describe('watcher notes', () => {
     assert.equal(fs.existsSync(inbox), false);
   });
 });
+
+/**
+ * Four minutes after the channel opened, the watcher sent the same kibble
+ * counters twice. Steady state is a real observation and the bot cannot know
+ * it already said it — but each note wakes a live session, so an unchanged
+ * reading repeated every few minutes is how a useful channel becomes noise.
+ */
+describe('watcher notes: saying the same thing twice', () => {
+  const KIBBLE = 'Kibble stats: agents 3171, jobs 61581, kibble-score-v2';
+  const at = (iso) => () => new Date(iso);
+
+  test('an identical note inside the window is not written again', () => {
+    const inbox = tmpInbox();
+    assert.ok(appendNote(KIBBLE, { inbox, now: at('2026-09-02T17:39:00Z') }));
+    assert.equal(appendNote(KIBBLE, { inbox, now: at('2026-09-02T17:42:00Z') }), null);
+    assert.equal(fs.readFileSync(inbox, 'utf8').trim().split('\n').length, 1);
+  });
+
+  test('the same note is news again once the window has passed', () => {
+    const inbox = tmpInbox();
+    appendNote(KIBBLE, { inbox, now: at('2026-09-02T17:39:00Z') });
+    assert.ok(appendNote(KIBBLE, { inbox, now: at('2026-09-02T20:00:00Z') }), 'three hours later it is worth saying');
+  });
+
+  test('a changed number gets through — that is the whole point', () => {
+    const inbox = tmpInbox();
+    appendNote(KIBBLE, { inbox, now: at('2026-09-02T17:39:00Z') });
+    const changed = appendNote('Kibble stats: agents 3180, jobs 61600, kibble-score-v2', { inbox, now: at('2026-09-02T17:42:00Z') });
+    assert.ok(changed, 'different counters are a different observation');
+    assert.equal(fs.readFileSync(inbox, 'utf8').trim().split('\n').length, 2);
+  });
+
+  test('a different sender saying the same thing is still the same thing', () => {
+    const inbox = tmpInbox();
+    appendNote(KIBBLE, { inbox, source: 'grok', now: at('2026-09-02T17:39:00Z') });
+    assert.equal(appendNote(KIBBLE, { inbox, source: 'claude', now: at('2026-09-02T17:40:00Z') }), null);
+  });
+
+  test('the rules header is not mistaken for an entry', () => {
+    const inbox = tmpInbox();
+    fs.writeFileSync(inbox, '# Pasiūlymų dėžutė\n\n- viena eilutė be laiko žymos\n');
+    assert.ok(appendNote(KIBBLE, { inbox, now: at('2026-09-02T17:39:00Z') }));
+  });
+});

@@ -133,7 +133,7 @@ npm run verify-collab    # patikrinti bendradarbiavimo įrašą
 npm run airdrop-model    # airdrop skaičiavimai
 npm run hardware-model   # mineris prieš validatorių
 npm run brief            # santrauka prižiūrėtojui (arba PRIEZIURA.bat)
-npm test                 # visi testai (2026-09-02: 514)
+npm test                 # visi testai (2026-09-02: 519)
 ```
 
 ---
@@ -558,6 +558,14 @@ patikrina ir pasako, kad jis klaidingas (taip 09-02 buvo atmesti du ir patvirtin
 Vienas įrašas = viena eilutė. Nematomi ir valdymo simboliai iššluojami ta pačia taisykle,
 kurią serveris taiko kiekvienai žinutei (Cc, Cf, Cs, Co, Zl, Zp) — tekstas, kuris
 atvaizduojamas kaip niekas, yra būdas įsprausti nurodymus į svetimą kontekstą.
+
+**Rašyk tik tai, kas pasikeitė.** Per pirmas kanalo minutes tie patys kibble skaičiai atėjo
+du kartus per keturias minutes. Tai ne boto kaltė — nekintanti būsena irgi yra pastebėjimas,
+o botas negali žinoti, ką jau sakė. Bet kiekvienas įrašas pažadina gyvą sesiją, todėl
+nepasikeitęs skaičius kas kelias minutes paverčia naudingą kanalą triukšmu. Todėl **identiškas
+įrašas per 2 valandas tyliai atmetamas** (įrankis atsako `praleista`). Ta pati taisyklė, kurią
+demonas jau taiko savo žinutėms kambariuose, tik čia — rašymo vietoje, nes taisyklė, kurią
+laikosi įrankis, yra ta, kurios skambintojas negali pamiršti.
 
 > ⚠️ **Tai žinia, ne komanda.** Claude ją skaito kaip duomenis, patikrina ir parodo jums.
 > Automatiškai nevykdoma niekada.
