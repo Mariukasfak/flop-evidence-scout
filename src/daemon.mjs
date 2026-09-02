@@ -23,6 +23,7 @@ import { sayOnce, clearOnce } from './log-once.mjs';
 import { checkOneSurface } from './surface-watch.mjs';
 import { OFFER_ROOM as TCLK_OFFER_ROOM } from './tclk.mjs';
 import { TclkEngine } from './tclk-engine.mjs';
+import { mirrorConsole } from './console-mirror.mjs';
 
 /**
  * Every writable path the daemon owns, derived from one base directory.
@@ -43,6 +44,7 @@ export function deriveFrom(o) {
     faucetAlertPath: o.faucetAlertPath || path.join(dataDir, 'faucet-alert.json'),
     surfaceStatePath: o.surfaceStatePath || path.join(dataDir, 'surface-state.json'),
     tclkStatePath: o.tclkStatePath || path.join(dataDir, 'tclk-state.json'),
+    consoleLogPath: o.consoleLogPath || path.join(dataDir, 'daemon-console.log'),
     heartbeatPath: o.heartbeatPath || path.join(dataDir, 'scout-heartbeat.json'),
     feedStatePath: o.feedStatePath || path.join(dataDir, 'feed-state.json'),
     feedPath: o.feedPath || path.join(docsDir, 'feed.json'),
@@ -335,6 +337,14 @@ export async function runScoutDaemon(options = {}) {
   // Re-derive after the caller's overrides, so passing only dataDir moves
   // every output rather than just the ones the caller thought to name.
   const config = { ...merged, ...deriveFrom(merged) };
+
+  /**
+   * Keep a copy of everything printed from here on. Until 2026-09-02 this
+   * output lived only in the launcher window, so an outage could only be
+   * reconstructed from the audit log's decisions - never from what the
+   * daemon actually said while making them.
+   */
+  if (config.consoleLogPath) mirrorConsole(config.consoleLogPath);
   
   // 1. Initialize Scout Agent (Agent #1)
   const scoutIdentity = loadOrCreateIdentity(config.identityPath, 'SCOUT_IDENTITY_JSON');

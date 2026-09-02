@@ -24,7 +24,8 @@
     "hardware-model": "node tools/hardware-model.mjs",
     "verify-collab": "node tools/verify-collab.mjs",
     "x-preview": "node tools/x-preview.mjs",
-    "kibble-preview": "node tools/kibble-preview.mjs"
+    "kibble-preview": "node tools/kibble-preview.mjs",
+    "brief": "node tools/watch-brief.mjs"
   },
   "keywords": [
     "flop-network",
