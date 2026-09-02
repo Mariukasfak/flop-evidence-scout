@@ -808,7 +808,21 @@ export async function runScoutDaemon(options = {}) {
       // The archiving stays sequential and in a fixed room order so the audit
       // trail does not reshuffle itself run to run for no reason.
       const recentMessages = [];
-      const archiveRooms = [...new Set([config.room, ...scoutEngine.watchRooms])];
+      /**
+       * The board our score is computed from is archived like any other room.
+       *
+       * It was the one room we read constantly and kept no copy of, on the
+       * assumption that /r/kibble/export was always there to reconstruct it.
+       * On 2026-09-02 the export answered 200 with the body "Service
+       * Unavailable" for twenty minutes while the ordinary read lane was fine,
+       * and the question waiting on it was worth 72 points: 24 not-useful
+       * verdicts against our deliveries that nothing local could explain.
+       *
+       * A 200-limit read per cycle covers a room moving at a few hundred
+       * messages a minute only in part, so this is a sample and not the ring —
+       * but a sample we hold beats a complete record we cannot fetch.
+       */
+      const archiveRooms = [...new Set([config.room, ...scoutEngine.watchRooms, kibbleEngine.room])];
       const reads = await timed('rooms', () => Promise.all(archiveRooms.map((archiveRoom) =>
         // A room that cannot be read is not worth failing the cycle over, and
         // one failure must not cancel the other five reads — hence a resolved
