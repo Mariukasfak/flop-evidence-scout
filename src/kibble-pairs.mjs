@@ -38,6 +38,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { didsMatch, isAbbreviatedDid } from './kibble.mjs';
+
 /** `max 2 scored useful from the same attestor→worker` — llms.txt, 2026-09-03. */
 export const PAIR_CAP = 2;
 
@@ -71,14 +73,33 @@ export function loadPairs(filePath, { cap = DEFAULT_PAIR_CAP_ENTRIES } = {}) {
     const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
     const raw = parsed?.workers;
     if (!raw || typeof raw !== 'object') return emptyBook();
-    const entries = Object.entries(raw)
-      .filter(([did, v]) => typeof did === 'string' && v && typeof v === 'object')
-      .slice(-cap)
-      .map(([did, v]) => [did, {
-        given: Number.isFinite(v.given) ? Math.max(0, Math.floor(v.given)) : 0,
-        praisedUs: v.praisedUs === true
-      }]);
-    return { workers: new Map(entries) };
+
+    /**
+     * Folded onto fingerprints on the way in, which also migrates the first
+     * version of this file. That version keyed on whatever DID string the
+     * caller happened to hold, so the same worker had two entries -- one full
+     * from the backfill, one abbreviated from the running engine -- and neither
+     * could see the other's count. Merging takes the larger count and the
+     * stricter reciprocal flag, so a migration can only tighten a budget.
+     */
+    const workers = new Map();
+    for (const [did, v] of Object.entries(raw)) {
+      if (typeof did !== 'string' || !did || !v || typeof v !== 'object') continue;
+      const given = Number.isFinite(v.given) ? Math.max(0, Math.floor(v.given)) : 0;
+      const praisedUs = v.praisedUs === true;
+      // Fold an abbreviated entry into the full DID for the same worker when
+      // both are present. Taking the larger count and the stricter reciprocal
+      // flag means a merge can only ever tighten a budget, never hand one back.
+      const existing = [...workers.keys()].find((k) => k !== did && didsMatch(k, did));
+      const key = existing && !isAbbreviatedDid(existing) ? existing : did;
+      const prior = workers.get(key) || workers.get(existing) || { given: 0, praisedUs: false };
+      if (existing && existing !== key) workers.delete(existing);
+      workers.set(key, {
+        given: Math.max(prior.given, given),
+        praisedUs: prior.praisedUs || praisedUs
+      });
+    }
+    return { workers: new Map([...workers.entries()].slice(-cap)) };
   } catch {
     return emptyBook();
   }
@@ -107,7 +128,23 @@ export function savePairs(book, filePath, { cap = DEFAULT_PAIR_CAP_ENTRIES } = {
   }
 }
 
-const entryFor = (book, workerDid) => book.workers.get(String(workerDid || '')) || null;
+/**
+ * The book's key for this worker, in whichever form it was banked.
+ *
+ * Exact hit first; the scan only ever inspects abbreviated leftovers, because a
+ * full DID that did not match exactly cannot match a different full DID either.
+ */
+function keyFor(book, workerDid) {
+  const did = String(workerDid ?? '').trim();
+  if (!did) return null;
+  if (book.workers.has(did)) return did;
+  for (const key of book.workers.keys()) {
+    if ((isAbbreviatedDid(key) || isAbbreviatedDid(did)) && didsMatch(key, did)) return key;
+  }
+  return null;
+}
+
+const entryFor = (book, workerDid) => book.workers.get(keyFor(book, workerDid)) || null;
 
 /**
  * How many more `useful` verdicts this worker can still be given before the
@@ -119,10 +156,16 @@ export function usefulBudgetLeft(book, workerDid) {
   return Math.max(0, ceiling - (entry?.given || 0));
 }
 
-/** Every worker whose budget is spent — what the picker skips. */
+/**
+ * Every worker whose budget is spent — what the picker skips.
+ *
+ * Keys go out in whichever form they were banked, and `pickRealDelivery` knows
+ * to bridge an abbreviated one. It is the picker's job because it is the picker
+ * that is handed whichever view the room happened to be read in.
+ */
 export function cappedWorkers(book) {
   const out = new Set();
-  for (const [did] of book.workers) if (usefulBudgetLeft(book, did) <= 0) out.add(did);
+  for (const [key] of book.workers) if (usefulBudgetLeft(book, key) <= 0) out.add(key);
   return out;
 }
 
@@ -134,13 +177,14 @@ export function cappedWorkers(book) {
  * a worker we never actually praised.
  */
 export function recordUseful(book, workerDid) {
-  const did = String(workerDid || '');
+  const did = String(workerDid ?? '').trim();
   if (!did) return book;
-  const entry = book.workers.get(did) || { given: 0, praisedUs: false };
+  const key = keyFor(book, did) || did;
+  const entry = book.workers.get(key) || { given: 0, praisedUs: false };
   // Re-insert so the map's insertion order stays "least recently touched
   // first", which is what the cap trims by.
-  book.workers.delete(did);
-  book.workers.set(did, { ...entry, given: entry.given + 1 });
+  book.workers.delete(key);
+  book.workers.set(key, { ...entry, given: entry.given + 1 });
   return book;
 }
 
@@ -152,11 +196,12 @@ export function recordUseful(book, workerDid) {
  * results, so it costs no extra request.
  */
 export function markPraisedUs(book, workerDid) {
-  const did = String(workerDid || '');
+  const did = String(workerDid ?? '').trim();
   if (!did) return book;
-  const entry = book.workers.get(did) || { given: 0, praisedUs: false };
+  const key = keyFor(book, did) || did;
+  const entry = book.workers.get(key) || { given: 0, praisedUs: false };
   if (entry.praisedUs) return book;
-  book.workers.set(did, { ...entry, praisedUs: true });
+  book.workers.set(key, { ...entry, praisedUs: true });
   return book;
 }
 
@@ -164,9 +209,9 @@ export function markPraisedUs(book, workerDid) {
 export function pairSummary(book) {
   let capped = 0;
   let reciprocal = 0;
-  for (const [did, entry] of book.workers) {
+  for (const [key, entry] of book.workers) {
     if (entry.praisedUs) reciprocal += 1;
-    if (usefulBudgetLeft(book, did) <= 0) capped += 1;
+    if (usefulBudgetLeft(book, key) <= 0) capped += 1;
   }
   return { workers: book.workers.size, capped, reciprocal };
 }

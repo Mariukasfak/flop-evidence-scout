@@ -7,7 +7,7 @@ import {
   parseKibbleLine, reconstructBoard, pickJob, pickThinDelivery, pickRealDelivery,
   isThinDelivery, sameDid, claimLine, resultLine, attestNotLine,
   attestUsefulLine, resultHashFor, thinDeliveryReason, successCondition,
-  isBootstrapJob, KIBBLE_HOST_DID, pickOwnJobDelivery
+  isBootstrapJob, KIBBLE_HOST_DID, pickOwnJobDelivery, didsMatch, isAbbreviatedDid
 } from '../src/kibble.mjs';
 
 /**
@@ -303,6 +303,25 @@ describe('choosing a delivery worth judging', () => {
     ]);
     const found = pickRealDelivery(jobs, { selfDid: SELF, skipWorkerDids: new Set([OTHER2]) });
     assert.equal(found.delivery.from, OTHER3);
+  });
+
+  /**
+   * The bug that made the whole budget a no-op for an hour on 2026-09-03.
+   *
+   * The book was seeded from /r/kibble/export, which carries full DIDs, while
+   * the running engine read the room as text, which abbreviates writers to
+   * `z6Mk<head>…<tail>`. The two never matched, so a worker with 53 verdicts
+   * against it looked untouched and collected 13 more.
+   */
+  test('a worker banked under a full DID is still skipped when the room abbreviates it', () => {
+    const bare = OTHER2.replace('did:key:', '');
+    const abbreviated = `${bare.slice(0, 8)}…${bare.slice(-4)}`;
+    const jobs = reconstructBoard([
+      { text: 'JOB v1 | k000000003a | explain | T | Explain the tradeoff between A and B in detail.', from: OTHER, seq: 1 },
+      { text: `DELIVER v1 | k000000003a | ${real}`, from: abbreviated, seq: 2 }
+    ]);
+    assert.ok(pickRealDelivery(jobs, { selfDid: SELF }));
+    assert.equal(pickRealDelivery(jobs, { selfDid: SELF, skipWorkerDids: new Set([OTHER2]) }), null);
   });
 
   test('leaves a job two other validators have already called useful', () => {

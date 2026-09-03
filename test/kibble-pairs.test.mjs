@@ -67,6 +67,59 @@ describe('the attestor→worker budget', () => {
   });
 });
 
+describe('the two views of one DID', () => {
+  /**
+   * What made the budget a no-op in production on 2026-09-03: the book was
+   * seeded from an export (full DIDs) while the running engine read the room as
+   * text (abbreviated `z6Mk<head>…<tail>`), so a worker with 53 verdicts
+   * against it looked untouched and collected 13 more in the next hour.
+   */
+  const bare = A.replace('did:key:', '');
+  const ABBREV = `${bare.slice(0, 8)}…${bare.slice(-4)}`;
+
+  test('a full DID and its abbreviation are one worker, not two', () => {
+    const book = loadPairs(tmpFile());
+    recordUseful(book, A);
+    recordUseful(book, ABBREV);
+    assert.equal(usefulBudgetLeft(book, A), 0);
+    assert.equal(usefulBudgetLeft(book, ABBREV), 0);
+    assert.equal(book.workers.size, 1, 'one worker, one entry');
+  });
+
+  test('cappedWorkers reaches a worker banked under the other form', () => {
+    const book = loadPairs(tmpFile());
+    recordUseful(book, ABBREV);
+    recordUseful(book, ABBREV);
+    assert.equal(usefulBudgetLeft(book, A), 0, 'the full DID is the same worker');
+  });
+
+  test('a legacy file holding both forms is merged on load, never loosened', () => {
+    const file = tmpFile();
+    fs.writeFileSync(file, JSON.stringify({
+      workers: {
+        [A]: { given: 53, praisedUs: false },
+        [ABBREV]: { given: 2, praisedUs: true }
+      }
+    }), 'utf8');
+    const book = loadPairs(file);
+    assert.equal(book.workers.size, 1);
+    assert.equal(usefulBudgetLeft(book, A), 0);
+    // The larger count and the stricter flag both survive.
+    const entry = [...book.workers.values()][0];
+    assert.equal(entry.given, 53);
+    assert.equal(entry.praisedUs, true);
+  });
+
+  test('two different workers are never merged', () => {
+    const book = loadPairs(tmpFile());
+    recordUseful(book, A);
+    recordUseful(book, B);
+    assert.equal(book.workers.size, 2);
+    assert.equal(usefulBudgetLeft(book, A), PAIR_CAP - 1);
+    assert.equal(usefulBudgetLeft(book, B), PAIR_CAP - 1);
+  });
+});
+
 describe('surviving a restart', () => {
   test('counts round-trip through the file', () => {
     const file = tmpFile();

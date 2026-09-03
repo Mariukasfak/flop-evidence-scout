@@ -431,6 +431,29 @@ export function pickThinDelivery(jobs, { selfDid, excludeDids = [], skipJobIds =
  * its own jobs and attest its own work. Match on the full string when we have
  * it, and on the abbreviation's head and tail when we do not.
  */
+/**
+ * Is this abbreviated rather than a full `did:key:`?
+ *
+ * The room's text view shortens writers to `<z6Mk<head>…<tail>>` while the JSON
+ * view and `/export` carry the whole thing. That difference silently defeated
+ * the attestor→worker budget on 2026-09-03: the book was seeded from an export
+ * (full DIDs) while the running engine read the room as text (abbreviated), so
+ * every lookup missed, no worker was ever recognised as spent, and one worker
+ * collected 13 more useful verdicts in the hour after the fix supposedly landed.
+ *
+ * `sameDid` can bridge the two, but only in one direction — abbreviated
+ * candidate against full self — so anything holding a mixed set has to know
+ * which entries need the slow, bidirectional check.
+ */
+export function isAbbreviatedDid(did) {
+  return /…/.test(String(did ?? ''));
+}
+
+/** True if these name the same agent, whichever view each of them came from. */
+export function didsMatch(a, b) {
+  return sameDid(a, b) || sameDid(b, a);
+}
+
 export function sameDid(candidate, selfDid) {
   if (!candidate || !selfDid) return false;
   const a = String(candidate).trim();
@@ -587,7 +610,24 @@ export function pickRealDelivery(jobs, {
   selfDid, excludeDids = [], skipJobIds = new Set(), minBodyChars = 80,
   skipWorkerDids = new Set(), maxPeerUseful = 2
 } = {}) {
-  const capped = (did) => [...skipWorkerDids].some((d) => sameDid(d, did));
+  /**
+   * Exact first, then the abbreviated leftovers.
+   *
+   * Both the budget book and the board now hold full DIDs, so the Set lookup
+   * answers almost every call in constant time. The loop exists only for
+   * entries banked before that was true, and it touches nothing else: a full
+   * DID that did not match exactly cannot match one either.
+   */
+  const capped = (did) => {
+    if (skipWorkerDids.has(did)) return true;
+    // A scan is only needed where one side is abbreviated: two different full
+    // DIDs that failed the exact test cannot match under any reading.
+    const loose = isAbbreviatedDid(did);
+    for (const entry of skipWorkerDids) {
+      if ((loose || isAbbreviatedDid(entry)) && didsMatch(entry, did)) return true;
+    }
+    return false;
+  };
   for (const job of [...jobs.values()].sort((a, b) => (b.postedSeq ?? 0) - (a.postedSeq ?? 0))) {
     if (skipJobIds.has(job.jobId)) continue;
     if (!job.known) continue;          // we cannot judge an answer to a question we never read

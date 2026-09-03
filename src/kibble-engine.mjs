@@ -422,7 +422,16 @@ export class KibbleEngine {
     if (this.boardCache && now() - this.boardCache.at < maxAgeMs) {
       return this.boardCache.jobs;
     }
-    const { messages } = await this.client.readRoom(this.room, { limit: READ_WINDOW });
+    /**
+     * JSON, so writers arrive as full `did:key:` strings.
+     *
+     * The text view abbreviates them to `z6Mk<head>…<tail>`, which is why every
+     * comparison in this file went through `sameDid`. It is also what defeated
+     * the attestor→worker budget: the book was seeded from an export with full
+     * DIDs and then written from abbreviated ones, so a spent worker looked new.
+     * Reading the same shape the tape uses removes the whole class of bug.
+     */
+    const { messages } = await this.client.readRoom(this.room, { limit: READ_WINDOW, format: 'json' });
     const jobs = reconstructBoard(messages);
     this.boardCache = { jobs, at: now() };
     return jobs;
