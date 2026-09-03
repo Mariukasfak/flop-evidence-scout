@@ -432,6 +432,17 @@ export class TclkPayer {
     deal.lockedBytes = String(value).trim();     // kept even when the announcement fails
     this.save();
 
+    /**
+     * The announcement needs the deal room to exist. While the server is
+     * refusing new rooms there is no point spending a request a minute finding
+     * that out again -- the rail already holds the lock, and the announcement
+     * can wait for the budget rather than hammer the refusal.
+     */
+    if (!this.#roomsOpen()) {
+      return { action: 'lock_unannounced_rooms_refused', contract: deal.contract,
+        blockedForMin: minutesBlocked(this.budget, now) };
+    }
+
     const posted = await this.#post(deal.room, {
       type: 'lock', from: this.identity.did, contract: deal.contract,
       rail: 'paper', ref: `${ns}/${key}`

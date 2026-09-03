@@ -249,7 +249,8 @@ describe('locking on the paper rail', () => {
    */
   test('a lock we placed but could not announce is finished, not re-attempted', async () => {
     const venue = new FakeVenue();
-    const payer = makePayer(venue);
+    let clock = 1_700_000_000_000;
+    const payer = makePayer(venue, { now: () => clock });
     const { accept } = await offerAndAccept(payer, venue);
     await payer.runTurn();
 
@@ -264,9 +265,14 @@ describe('locking on the paper rail', () => {
     assert.ok(venue.notes.get(`${ns}/${key}`), 'the rail was written even though the room was not');
     assert.ok(payer.state.deal.lockedBytes, 'and the bytes a refund must name were kept');
 
+    // A refusal stands the lane down until the day turns rather than spending a
+    // request a minute rediscovering it. The rail already holds the lock.
     venue.postMessage = realPost;
+    assert.equal((await payer.runTurn()).action, 'lock_unannounced_rooms_refused');
+
+    clock += 25 * 3600_000;
     const retry = await payer.runTurn();
-    assert.equal(retry.action, 'locked', 'the second attempt announces rather than rewriting');
+    assert.equal(retry.action, 'locked', 'the later attempt announces rather than rewriting');
     assert.equal(payer.state.deal.status, 'locked');
   });
 

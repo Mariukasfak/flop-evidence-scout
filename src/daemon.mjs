@@ -1138,7 +1138,8 @@ export async function runScoutDaemon(options = {}) {
              * read has to be distinguishable from one with nothing to read.
              */
             const payer = await timed('tclkPayer', () => tclkPayer.runTurn());
-            const quietPayer = ['offer_paced', 'waiting_for_accept', 'waiting_for_reveal', 'no_question_left', 'rooms_refused'];
+            const quietPayer = ['offer_paced', 'waiting_for_accept', 'waiting_for_reveal', 'no_question_left',
+              'rooms_refused', 'lock_unannounced_rooms_refused'];
             const payerChanged = payer.action !== lastPayerAction;
             lastPayerAction = payer.action;
             if (!quietPayer.includes(payer.action) || payerChanged) {
