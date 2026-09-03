@@ -1060,6 +1060,70 @@ describe('Both verdict lanes stop when our reasons stop varying', () => {
 
     assert.equal(usefulBudgetLeft(engine.pairs, OTHER), PAIR_CAP - 1, 'still counted, just not persisted');
   });
+
+  /**
+   * The guard had no way out of its own verdict.
+   *
+   * `recentReasons` was appended only after a successful post while the check
+   * ran before it, so the first dip below the floor froze the window on the
+   * entries that had failed and nothing could ever enter to change it. Our own
+   * audit log on 2026-09-03 shows 42 consecutive blocks all reporting variety
+   * 0.4166666666666667 to the last digit -- one number recomputed over a set
+   * that never moved. The `not` lane, the uncapped one, had been dead since it
+   * first dipped.
+   */
+  test('a lane blocked for repeating itself can talk its way back out', async () => {
+    const workerIdentity = generateIdentity();
+    const build = () => makeClient({
+      roomMessages: [
+        jobLine('k000000000d'),
+        deliverLine('k000000000d', GOOD_ANSWER, { from: OTHER, seq: 2 }),
+        jobLine('k000000000e'),
+        deliverLine('k000000000e', GOOD_ANSWER, { from: workerIdentity.did, seq: 3 })
+      ]
+    });
+    const client = build();
+    const engine = new KibbleEngine({ workerIdentity, validatorIdentity: generateIdentity(), client });
+    engine.localState.recentReasons = Array.from({ length: 12 }, () => 'this delivery answers the question asked');
+
+    const outcomes = [];
+    for (let turn = 0; turn < 7; turn += 1) {
+      engine.localState.recentReasons = [...engine.localState.recentReasons];
+      const backend = makeBackend(`USEFUL${String.fromCharCode(10)}a distinct sentence about delivery number ${turn}`);
+      const jobs = reconstructBoard(client.roomMessages);
+      outcomes.push((await engine.attemptUsefulAttest({ backend, real: true, jobs })).action);
+      engine.localState.lastAttestJobId = null;
+    }
+
+    // Twelve slots and a floor of 0.5. The reason is recorded before the check,
+    // so on turn k the window holds k distinct sentences plus the survivors of
+    // the repeated one: (k + 1) / 12. That reaches 0.5 at k = 5, which is the
+    // fifth turn -- four blocked, then out.
+    assert.deepEqual(outcomes.slice(0, 4), Array.from({ length: 4 }, () => 'reasons_too_alike'));
+    assert.equal(outcomes[4], 'attested_useful', 'a model writing varied reasons must be able to unblock the lane');
+  });
+
+  test('a model that really is repeating itself stays blocked', async () => {
+    const workerIdentity = generateIdentity();
+    const client = makeClient({
+      roomMessages: [
+        jobLine('k000000000d'),
+        deliverLine('k000000000d', GOOD_ANSWER, { from: OTHER, seq: 2 }),
+        jobLine('k000000000e'),
+        deliverLine('k000000000e', GOOD_ANSWER, { from: workerIdentity.did, seq: 3 })
+      ]
+    });
+    const engine = new KibbleEngine({ workerIdentity, validatorIdentity: generateIdentity(), client });
+    engine.localState.recentReasons = Array.from({ length: 12 }, () => 'this delivery answers the question asked');
+
+    const backend = makeBackend(`USEFUL${String.fromCharCode(10)}this delivery answers the question asked`);
+    const jobs = reconstructBoard(client.roomMessages);
+    for (let turn = 0; turn < 14; turn += 1) {
+      const result = await engine.attemptUsefulAttest({ backend, real: true, jobs });
+      assert.equal(result.action, 'reasons_too_alike', `turn ${turn} must stay shut`);
+    }
+    assert.equal(client.posts.length, 0);
+  });
 });
 
 /**

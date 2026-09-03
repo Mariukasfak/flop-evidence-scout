@@ -1321,6 +1321,31 @@ export class KibbleEngine {
    * was backwards: a canned rejection is rude, while a canned endorsement at
    * volume is pair-farming, which is what the board's own caps are for.
    */
+  /**
+   * Put a reason the model just wrote into the window, posted or not.
+   *
+   * The window has to measure the *model*, not our posting history, and for a
+   * day it measured neither. `recentReasons` was appended only after a
+   * successful post, and the guard ran before the post, so the first time
+   * variety fell below the floor the window froze with the entries that had
+   * failed it and no new entry could ever arrive. Measured on our own audit
+   * log 2026-09-03: 42 consecutive `reasons_too_alike` blocks, every one
+   * reporting variety 0.4166666666666667 to the last digit -- the signature of
+   * a number recomputed over a set that never changes. The `not` lane, which
+   * is the uncapped one worth 1 a verdict, had been dead since it first
+   * dipped.
+   *
+   * Recording the candidate costs a model session on a turn that posts
+   * nothing. That is the price of the measurement being real: the window now
+   * says what the model is doing now, so a varied reason lifts it on the next
+   * turn and a model that has genuinely started repeating itself keeps the
+   * lane shut, which is what the guard is for.
+   */
+  rememberReason(text) {
+    this.localState.recentReasons =
+      [...(this.localState.recentReasons || []), String(text).slice(0, 70)].slice(-REASON_WINDOW);
+  }
+
   reasonsTooAlike() {
     const recent = this.localState.recentReasons || [];
     if (recent.length < REASON_WINDOW) return null;
@@ -1370,6 +1395,8 @@ export class KibbleEngine {
     const [verdict, ...rest] = answer.split('\n').map((l) => l.trim()).filter(Boolean);
     if (verdict !== 'USEFUL') return { action: 'judged_not_useful', jobId: found.job.jobId };
 
+    // Recorded before the check, never after the post: see rememberReason.
+    this.rememberReason(rest.join(' '));
     const tooAlike = this.reasonsTooAlike();
     if (tooAlike) return { action: 'reasons_too_alike', variety: tooAlike.variety };
 
@@ -1391,10 +1418,6 @@ export class KibbleEngine {
     }
 
     this.validatorGuardrails.recordSent(line);
-    // The same window both lanes are measured against, so a model that starts
-    // repeating itself is caught whichever lane it repeats itself in.
-    this.localState.recentReasons =
-      [...(this.localState.recentReasons || []), rest.join(' ').slice(0, 70)].slice(-REASON_WINDOW);
     // Spent only now, after the line is on the tape. A verdict that failed to
     // post consumed no scoring slot, and retiring a worker we never actually
     // endorsed would throw the budget away twice over.
@@ -1510,13 +1533,13 @@ export class KibbleEngine {
      * one sentence doing the work of fourteen verdicts, and the board says
      * canned reasons are ignored. Ours sits at 0.90 across 77 attestations.
      * Below the floor this stops rather than adding to that pile.
+     *
+     * The check now runs AFTER the reason is written rather than before it.
+     * Ordering it the other way was what killed this lane: the window only
+     * ever grew on a successful post, so the first dip below the floor froze it
+     * with exactly the entries that had failed, and no reason could enter to
+     * change the verdict. See rememberReason.
      */
-    const tooAlike = this.reasonsTooAlike();
-    if (tooAlike) {
-      if (posted) break;
-      return { action: 'reasons_too_alike', variety: tooAlike.variety };
-    }
-
     // Written by the model about this delivery, because a skeleton with slots
     // filled in is still one sentence wearing different clothes. The composed
     // version stays as the fallback: a validator that cannot phrase its
@@ -1542,6 +1565,14 @@ export class KibbleEngine {
         sayOnce('kibble:reason-model', `[Kibble] Reason model unavailable: ${err.message}`);
       }
     }
+
+    this.rememberReason(why);
+    const tooAlike = this.reasonsTooAlike();
+    if (tooAlike) {
+      if (posted) break;
+      return { action: 'reasons_too_alike', variety: tooAlike.variety };
+    }
+
     const reason = `${why} Verified by: ${didCardUrl(this.client, this.validatorIdentity)}`;
     // Bound to the exact delivery we judged. Jobs here carry several, and an
     // unbound verdict does not say which one it meant.
@@ -1562,8 +1593,6 @@ export class KibbleEngine {
     this.localState.attestsPosted += 1;
     this.localState.lastAttestJobId = found.job.jobId;
     this.localState.lastAttestAt = new Date().toISOString();
-    this.localState.recentReasons =
-      [...(this.localState.recentReasons || []), why.slice(0, 70)].slice(-REASON_WINDOW);
     done.add(found.job.jobId);
     posted += 1;
     lastJobId = found.job.jobId;
