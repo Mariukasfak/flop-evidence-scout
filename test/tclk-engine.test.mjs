@@ -579,6 +579,46 @@ describe('the lane remembers what a deal taught it', () => {
       'the file outlives the process that learned it');
   });
 
+  test('a scan that lands mid-run is picked up without a restart', async () => {
+    const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
+    const repFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tclk-rep-')), 'payers.json');
+    const engine = engineFor(venue, me, { payerRepPath: repFile });   // no file yet, as on day one
+
+    // The scan finishes after the process started, which is exactly what
+    // happened on 2026-09-03: the daemon began six minutes before the file did.
+    fs.writeFileSync(repFile, JSON.stringify({
+      updatedAt: new Date().toISOString(),
+      payers: { [payer.did]: { tried: 9, done: 0 } }
+    }));
+
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer)));
+    assert.equal((await engine.runTurn()).action, 'no_acceptable_offer');
+  });
+
+  test('writing one deal never discards what a scan wrote', async () => {
+    const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
+    const repFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tclk-rep-')), 'payers.json');
+    const engine = engineFor(venue, me, { payerRepPath: repFile });
+
+    // Five hundred payers arrive from the room after we loaded an empty store.
+    const scanned = {};
+    for (let i = 0; i < 500; i++) scanned['did:key:z6Mkscan' + i] = { tried: 2, done: 1 };
+    fs.writeFileSync(repFile, JSON.stringify({ updatedAt: new Date().toISOString(), payers: scanned }));
+
+    let clock = T0;
+    const running = engineFor(venue, me, { now: () => clock, payerRepPath: repFile });
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer)));
+    await running.runTurn();
+    clock += 6 * 60_000;
+    await running.runTurn();                        // abandons, and writes
+
+    const after = JSON.parse(fs.readFileSync(repFile, 'utf8'));
+    assert.equal(Object.keys(after.payers).length, 501, 'the scan survives our one deal');
+    assert.deepEqual(after.payers[payer.did], { tried: 1, done: 0 });
+    assert.deepEqual(after.payers['did:key:z6Mkscan0'], { tried: 2, done: 1 });
+    assert.ok(engine);
+  });
+
   test('no reputation path means nothing is written, and nothing breaks', async () => {
     const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
     venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer)));

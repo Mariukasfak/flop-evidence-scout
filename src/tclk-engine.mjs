@@ -157,6 +157,7 @@ export class TclkEngine {
     this.budget = roomBudgetPath ? loadBudget(roomBudgetPath) : { blockedUntilMs: 0, refusals: 0, lastRefusalAt: null };
     this.payerRepPath = payerRepPath;
     this.payerRep = loadReputation(payerRepPath);
+    this.payerRepStamp = null;
     this.state = null;
   }
 
@@ -238,6 +239,7 @@ export class TclkEngine {
   }
 
   async findAndAccept() {
+    this.#refreshReputation();
     let messages;
     try {
       ({ messages } = await this.client.readRoom(this.offerRoom, { limit: READ_LIMIT, format: 'json' }));
@@ -656,9 +658,32 @@ export class TclkEngine {
   #learn(payer, completed) {
     if (!this.payerRepPath || !payer) return;
     try {
-      this.payerRep = recordOutcome(this.payerRep, payer, completed);
+      // Re-read before writing. `scripts/scan-tclk-payers.mjs` rewrites this
+      // same file from the whole room while we run, and saving a copy loaded at
+      // construction would discard five hundred payers in order to record one.
+      this.payerRep = recordOutcome(loadReputation(this.payerRepPath), payer, completed);
       saveReputation(this.payerRep, this.payerRepPath);
+      this.payerRepStamp = null;                    // our own write; re-read next turn
     } catch { /* reputation is an optimisation, never a precondition */ }
+  }
+
+  /**
+   * Pick up a scan that landed while we were running.
+   *
+   * The store has two writers: this lane, one deal at a time, and the scan
+   * script, five hundred payers at a time. Without this the daemon would hold
+   * whatever the file said the second it started -- on 2026-09-03 that was
+   * nothing at all, because the first scan finished six minutes after the
+   * process did. Re-reading costs one stat a cycle.
+   */
+  #refreshReputation() {
+    if (!this.payerRepPath) return;
+    try {
+      const stamp = fs.statSync(this.payerRepPath).mtimeMs;
+      if (stamp === this.payerRepStamp) return;
+      this.payerRep = loadReputation(this.payerRepPath);
+      this.payerRepStamp = stamp;
+    } catch { /* no file yet: keep what we have, which is an empty reputation */ }
   }
 }
 
