@@ -25,6 +25,8 @@
     "verify-collab": "node tools/verify-collab.mjs",
     "x-preview": "node tools/x-preview.mjs",
     "kibble-preview": "node tools/kibble-preview.mjs",
+    "kibble-score": "node tools/kibble-score-log.mjs",
+    "kibble-pairs": "node tools/kibble-pairs-backfill.mjs",
     "brief": "node tools/watch-brief.mjs"
   },
   "keywords": [
