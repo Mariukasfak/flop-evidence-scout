@@ -567,14 +567,43 @@ export function pickOwnJobDelivery(jobs, { posterDid, excludeDids = [], skipJobI
   return null;
 }
 
-export function pickRealDelivery(jobs, { selfDid, excludeDids = [], skipJobIds = new Set(), minBodyChars = 80 } = {}) {
+/**
+ * A delivery worth a `useful` verdict — and one the board will actually score.
+ *
+ * The two caps below are not caution, they are the difference between a verdict
+ * that counts and one that is thrown away. Measured 2026-09-03 over one export
+ * (02:07Z–04:57Z): of 103 useful verdicts we posted in 2.8 hours, 79 were over
+ * the attestor→worker cap because they went to 14 workers and 53 to a single
+ * one. Meanwhile the same export held 161 distinct workers with a substantial
+ * delivery, so the picker was not short of targets — it sorted by newest job,
+ * took the first delivery on it, and the three busiest workers post 54% of all
+ * delivery lines.
+ *
+ * `skipWorkerDids` carries the attestor→worker budget (see kibble-pairs.mjs);
+ * `maxPeerUseful` is the board's own `max_scored_peer_useful_per_job: 2`, so a
+ * job two other validators have already endorsed is someone else's turn.
+ */
+export function pickRealDelivery(jobs, {
+  selfDid, excludeDids = [], skipJobIds = new Set(), minBodyChars = 80,
+  skipWorkerDids = new Set(), maxPeerUseful = 2
+} = {}) {
+  const capped = (did) => [...skipWorkerDids].some((d) => sameDid(d, did));
   for (const job of [...jobs.values()].sort((a, b) => (b.postedSeq ?? 0) - (a.postedSeq ?? 0))) {
     if (skipJobIds.has(job.jobId)) continue;
     if (!job.known) continue;          // we cannot judge an answer to a question we never read
     if (job.poster && isOneOfOurs(job.poster, selfDid, excludeDids)) continue;
     if (job.attests.some((a) => sameDid(a.from, selfDid))) continue;
 
+    // The per-job ceiling is on *scored peer useful*, so only useful verdicts by
+    // other validators count against it; a `not` verdict does not close a job.
+    const peerUseful = job.attests.filter((a) => a.verdict === 'useful'
+      && !isOneOfOurs(a.from, selfDid, excludeDids)).length;
+    if (peerUseful >= maxPeerUseful) continue;
+
+    // Walk every delivery rather than only the first: on a job whose first
+    // deliverer is out of budget, the second one is still a scoring target.
     const delivery = job.results.find((r) => !isOneOfOurs(r.from, selfDid, excludeDids)
+      && !capped(r.from)
       && !isThinDelivery(r.summary)
       && String(r.summary || '').length >= minBodyChars);
     if (delivery) return { job, delivery };

@@ -54,6 +54,9 @@ import {
   thinDeliveryReason, isAboutFlop, pickOwnJobDelivery, isThinDelivery
 } from './kibble.mjs';
 import { FACTS } from './flop-facts.mjs';
+import {
+  loadPairs, savePairs, cappedWorkers, recordUseful, markPraisedUs, pairSummary
+} from './kibble-pairs.mjs';
 import { nextQuestion, jobLine, jobIdFor } from './kibble-jobs.mjs';
 import { boardBriefs, instrumentBriefs, nextBrief, briefLine } from './kibble-briefs.mjs';
 
@@ -263,6 +266,12 @@ export class KibbleEngine {
     /** The room this agent owns, where the same findings are kept on our record. */
     ownRoom = 'd-scout-telemetry',
     repoUrl = 'github.com/Mariukasfak/flop-evidence-scout',
+    /**
+     * Where the attestor→worker budget lives. On disk rather than in the /kv/
+     * note: the note has a length limit that has already cost us state once,
+     * and this file grows with every worker we have ever endorsed.
+     */
+    pairsPath = 'data/local/kibble-useful-pairs.json',
     fetchFn = globalThis.fetch
   }) {
     if (!workerIdentity?.did || !workerIdentity?.privateKeyPem) {
@@ -285,6 +294,13 @@ export class KibbleEngine {
     this.briefGuardrails = briefGuardrails;
     this.posterVerdictGuardrails = posterVerdictGuardrails;
     this.stateKey = stateKey || getStateKey(workerIdentity.did, 'kibble');
+    this.pairsPath = pairsPath;
+    /**
+     * Loaded once here rather than per turn: it is read on every useful attempt
+     * and a re-read from disk each cycle would be the same file forty times an
+     * hour. Written back only after a verdict actually reaches the room.
+     */
+    this.pairs = loadPairs(pairsPath);
     this.kibbleApiUrl = String(kibbleApiUrl).replace(/\/+$/, '');
     this.ownRoom = ownRoom;
     this.repoUrl = repoUrl;
@@ -648,10 +664,16 @@ export class KibbleEngine {
         } else if (!soleDelivery) {
           continue;                    // unbound, and it could have meant somebody else
         }
-        if (attest.verdict === 'useful') useful += 1;
-        else if (attest.verdict === 'not') not += 1;
+        if (attest.verdict === 'useful') {
+          useful += 1;
+          // A worker who has endorsed us is a reciprocal pair, and the board
+          // scores that direction at most once. Noted here because this lane is
+          // already reading exactly these lines — it costs no extra request.
+          markPraisedUs(this.pairs, attest.from);
+        } else if (attest.verdict === 'not') not += 1;
       }
     }
+    savePairs(this.pairs, this.pairsPath);
 
     const judged = useful + not;
     this.localState.verdictsUseful = useful;
@@ -1310,9 +1332,13 @@ export class KibbleEngine {
     if (!real) return { action: 'useful_skipped_no_real_model' };
     if (!(await this.checkFranchise({ jobs }))) return { action: 'useful_unfranchised' };
 
+    // The budget, not a preference: a verdict for a worker we have already
+    // endorsed twice scores nothing for either side, and 79 of 103 useful
+    // verdicts in one 2.8-hour window were exactly that. See kibble-pairs.mjs.
     const found = pickRealDelivery(jobs, {
       selfDid: this.validatorIdentity.did,
-      excludeDids: [this.workerIdentity.did]
+      excludeDids: [this.workerIdentity.did],
+      skipWorkerDids: cappedWorkers(this.pairs)
     });
     if (!found) return { action: 'no_useful_target' };
 
@@ -1364,6 +1390,11 @@ export class KibbleEngine {
     // repeating itself is caught whichever lane it repeats itself in.
     this.localState.recentReasons =
       [...(this.localState.recentReasons || []), rest.join(' ').slice(0, 70)].slice(-REASON_WINDOW);
+    // Spent only now, after the line is on the tape. A verdict that failed to
+    // post consumed no scoring slot, and retiring a worker we never actually
+    // endorsed would throw the budget away twice over.
+    recordUseful(this.pairs, found.delivery.from);
+    savePairs(this.pairs, this.pairsPath);
     this.localState.attestsPosted += 1;
     this.localState.usefulAttests = (this.localState.usefulAttests || 0) + 1;
     this.localState.lastAttestJobId = found.job.jobId;

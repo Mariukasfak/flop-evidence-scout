@@ -277,6 +277,59 @@ describe('choosing a delivery worth judging', () => {
     ]);
     assert.equal(pickRealDelivery(jobs, { selfDid: SELF }), null);
   });
+
+  /**
+   * The board scores at most two useful verdicts from one attestor to one
+   * worker. Measured 2026-09-03 over a 2.8-hour export, this validator sent 103
+   * useful verdicts to 14 workers — 53 to one of them — so 79 of them scored
+   * nothing. Skipping a spent worker is what turns the rest into points.
+   */
+  test('skips a worker whose useful budget we have already spent', () => {
+    const jobs = reconstructBoard([
+      { text: 'JOB v1 | k000000001e | explain | T | Explain the tradeoff between A and B in detail.', from: OTHER, seq: 1 },
+      { text: `DELIVER v1 | k000000001e | ${real}`, from: OTHER2, seq: 2 }
+    ]);
+    // Findable with an open budget, invisible once it is spent — same tape.
+    assert.ok(pickRealDelivery(jobs, { selfDid: SELF }));
+    assert.equal(pickRealDelivery(jobs, { selfDid: SELF, skipWorkerDids: new Set([OTHER2]) }), null);
+  });
+
+  test('a second deliverer on the same job is still a target', () => {
+    const OTHER3 = 'did:key:z6MkAThirdPartyWorkerOnTheSameJob0000000000';
+    const jobs = reconstructBoard([
+      { text: 'JOB v1 | k000000001f | explain | T | Explain the tradeoff between A and B in detail.', from: OTHER, seq: 1 },
+      { text: `DELIVER v1 | k000000001f | ${real}`, from: OTHER2, seq: 2 },
+      { text: `DELIVER v1 | k000000001f | ${real} And it degrades badly above a few hundred peers.`, from: OTHER3, seq: 3 }
+    ]);
+    const found = pickRealDelivery(jobs, { selfDid: SELF, skipWorkerDids: new Set([OTHER2]) });
+    assert.equal(found.delivery.from, OTHER3);
+  });
+
+  test('leaves a job two other validators have already called useful', () => {
+    // `max_scored_peer_useful_per_job: 2` — a third endorsement scores nobody.
+    const V1 = 'did:key:z6MkValidatorOne00000000000000000000000000';
+    const V2 = 'did:key:z6MkValidatorTwo00000000000000000000000000';
+    const hash = resultHashFor(real);
+    const jobs = reconstructBoard([
+      { text: 'JOB v1 | k000000002a | explain | T | Explain the tradeoff between A and B in detail.', from: OTHER, seq: 1 },
+      { text: `DELIVER v1 | k000000002a | ${real}`, from: OTHER2, seq: 2 },
+      { text: attestUsefulLine('k000000002a', hash, 'It names the mechanism.'), from: V1, seq: 3 },
+      { text: attestUsefulLine('k000000002a', hash, 'It states the cost as well.'), from: V2, seq: 4 }
+    ]);
+    assert.equal(pickRealDelivery(jobs, { selfDid: SELF }), null);
+  });
+
+  test('two `not` verdicts do not close a job — the cap is on useful', () => {
+    const V1 = 'did:key:z6MkValidatorOne00000000000000000000000000';
+    const V2 = 'did:key:z6MkValidatorTwo00000000000000000000000000';
+    const jobs = reconstructBoard([
+      { text: 'JOB v1 | k000000002b | explain | T | Explain the tradeoff between A and B in detail.', from: OTHER, seq: 1 },
+      { text: `DELIVER v1 | k000000002b | ${real}`, from: OTHER2, seq: 2 },
+      { text: attestNotLine('k000000002b', 'It restates the question.'), from: V1, seq: 3 },
+      { text: attestNotLine('k000000002b', 'No success condition is met.'), from: V2, seq: 4 }
+    ]);
+    assert.ok(pickRealDelivery(jobs, { selfDid: SELF }));
+  });
 });
 
 
