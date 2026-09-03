@@ -38,7 +38,7 @@ import {
 } from './tclk.mjs';
 import { sayOnce } from './log-once.mjs';
 import {
-  loadBudget, saveBudget, canOpenRoom, recordRefusal, isRoomCreationRefusal, minutesBlocked
+  loadBudget, saveBudget, recordRefusal, isRoomCreationRefusal, minutesBlocked
 } from './room-budget.mjs';
 import { buildTask } from './workload.mjs';
 import { runSession } from './inference.mjs';
@@ -154,19 +154,25 @@ export class TclkEngine {
   }
 
   /**
-   * Accepting a deal we could not finish is worse than not accepting it.
+   * Why the payee needs no room budget of its own to accept.
    *
    * A deal lives in `mb-p-tclk-<contract>`, and that room does not exist until
    * one of the two parties writes into it. Measured 2026-09-03: every write of
    * ours into a deal room since 2026-09-02 12:39Z was refused with the server's
    * `room limit reached` message, and every deal room we have named since then
-   * reads back empty -- eight of them, probed one by one. So this lane was
-   * accepting offers, waiting for locks it could not have read in a room that
-   * did not exist, and then failing to post the cancel as well.
+   * reads back empty -- eight of them, probed one by one.
+   *
+   * But the party that opens that room is the *payer*, with the lock. The payee
+   * writes nothing into it until there is a lock to answer, so our reveal and
+   * receipt land in a room the counterparty already paid for; and the one write
+   * that would have opened a room of our own -- the `cancel` for a payer who
+   * never locked -- is already gated on `deal.roomSeen`.
+   *
+   * So a refusal against our own room budget is no reason to stop accepting.
+   * The gate that used to stand here stood down this lane for the whole of
+   * 2026-09-03 over rooms it was never going to ask for. The budget is still
+   * recorded on refusal (see `#noteRefusal`) because the payer lane reads it.
    */
-  #roomsOpen() {
-    return canOpenRoom(this.budget, this.now());
-  }
 
   #noteRefusal(err) {
     if (!isRoomCreationRefusal(err)) return false;
@@ -230,10 +236,6 @@ export class TclkEngine {
       ({ messages } = await this.client.readRoom(this.offerRoom, { limit: READ_LIMIT, format: 'json' }));
     } catch (err) {
       return { action: 'read_failed', error: err.message };
-    }
-
-    if (!this.#roomsOpen()) {
-      return { action: 'rooms_refused', blockedForMin: minutesBlocked(this.budget, this.now()) };
     }
 
     const frames = this.#framesIn(messages);
