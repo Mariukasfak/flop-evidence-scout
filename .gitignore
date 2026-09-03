@@ -7,3 +7,6 @@ data/
 # Vietiniai nustatymai (meniu.bat juos rasa). Niekada i git.
 .env.local
 .env.tmp
+
+# Claude Code vietiniai failai ir worktree kopijos (juose buna ir .secrets/). Niekada i git.
+.claude/
