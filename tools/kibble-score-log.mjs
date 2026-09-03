@@ -11,10 +11,11 @@
  * moving, with `engine_seq` stuck at 9100924: the scorer's per-agent pump had
  * stalled, and nothing we did would have shown up in it.
  *
- * A frozen score is therefore not evidence about our behaviour, and a rising
- * one is not proof a change worked unless the engine moved too. So every
- * reading records `engine_seq`, and the delta line says plainly when the engine
- * did not advance.
+ * A frozen score is therefore not evidence about our behaviour. But `engine_seq`
+ * is not the freshness signal either: on two readings minutes apart the terms
+ * moved (+3 given, +1 result) while `engine_seq` sat at 9100924 throughout. So
+ * the reading reports whether anything actually moved, and carries engine_seq
+ * beside it as context rather than quoting it as a verdict.
  *
  * Run it whenever you want to know, or on a schedule:
  *
@@ -86,14 +87,27 @@ async function main() {
   }
 
   const seq = reading.agents.find((a) => a.engineSeq)?.engineSeq;
-  const seqBefore = previous?.agents?.find((a) => a.engineSeq)?.engineSeq;
-  if (seq && seqBefore && seq === seqBefore) {
-    const mins = Math.round((Date.parse(reading.at) - Date.parse(previous.at)) / 60_000);
-    console.log(`\nthe scorer has not advanced in ${mins} min (engine_seq ${seq}). `
-      + 'A flat reading here says nothing about us.');
-  } else if (seq) {
-    console.log(`\nengine_seq ${seq}${seqBefore ? ` (was ${seqBefore})` : ''}`);
-  }
+  if (!previous) { console.log(`\nfirst reading (engine_seq ${seq ?? '-'})`); return; }
+
+  /**
+   * Movement, not engine_seq.
+   *
+   * The first version of this line read engine_seq as the freshness signal. The
+   * operator's own two readings disproved it on the same morning: the terms
+   * moved (+3 given, +1 result) while engine_seq sat at 9100924 throughout.
+   * Whatever that number counts, it is not this pump, so the only honest signal
+   * is the direct one.
+   */
+  const moved = reading.agents.some((a) => {
+    const before = previous.agents?.find((b) => b.name === a.name);
+    if (!before || a.error) return false;
+    return a.score !== before.score || TERMS.some((t) => a.terms[t] !== before.terms?.[t]);
+  });
+  const mins = Math.round((Date.parse(reading.at) - Date.parse(previous.at)) / 60_000);
+  console.log(moved
+    ? `\nthe board moved in the last ${mins} min (engine_seq ${seq ?? '-'})`
+    : `\nnothing moved in ${mins} min (engine_seq ${seq ?? '-'}). Either we posted nothing `
+      + 'countable, or the scorer is between passes — one flat reading decides neither.');
 }
 
 main().catch((err) => {
