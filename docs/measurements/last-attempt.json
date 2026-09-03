@@ -1,5 +1,5 @@
 {
-  "at": "2026-09-03T09:52:53.257Z",
-  "ok": true,
-  "reason": null
+  "at": "2026-09-03T14:36:54.060Z",
+  "ok": false,
+  "reason": "GET /r/lobby?limit=100 -> HTTP 503"
 }
