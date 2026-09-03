@@ -9,6 +9,7 @@ import { KibbleEngine, didCardUrl } from '../src/kibble-engine.mjs';
 import { reconstructBoard } from '../src/kibble.mjs';
 import { QUESTION_BANK, jobIdFor, jobLine as questionJobLine } from '../src/kibble-jobs.mjs';
 import { boardBriefs, instrumentBriefs, nextBrief, briefLine } from '../src/kibble-briefs.mjs';
+import { PAIR_CAP, usefulBudgetLeft } from '../src/kibble-pairs.mjs';
 
 const OTHER = 'did:key:z6MknDn3CH7vumHw5rXREhdQaBcDeFgHiJkLmNoPqRsTuVwX';
 
@@ -1031,6 +1032,33 @@ describe('Both verdict lanes stop when our reasons stop varying', () => {
 
     assert.equal((engine.localState.recentReasons || []).length, 1,
       'a judgement counts toward the same window a rejection does');
+  });
+
+  /**
+   * The budget book is live data. Defaulting its path to the real file meant
+   * every test that ran a useful verdict spent the running agent's budget on a
+   * fixture DID, and the second run of this file failed four unrelated tests
+   * because OTHER had been retired by the first. The daemon names the path; an
+   * engine nobody told keeps the count in memory and writes nothing.
+   */
+  test('the budget is counted in memory unless the daemon names a file', async () => {
+    const workerIdentity = generateIdentity();
+    const client = makeClient({
+      roomMessages: [
+        jobLine('k000000000d'),
+        deliverLine('k000000000d', GOOD_ANSWER, { from: OTHER, seq: 2 }),
+        jobLine('k000000000e'),
+        deliverLine('k000000000e', GOOD_ANSWER, { from: workerIdentity.did, seq: 3 })
+      ]
+    });
+    const engine = new KibbleEngine({ workerIdentity, validatorIdentity: generateIdentity(), client });
+    assert.equal(engine.pairsPath, null, 'no path unless one is given');
+
+    const backend = makeBackend('USEFUL\nthe answer names the single-file design and contrasts it with a server socket, which is what was asked');
+    const jobs = reconstructBoard(client.roomMessages);
+    await engine.attemptUsefulAttest({ backend, real: true, jobs });
+
+    assert.equal(usefulBudgetLeft(engine.pairs, OTHER), PAIR_CAP - 1, 'still counted, just not persisted');
   });
 });
 

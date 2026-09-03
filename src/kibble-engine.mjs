@@ -270,8 +270,13 @@ export class KibbleEngine {
      * Where the attestor→worker budget lives. On disk rather than in the /kv/
      * note: the note has a length limit that has already cost us state once,
      * and this file grows with every worker we have ever endorsed.
+     *
+     * Null by default, and the daemon names the real path. A default that
+     * pointed at live data meant every test that constructed an engine wrote
+     * into the running agent's budget — which is how four unrelated tests
+     * started failing the first time this file was exercised twice in a row.
      */
-    pairsPath = 'data/local/kibble-useful-pairs.json',
+    pairsPath = null,
     fetchFn = globalThis.fetch
   }) {
     if (!workerIdentity?.did || !workerIdentity?.privateKeyPem) {
@@ -300,7 +305,7 @@ export class KibbleEngine {
      * and a re-read from disk each cycle would be the same file forty times an
      * hour. Written back only after a verdict actually reaches the room.
      */
-    this.pairs = loadPairs(pairsPath);
+    this.pairs = pairsPath ? loadPairs(pairsPath) : { workers: new Map() };
     this.kibbleApiUrl = String(kibbleApiUrl).replace(/\/+$/, '');
     this.ownRoom = ownRoom;
     this.repoUrl = repoUrl;
@@ -673,7 +678,7 @@ export class KibbleEngine {
         } else if (attest.verdict === 'not') not += 1;
       }
     }
-    savePairs(this.pairs, this.pairsPath);
+    if (this.pairsPath) savePairs(this.pairs, this.pairsPath);
 
     const judged = useful + not;
     this.localState.verdictsUseful = useful;
@@ -1394,7 +1399,7 @@ export class KibbleEngine {
     // post consumed no scoring slot, and retiring a worker we never actually
     // endorsed would throw the budget away twice over.
     recordUseful(this.pairs, found.delivery.from);
-    savePairs(this.pairs, this.pairsPath);
+    if (this.pairsPath) savePairs(this.pairs, this.pairsPath);
     this.localState.attestsPosted += 1;
     this.localState.usefulAttests = (this.localState.usefulAttests || 0) + 1;
     this.localState.lastAttestJobId = found.job.jobId;

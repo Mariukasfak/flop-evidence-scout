@@ -23,6 +23,8 @@ import { sayOnce, clearOnce } from './log-once.mjs';
 import { checkOneSurface } from './surface-watch.mjs';
 import { OFFER_ROOM as TCLK_OFFER_ROOM } from './tclk.mjs';
 import { TclkEngine } from './tclk-engine.mjs';
+import { TclkPayer } from './tclk-payer.mjs';
+import { QUESTION_BANK } from './kibble-jobs.mjs';
 import { mirrorConsole } from './console-mirror.mjs';
 
 /**
@@ -44,6 +46,8 @@ export function deriveFrom(o) {
     faucetAlertPath: o.faucetAlertPath || path.join(dataDir, 'faucet-alert.json'),
     surfaceStatePath: o.surfaceStatePath || path.join(dataDir, 'surface-state.json'),
     tclkStatePath: o.tclkStatePath || path.join(dataDir, 'tclk-state.json'),
+    tclkPayerStatePath: o.tclkPayerStatePath || path.join(dataDir, 'tclk-payer-state.json'),
+    kibblePairsPath: o.kibblePairsPath || path.join(dataDir, 'kibble-useful-pairs.json'),
     consoleLogPath: o.consoleLogPath || path.join(dataDir, 'daemon-console.log'),
     heartbeatPath: o.heartbeatPath || path.join(dataDir, 'scout-heartbeat.json'),
     feedStatePath: o.feedStatePath || path.join(dataDir, 'feed-state.json'),
@@ -382,10 +386,33 @@ export async function runScoutDaemon(options = {}) {
   // Scout claims and delivers; Scribe validates. The spec requires poster, worker
   // and validator to be three different parties, so this is never one identity
   // doing both jobs. See src/kibble-engine.mjs for why.
-  const kibbleEngine = new KibbleEngine({ workerIdentity: scoutIdentity, validatorIdentity: scribeIdentity, client });
+  const kibbleEngine = new KibbleEngine({
+    workerIdentity: scoutIdentity, validatorIdentity: scribeIdentity, client,
+    // The attestor->worker budget. Named here rather than defaulted in the
+    // engine, so nothing but the running agent ever writes the live book.
+    pairsPath: config.kibblePairsPath
+  });
   // Scout takes the deals; Scribe's key is named so its offers are never ours to accept.
   const tclkEngine = new TclkEngine({
     identity: scoutIdentity, client, statePath: config.tclkStatePath, otherDids: [scribeIdentity.did]
+  });
+  /**
+   * The other side of the same convention, on Scribe's key.
+   *
+   * Two keys, two roles, and never each other's counterparty: the payee lane
+   * already refuses offers from Scribe, and the payer lane refuses acceptances
+   * from Scout. A deal between two of our own processes would be a transcript
+   * of nothing.
+   *
+   * Why take the payer side at all, when the spec says the asymmetry runs
+   * against it: on the paper rail there is nothing to lose, and measured
+   * 2026-09-03 over 100 messages of tclk-offers the room now completes deals
+   * (42 offers, 28 accepts, 3 locks, 3 reveals) while still being short of
+   * anyone posting real work to be done.
+   */
+  const tclkPayer = new TclkPayer({
+    identity: scribeIdentity, client, statePath: config.tclkPayerStatePath,
+    otherDids: [scoutIdentity.did], questionBank: QUESTION_BANK
   });
 
   // The DID note has advertised a mailbox from the start; this is what finally
@@ -419,6 +446,8 @@ export async function runScoutDaemon(options = {}) {
   let surfaceIndex = 0;
   /** The tclk lane's last outcome, so a quiet outcome is audited once rather than every cycle. */
   let lastTclkAction = null;
+  /** The payer lane's, kept apart from the payee's so one lane cannot mute the other. */
+  let lastPayerAction = null;
   const stop = () => {
     if (!running) return;
     console.log('\n[Dual Agent Mesh] Shutting down gracefully...');
@@ -1097,6 +1126,24 @@ export async function runScoutDaemon(options = {}) {
             }
           } catch (err) {
             sayOnce('tclk:lane', `[tclk] lane failed: ${err.message}`);
+          }
+          try {
+            /**
+             * The payer lane. Same quiet-when-unchanged rule as the payee side,
+             * for the same reason: `waiting_for_accept` every minute for an
+             * hour is not information, but a lane that stopped being able to
+             * read has to be distinguishable from one with nothing to read.
+             */
+            const payer = await timed('tclkPayer', () => tclkPayer.runTurn());
+            const quietPayer = ['offer_paced', 'waiting_for_accept', 'waiting_for_reveal', 'no_question_left'];
+            const payerChanged = payer.action !== lastPayerAction;
+            lastPayerAction = payer.action;
+            if (!quietPayer.includes(payer.action) || payerChanged) {
+              console.log(`[tclk/payer] ${payer.action}${payer.contract ? ` — ${payer.contract.slice(0, 18)}` : ''}${payer.error ? ` (${payer.error})` : ''}`);
+              appendAudit(config.auditLogPath, { agent: 'tclk-payer', ...payer });
+            }
+          } catch (err) {
+            sayOnce('tclk:payer-lane', `[tclk] payer lane failed: ${err.message}`);
           }
           try {
             const kibbleBrief = await timed('kibbleBrief', () => kibbleEngine.runBriefTurn());
