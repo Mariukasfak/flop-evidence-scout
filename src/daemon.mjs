@@ -1168,10 +1168,23 @@ export async function runScoutDaemon(options = {}) {
             console.log(`[Kibble/Poster] Skipped — ${err.message}`);
           }
           try {
-            // Whatever this cycle can still spare, so the batch is bounded by the
-            // clock rather than by a number anybody chose.
-            const validatorMs = Math.max(3_000,
-              config.intervalMs - (Date.now() - cycleTop) - MIN_LANE_MARGIN_MS - 8_000);
+            /**
+             * Whatever this cycle can spare, but never most of it.
+             *
+             * "Whatever is left" was the whole rule until the useful lane started
+             * spending its full three-verdict allowance, at which point each
+             * verdict costs a model session rather than a regex. Measured
+             * 2026-09-03, straight after that change: the validator step reached
+             * 22.3s and one cycle ran 79.6s against a 60s interval, with the
+             * average moving 23.2s -> 33.8s. This file already carries the same
+             * lesson from an earlier round -- the validator grew to 8.7s and
+             * cycles per hour fell from 58 to 44 -- so the bound is a share of
+             * the interval, which still fits three sessions at the ~7s each they
+             * were measured to take, and cannot starve the eleven other lanes.
+             */
+            const validatorMs = Math.max(3_000, Math.min(
+              config.intervalMs - (Date.now() - cycleTop) - MIN_LANE_MARGIN_MS - 8_000,
+              Math.floor(config.intervalMs * 0.4)));
             const kibbleValidator = await timed('kibbleValidator',
               () => kibbleEngine.runValidatorTurn({ backend, real, ledgerPath, maxMs: validatorMs }));
             if (kibbleValidator.action !== 'no_target') {
