@@ -41,7 +41,7 @@ import {
   loadBudget, saveBudget, recordRefusal, isRoomCreationRefusal, minutesBlocked
 } from './room-budget.mjs';
 import {
-  loadReputation, isBurned, isTrusted, offerLooksAlive
+  loadReputation, saveReputation, recordOutcome, isBurned, isTrusted, offerLooksAlive
 } from './tclk-reputation.mjs';
 import { buildTask } from './workload.mjs';
 import { runSession } from './inference.mjs';
@@ -638,6 +638,27 @@ export class TclkEngine {
     this.state[bucket] = [...(this.state[bucket] || []), record].slice(-50);
     this.state.deal = null;
     this.save();
+    this.#learn(deal.offer.from, bucket === 'completed');
+  }
+
+  /**
+   * What this deal taught us about its payer.
+   *
+   * `scripts/scan-tclk-payers.mjs` rebuilds this store from the whole room, but
+   * that is a snapshot; between runs the only new evidence is our own. Writing
+   * it here means a payer who walks away from us is refused on the very next
+   * cycle instead of after the next scan, and it is the same store either way --
+   * a scan simply overwrites it with a wider count.
+   *
+   * Never allowed to fail a turn: a deal that settled is not un-settled by a
+   * full disk, and the lane must not care whether this file exists at all.
+   */
+  #learn(payer, completed) {
+    if (!this.payerRepPath || !payer) return;
+    try {
+      this.payerRep = recordOutcome(this.payerRep, payer, completed);
+      saveReputation(this.payerRep, this.payerRepPath);
+    } catch { /* reputation is an optimisation, never a precondition */ }
   }
 }
 

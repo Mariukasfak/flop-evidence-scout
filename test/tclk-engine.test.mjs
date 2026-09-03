@@ -546,6 +546,50 @@ describe('tclk payee lane: a job whose context is a GitHub URL', () => {
  * of the live ones on the morning Hayes named agent deals as an airdrop
  * criterion.
  */
+describe('the lane remembers what a deal taught it', () => {
+  test('a payer who walks away is written down, and refused on the next cycle', async () => {
+    const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
+    const repFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tclk-rep-')), 'payers.json');
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer)));
+    let clock = T0;
+    const engine = engineFor(venue, me, { now: () => clock, payerRepPath: repFile });
+
+    assert.equal((await engine.runTurn()).action, 'offer_accepted');
+    clock += 6 * 60_000;
+    assert.equal((await engine.runTurn()).action, 'deal_cancelled');
+
+    const written = JSON.parse(fs.readFileSync(repFile, 'utf8'));
+    assert.deepEqual(written.payers[payer.did], { tried: 1, done: 0 });
+  });
+
+  test('what one process learned, the next one refuses', async () => {
+    const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
+    const repFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tclk-rep-')), 'payers.json');
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer)));
+    let clock = T0;
+    const first = engineFor(venue, me, { now: () => clock, payerRepPath: repFile });
+    await first.runTurn();
+    clock += 6 * 60_000;
+    await first.runTurn();
+
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer, { claimByMs: clock + 2 * HOUR })));
+    const second = engineFor(venue, me, { now: () => clock, payerRepPath: repFile });
+
+    assert.equal((await second.runTurn()).action, 'no_acceptable_offer',
+      'the file outlives the process that learned it');
+  });
+
+  test('no reputation path means nothing is written, and nothing breaks', async () => {
+    const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer)));
+    let clock = T0;
+    const engine = engineFor(venue, me, { now: () => clock });
+    await engine.runTurn();
+    clock += 6 * 60_000;
+    assert.equal((await engine.runTurn()).action, 'deal_cancelled');
+  });
+});
+
 describe('tclk payee lane: a payer who does not lock loses the slot', () => {
   async function accepted() {
     const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
