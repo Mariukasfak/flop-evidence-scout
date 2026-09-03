@@ -49,6 +49,23 @@ import { appendReceipt } from './inference-ledger.mjs';
  */
 export const MIN_CLAIM_WINDOW_MS = 10 * 60_000;
 
+/**
+ * How long we hold a deal whose payer has not locked.
+ *
+ * Until 2026-09-03 this was `claimByMs` — up to a day. It cost us the most
+ * important morning of the campaign: Hayes had just named agent-to-agent deals
+ * as an airdrop criterion, the room filled with 11 locks and 10 reveals in one
+ * 200-message window, and this lane sat on a dead offer from the previous
+ * afternoon whose payer was never going to lock, unable to accept any of them.
+ *
+ * Measured on those eleven locks: every one arrived within **31 seconds** of
+ * the accept, median **1 second**. A payer who intends to lock does it while
+ * the accept is still warm. Five minutes is ten times the slowest observed and
+ * still three to five of our own cycles, so a slow network cannot make us
+ * cancel a deal that was about to work.
+ */
+export const NO_LOCK_MS = 5 * 60_000;
+
 const READ_LIMIT = 200;
 
 /**
@@ -194,6 +211,7 @@ export class TclkEngine {
         && o.lock === 'hash'                     // never the unaudited point path
         && o.rails.includes('paper')             // the only rail that exists
         && !this.ours.has(o.from)                // not ours, not our sibling key's
+        && !this.#neverLocked().has(o.from)      // already had their chance and did not take it
         && !accepted.has(o.id)                   // first accept wins; a second is noise
         && offerIdMatches(o)                     // a frame that lies about its own id is not an offer
         && validateDeadlines(o, now).ok
@@ -265,12 +283,17 @@ export class TclkEngine {
   }
 
   async #awaitLock(deal, now) {
-    if (now >= deal.offer.claimByMs) {
+    const waited = now - deal.acceptedAt;
+    const giveUp = now >= deal.offer.claimByMs || waited >= NO_LOCK_MS;
+    if (giveUp) {
       // The payer never locked. Cancel is valid before any lock exists, from
       // either side; posting it frees the room's record and us.
+      const reason = now >= deal.offer.claimByMs
+        ? 'payer never locked before claimByMs'
+        : `payer did not lock within ${Math.round(NO_LOCK_MS / 60_000)} min`;
       await this.#post(deal.room, { type: 'cancel', from: this.identity.did, contract: deal.contract });
-      this.#close(deal, 'abandoned', 'payer never locked before claimByMs');
-      return { action: 'deal_cancelled', contract: deal.contract, reason: 'payer never locked' };
+      this.#close(deal, 'abandoned', reason);
+      return { action: 'deal_cancelled', contract: deal.contract, reason };
     }
 
     let messages;
@@ -386,6 +409,22 @@ export class TclkEngine {
   }
 
   /* ---------------------------------------------------------- helpers --- */
+
+  /**
+   * Payers who took an accept from us and then never locked.
+   *
+   * Their offers keep appearing, and each one we take costs a slot no live
+   * offer can use. The room supplies enough of them — 88 offers in one
+   * 200-message window on 2026-09-03 — that skipping a proven non-locker costs
+   * nothing and buys back the wait. Only the never-locked reason counts: a deal
+   * that ended for any other cause says nothing about the payer.
+   */
+  #neverLocked() {
+    return new Set((this.state.abandoned || [])
+      .filter((r) => typeof r.reason === 'string' && r.reason.includes('lock'))
+      .map((r) => r.payer)
+      .filter(Boolean));
+  }
 
   /** What the paper rail actually records for this contract, or null. */
   async #railStatus(contract) {

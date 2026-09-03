@@ -463,6 +463,76 @@ describe('tclk payee lane: a job whose context is a GitHub URL', () => {
 });
 
 /**
+ * Measured in `tclk-offers` on 2026-09-03, over one 200-message window: eleven
+ * locks, every one of them within **31 seconds** of its accept, median **one
+ * second**. Meanwhile this lane was holding a dead offer from the previous
+ * afternoon until its `claimByMs` — nearly a full day — and could accept none
+ * of the live ones on the morning Hayes named agent deals as an airdrop
+ * criterion.
+ */
+describe('tclk payee lane: a payer who does not lock loses the slot', () => {
+  async function accepted() {
+    const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer)));
+    let clock = T0;
+    const engine = engineFor(venue, me, { now: () => clock });
+    await engine.runTurn();
+    return { venue, me, payer, engine, deal: engine.load().deal, tick: (ms) => { clock += ms; } };
+  }
+
+  test('the deal is dropped minutes after the accept, not a day later at claimBy', async () => {
+    const { venue, engine, deal, tick } = await accepted();
+
+    tick(4 * 60_000);
+    assert.equal((await engine.runTurn()).action, 'waiting_for_lock', 'four minutes is still within the window');
+
+    tick(2 * 60_000);
+    const done = await engine.runTurn();
+
+    assert.equal(done.action, 'deal_cancelled');
+    assert.match(done.reason, /did not lock within/);
+    assert.ok(deal.offer.claimByMs - T0 > 30 * 60_000, 'and claimBy was still far away');
+    const cancel = venue.rooms.get(deal.room).map((m) => decodeFrame(m.text)).find((f) => f?.type === 'cancel');
+    assert.ok(cancel, 'the counterparty is told, not just dropped silently');
+    assert.equal(engine.load().deal, null, 'the lane is free for a live offer');
+  });
+
+  test('a lock that arrives inside the window is still taken', async () => {
+    const { venue, payer, engine, deal, tick } = await accepted();
+    tick(31_000);                                   // the slowest lock actually measured
+    venue.say(deal.room, payer.did, encodeFrame({ type: 'lock', from: payer.did, contract: deal.contract, rail: 'paper', ref: deal.contract }));
+    const { ns, key } = paperNote(deal.contract);
+    venue.notes.set(`${ns}/${key}`, encodePaperRecord({ status: 'locked', lock: 'hash', statement: deal.statement, refundAfterMs: deal.offer.refundAfterMs }));
+
+    assert.equal((await engine.runTurn()).action, 'lock_verified');
+  });
+
+  test('a payer who already failed to lock is not accepted again', async () => {
+    const { venue, payer, engine, tick } = await accepted();
+    tick(6 * 60_000);
+    await engine.runTurn();                          // cancels, records the payer
+
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer, { claimByMs: T0 + 4 * HOUR, refundAfterMs: T0 + 5 * HOUR })));
+    const again = await engine.runTurn();
+
+    assert.equal(again.action, 'no_acceptable_offer', 'their next offer is skipped');
+  });
+
+  test('a stranger is still accepted after another payer went quiet', async () => {
+    const { venue, engine, tick } = await accepted();
+    tick(6 * 60_000);
+    await engine.runTurn();
+
+    const fresh = generateIdentity();
+    venue.say(OFFER_ROOM, fresh.did, encodeFrame(payerOffer(fresh, { claimByMs: T0 + 4 * HOUR, refundAfterMs: T0 + 5 * HOUR })));
+    const next = await engine.runTurn();
+
+    assert.equal(next.action, 'offer_accepted');
+    assert.equal(next.payer, fresh.did, 'one bad payer does not close the lane');
+  });
+});
+
+/**
  * tclk shipped a check on 2026-09-02 rejecting "receipt frames whose claimed
  * outcome contradicts the contract's terminal state, preventing a later
  * reputation or spend-accounting consumer from accepting a false claimed /
