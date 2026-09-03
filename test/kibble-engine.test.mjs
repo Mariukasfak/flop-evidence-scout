@@ -1103,6 +1103,75 @@ describe('Both verdict lanes stop when our reasons stop varying', () => {
     assert.equal(outcomes[4], 'attested_useful', 'a model writing varied reasons must be able to unblock the lane');
   });
 
+  /**
+   * The useful lane used to post one verdict and return, however much of the
+   * cycle was left. Measured 2026-09-03 over an hour: 41 useful and 6 not, about
+   * 0.9 verdicts a cycle, against a per-cycle budget of three and a validator
+   * step of 2.4s inside a 23s cycle on a 60s interval. Two thirds of the budget
+   * that was chosen to prevent bursts went unused every single minute.
+   */
+  test('the useful lane spends the whole per-cycle budget, not one verdict of it', async () => {
+    const workerIdentity = generateIdentity();
+    const workers = [
+      'did:key:z6MkWorkerOne00000000000000000000000000000001',
+      'did:key:z6MkWorkerTwo00000000000000000000000000000002',
+      'did:key:z6MkWorkerThree000000000000000000000000000003',
+      'did:key:z6MkWorkerFour0000000000000000000000000000004'
+    ];
+    const roomMessages = [
+      jobLine('k00000000e1'),
+      deliverLine('k00000000e1', GOOD_ANSWER, { from: workerIdentity.did, seq: 2 })
+    ];
+    workers.forEach((who, i) => {
+      roomMessages.push(jobLine(`k0000000f${String(i)}0`));
+      roomMessages.push(deliverLine(`k0000000f${String(i)}0`, `${GOOD_ANSWER} Variation ${i}.`, { from: who, seq: 10 + i }));
+    });
+    const client = makeClient({ roomMessages });
+    const engine = new KibbleEngine({ workerIdentity, validatorIdentity: generateIdentity(), client });
+    // Not a thin-first turn: those are one in nine and go to templates.
+    engine.localState.totalValidatorTurns = 0;
+
+    let n = 0;
+    const backend = {
+      id: 'test-backend', simulated: false,
+      async generate() {
+        n += 1;
+        return { text: `USEFUL${String.fromCharCode(10)}a distinct sentence naming what delivery ${n} got right about the question` };
+      }
+    };
+    const result = await engine.runValidatorTurn({ backend, real: true, maxMs: 20_000 });
+
+    assert.equal(result.posted, 3, 'three a cycle is the budget, and it is now actually spent');
+    assert.equal(result.useful, 3);
+    assert.equal(client.posts.filter((p) => /\| useful \|/.test(p.text)).length, 3);
+  });
+
+  test('a batch never praises one worker past the pair cap', async () => {
+    // One worker, four deliveries. The budget is two, so the batch stops at two
+    // however much cycle is left -- the third would score nothing for anybody.
+    const workerIdentity = generateIdentity();
+    const one = 'did:key:z6MkTheOnlyWorkerInTheRoom00000000000000001';
+    const roomMessages = [
+      jobLine('k00000000e2'),
+      deliverLine('k00000000e2', GOOD_ANSWER, { from: workerIdentity.did, seq: 2 })
+    ];
+    for (let i = 0; i < 4; i += 1) {
+      roomMessages.push(jobLine(`k0000000g${String(i)}0`.replace('g', 'a')));
+      roomMessages.push(deliverLine(`k0000000a${String(i)}0`, `${GOOD_ANSWER} Variation ${i}.`, { from: one, seq: 20 + i }));
+    }
+    const client = makeClient({ roomMessages });
+    const engine = new KibbleEngine({ workerIdentity, validatorIdentity: generateIdentity(), client });
+    engine.localState.totalValidatorTurns = 0;
+
+    let n = 0;
+    const backend = {
+      id: 'test-backend', simulated: false,
+      async generate() { n += 1; return { text: `USEFUL${String.fromCharCode(10)}a distinct sentence about delivery ${n} and why it answers the question` }; }
+    };
+    const result = await engine.runValidatorTurn({ backend, real: true, maxMs: 20_000 });
+    assert.equal(result.useful ?? 0, 2, 'two per worker, lifetime — the third is not worth posting');
+  });
+
   test('a model that really is repeating itself stays blocked', async () => {
     const workerIdentity = generateIdentity();
     const client = makeClient({

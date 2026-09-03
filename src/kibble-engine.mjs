@@ -1367,7 +1367,7 @@ export class KibbleEngine {
     return { variety };
   }
 
-  async attemptUsefulAttest({ backend, real, ledgerPath, jobs } = {}) {
+  async attemptUsefulAttest({ backend, real, ledgerPath, jobs, skipJobIds = new Set() } = {}) {
     if (!real) return { action: 'useful_skipped_no_real_model' };
     if (!(await this.checkFranchise({ jobs }))) return { action: 'useful_unfranchised' };
 
@@ -1377,7 +1377,10 @@ export class KibbleEngine {
     const found = pickRealDelivery(jobs, {
       selfDid: this.validatorIdentity.did,
       excludeDids: [this.workerIdentity.did],
-      skipWorkerDids: cappedWorkers(this.pairs)
+      skipWorkerDids: cappedWorkers(this.pairs),
+      // Our own verdict is not on the board object we are holding, so without
+      // this a batch picks the same delivery again on its next pass.
+      skipJobIds
     });
     if (!found) return { action: 'no_useful_target' };
 
@@ -1499,13 +1502,6 @@ export class KibbleEngine {
      * board is empty.
      */
     const thinFirst = this.localState.totalValidatorTurns % THIN_TURN_IN === 0;
-    if (!thinFirst) {
-      const judged = await this.attemptUsefulAttest({ backend, real, ledgerPath, jobs });
-      const nothingToJudge = judged.action === 'no_useful_target'
-        || judged.action === 'useful_unfranchised'
-        || judged.action === 'useful_skipped_no_real_model';
-      if (!nothingToJudge) return judged;
-    }
 
     const deadline = now() + maxMs;
     // Jobs settled inside this batch. Our own attestation is not on the board
@@ -1513,6 +1509,52 @@ export class KibbleEngine {
     const done = new Set();
     let posted = 0;
     let lastJobId = null;
+    let usefulPosted = 0;
+
+    /**
+     * The useful lane spends the same per-cycle budget the `not` lane does.
+     *
+     * It used to post one verdict and return, whatever time was left. Measured
+     * 2026-09-03 over an hour: 41 useful and 6 not, about 0.9 verdicts a cycle,
+     * against a budget of three and a validator step of 2.4s inside a 23s cycle
+     * on a 60s interval. The cap of three was chosen to stop bursts and it is
+     * still doing that job — it was simply never applied to the lane that does
+     * most of the judging, so two thirds of it went unused every minute.
+     *
+     * Bounded three ways, none of them a preference: the shared budget above,
+     * the clock this cycle can spare, and the room actually having a delivery
+     * whose worker still has attestor budget left. A model that declines one
+     * delivery moves to the next rather than ending the turn, because a refusal
+     * is information about that delivery, not about the room.
+     */
+    if (!thinFirst) {
+      for (;;) {
+        if (posted >= MAX_ATTESTS_PER_CYCLE || now() >= deadline) break;
+        const judged = await this.attemptUsefulAttest({ backend, real, ledgerPath, jobs, skipJobIds: done });
+
+        if (judged.action === 'attested_useful') {
+          posted += 1;
+          usefulPosted += 1;
+          lastJobId = judged.jobId;
+          done.add(judged.jobId);
+          continue;
+        }
+        // The room has nothing left for this lane: fall through to templates.
+        if (judged.action === 'no_useful_target'
+          || judged.action === 'useful_unfranchised'
+          || judged.action === 'useful_skipped_no_real_model') break;
+        // The model looked and said no, or the reason failed validation. That is
+        // about this delivery; try another while the budget and clock allow.
+        if (judged.action === 'judged_not_useful' || judged.action === 'useful_refused') {
+          if (judged.jobId) { done.add(judged.jobId); continue; }
+          break;
+        }
+        // Anything else — paced, blocked, a failed post, reasons too alike — is
+        // about us rather than the board, and is the answer for this turn.
+        if (!posted) return judged;
+        break;
+      }
+    }
 
     for (;;) {
     const found = pickThinDelivery(jobs, {
@@ -1521,10 +1563,12 @@ export class KibbleEngine {
       skipJobIds: done
     });
     if (!found) {
-      // Nothing plainly empty to call out. The room is short of validators
-      // either way, so spend the turn judging something real instead.
+      // Nothing plainly empty to call out. On a thin-first turn the real-work
+      // lane has not run yet, so spend the turn there; otherwise it has already
+      // been exhausted above and running it again would only re-read the board.
       if (posted) break;
-      return this.attemptUsefulAttest({ backend, real, ledgerPath, jobs });
+      if (!thinFirst) return { action: 'no_target' };
+      return this.attemptUsefulAttest({ backend, real, ledgerPath, jobs, skipJobIds: done });
     }
 
     const paced = this.validatorGuardrails.canSendMessage(`kibble-attest-probe-${found.job.jobId}`);
@@ -1615,7 +1659,8 @@ export class KibbleEngine {
     // either way, and a note write each time would spend the cycle on bookkeeping.
     await this.saveRemoteState();
     return {
-      action: 'attested_not', posted, jobId: lastJobId,
+      action: usefulPosted === posted ? 'attested_useful' : 'attested_not',
+      posted, useful: usefulPosted, not: posted - usefulPosted, jobId: lastJobId,
       attestsPosted: this.localState.attestsPosted
     };
   }
