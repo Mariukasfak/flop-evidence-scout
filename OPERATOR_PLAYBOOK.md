@@ -108,3 +108,47 @@ Ką matote loguose: `waiting_for_lock` (laukiam mokėtojo — normalu), `deal_ca
 
 **Jūsų sprendimas laukia vienas:** jei kada atsiras vertę laikantis bėgis, ar jį įjungti.
 Agentas pats to nedaro. Pilnas aprašymas — `PROJEKTAS.md`, skyrius 7e.
+
+---
+
+## 8. Mokėtojo (payer) juosta ir vertinimų biudžetas (nuo 2026-09-03)
+
+Nuo šiol tclk juostoje esame **abiejose pusėse**: Scout vykdo (payee), Scribe užsako
+(payer). Vienas atviras pasiūlymas vienu metu, ne dažniau kaip kas valandą.
+
+| Klausimas | Atsakymas |
+|---|---|
+| Ar rizikuojame pinigais? | **Ne.** `paper` bėgis nieko neatsiskaito |
+| Kuo mokame? | `PAPER`, ne `FLOP` — kad niekas nepalaikytų pinigų pasiūlymu |
+| Ką užsakome? | Tikrus klausimus, kurių patys atsakyti negalime |
+| Ar dvi mūsų pusės gali susitarti tarpusavyje? | **Ne.** Kiekviena atmeta kitos raktą |
+
+Ką matote loguose: `[tclk/payer] offer_posted` (pasiūlymas išėjo), `offer_accepted_by`
+(kažkas jį priėmė), `locked` (užrakinom popieriuje ir paskelbėm), `deal_claimed_by_payee`
+(darbas atėjo, sandoris uždarytas), `refunded` (niekas neatskleidė, susigrąžinom),
+`rooms_refused` (serveris neleidžia kurti naujų kambarių — laukiam iki paros pabaigos).
+
+### Naudingo darbo lenta: kas pasikeitė
+
+Vertinimai lentoje turi **ribą, kurios nežinojome**: tam pačiam darbuotojui daugiau nei
+**du** pagyrimai neduoda nieko nei jam, nei mums. Per vieną 2,8 val. langą 79 iš 103 mūsų
+pagyrimų buvo virš ribos — dėl to žurnale 1 489 vertinimai, o lentoje 404.
+
+Dabar biudžetas laikomas `data/local/kibble-useful-pairs.json` ir išnaudotas darbuotojas
+praleidžiamas. Jei tas failas kada dingtų:
+
+```bash
+npm run kibble-pairs      # atkuria biudžetą iš pačios juostos
+```
+
+### Kaip pasižiūrėti, ar taisymai veikia
+
+```bash
+npm run kibble-score
+```
+
+Parodo, ką lenta sako apie abu mūsų agentus, ir **pokytį nuo praeito karto**.
+
+> ⚠️ Lentos skaičiuoklė kartais stringa valandai ar ilgiau. Tada visi skaičiai stovi vietoje
+> ir tai **nieko nesako apie mus**. Įrankis pats tai pasako eilute „the scorer has not
+> advanced in N min".

@@ -590,6 +590,147 @@ Praktinis darbo pasidalijimas, kuris veikia:
 
 ---
 
+## 7g. 2026-09-03: keturios klaidos, kurios kainavo taskus
+
+Sia diena viskas prasidejo nuo vieno paprasto klausimo — kiek mums iki lentos top 10 — ir
+pirmas atsakymas buvo nemalonus: **musu pacius skaiciai nesutapo su lentos skaiciais.**
+Musu zurnalas sake 1 489 pateikti vertinimai. Lenta sake 404.
+
+Zemiau — kas is tikruju vyko. Visi skaiciai ismatuoti ta diena is gyvo tinklo.
+
+### Kaip is tikruju skaiciuojami taskai
+
+Formule ne speliojama, ji paskelbta (`/api/status` → `scoring`):
+
+    taskai = 2*paskelbti_darbai + pristatyti_atsakymai + pateikti_vertinimai
+           + matavimai(BRIEF) + uzsakovo_ACCEPT + 6*gauta_naudinga - 3*gauta_nenaudinga
+
+Patikrinta ranka pries lentos virsune: 1 vietos agentas 2263*2 + 290 + 59 + 3*6 - 100*3 =
+**4593**, lygiai tiek, kiek rodo lenta. Formule teisinga.
+
+| Kas | Scout | Scribe |
+|---|---|---|
+| Taskai | 30 | **410** (34 vieta is 3 197) |
+| Paskelbti darbai | 7 | 0 |
+| Pristatyti atsakymai | 63 | 2 |
+| **Pateikti vertinimai** | 7 | **404** |
+| Matavimai (BRIEF) | 0 | 4 |
+| Gauta „nenaudinga" | 30 → **-90** | 0 |
+
+Iki 10 vietos reikia ~1 050 tasku. Pagrindine juosta — vertinimai, po 1 taska, be jokiu
+lenktyniu.
+
+### Klaida 1: keturi is penkiu musu pagyrimu buvo tuscias darbas
+
+Lenta turi taisykle, kurios niekada neperskaitem kaip **biudzeto**:
+
+> max 2 scored useful from the same attestor→worker
+
+Vertindami vieno ir to paties darbuotojo darba **treti karta**, negaunam nieko — nei jis
+savo 6 tasku, nei mes savo 1. Zinute vis tiek issiunciama, modelio seansas vis tiek
+sunaudojamas.
+
+Isvertinta per viena 2 val. 50 min. juostos eksporta:
+
+* 103 „naudinga" verdiktai
+* skirti **14 darbuotoju**
+* is ju **53 vienam** (…dpcRRm)
+* **79 is 103 buvo virs ribos** — ir riba galioja visam laikui, ne tik siam langui
+
+Trukumo niekada nebuvo: tame paciame eksporte **161 skirtingas darbuotojas** su rimtu
+atsakymu per 2,8 val. Rinkejas tiesiog rikiavo pagal naujausia darba ir imdavo pirma
+pasitaikiusi atsakyma, o trys aktyviausi darbuotojai raso 54 % visu pristatymu — tad jis
+nuolat kliudavo i tuos pacius tris.
+
+Dabar `data/local/kibble-useful-pairs.json` laiko biudzeta: kiek pagyrimu kuriam
+darbuotojui jau isleista, ir ar jis pats mus jau gyre (tada riba — 1, ne 2). Isnaudotas
+darbuotojas praleidziamas, ieskoma kito.
+
+### Klaida 2: apsauga nuo antspaudavimo uzsirakino pati
+
+Agentas turi apsauga: jei paskutiniai 12 musu paaiskinimu per panasus vienas i kita,
+juosta sustoja — nes lenta ignoruoja sablonines priezastis, ir mes patys tuo priekaistaujam
+kitiems.
+
+Zurnale **42 blokavimai is eiles, ir visi rodo variety 0.4166666666666667** — iki paskutinio
+skaitmens. Skaicius, perskaiciuojamas is besikeiciancio rinkinio, taip nesielgia.
+
+Priezastis: langas buvo pildomas **tik po sekmingo issiuntimo**, o patikra vyko **pries**
+issiuntima. Todel pirma karta nukritus zemiau ribos langas uzsalo su tais paciais 12 irasu,
+naujas irasas i ji patekti nebegalejo niekada, ir juosta mire. Neuzkabinta juosta yra ta
+pati, kuri neturi jokiu ribu ir duoda po 1 taska.
+
+Dabar paaiskinimas iraso i langa **tada, kai modelis ji parase** — issiustas ar ne. Ivairus
+paaiskinimas kita ejima langa pakelia; modelis, kuris is tikruju kartojasi, juosta laiko
+uzdaryta, o tam apsauga ir yra.
+
+### Klaida 3: nei vienas musu tclk sandorio kambarys niekada neegzistavo
+
+Patikrinta po viena, visi astuoni siandienos: `count=0`. Vienintele isimtis —
+`mb-p-tclk-951dd1dfec9139b2`, sukurtas 2026-09-02 12:39Z. Nuo tada kiekvienas rasymas:
+
+    HTTP 400 room limit reached (81920 is the cap, and this would be a new one)
+
+**Ir tai netiesa apie serveri.** `/rooms` tuo metu rode 54 456 kambarius is 81 920 ir
+779,9 MB is 5,0 GB, o `/r/events` rode svetimus kambarius kuriamus po 2 per minute — viena
+is ju **18 sekundziu po musu atmetimo**. Vienintelis per-klienta parametras `/config` yra
+`rate_rooms_per_day: 20`.
+
+Vadinasi, dvi paras juosta priimdavo pasiulymus, lauke uzrakto kambaryje, kurio nebuvo, ir
+rasydavo isvada „mokėtojas neuzrakino" — isvada, kurios ji negalejo padaryti. O musu
+kambariu biudzetas buvo isleidziamas i `cancel` kadrus: kambarys atidaromas vien tam, kad
+jame butu paskelbta, jog jame nieko neivyko.
+
+Dabar: **negyvam sandoriui kambarys nebekuriamas.** Jei uzrakto nebuvo ir kambaryje niekas
+neraso, atsaukiam tyliai — `claimByMs` pasako ta pati nemokamai, o musu priemimas jau guli
+`tclk-offers`, kur mokėtojas ir ziuri. Gaves atmetima, agentas nustoja bandyti iki paros
+pabaigos, uuot kas minute atsitrenkes i ta pacia siena.
+
+### Klaida 4: sandoris uzstrigo del savo paties sekmingo uzrakto
+
+Pirmas gyvas mokėtojo sandoris: uzrasas begyje irasytas sekmingai, kadras apie ji —
+atmestas (kambario sukurti nepavyko), o kitas ciklas kartojo visa zingsni nuo pradziu, kur
+`if_absent` atsitrenke i **musu pacius** uzrasa ir grazino 409. Amzinai.
+
+Dabar begis perskaitomas pries rasant: uzrasas, kuris yra lygiai tai, ka ketinom irasyti,
+skaitomas kaip **musu** uzraktas, ne kaip svetimas.
+
+### Kas nauja: mokėtojo pusė (`src/tclk-payer.mjs`)
+
+Iki siol buvom tik **vykdytojai** — ta puse, kuriai niekas neturi musu pasitiketi. Nuo
+2026-09-03 Scribe raktu veikia ir **mokėtojo** puse.
+
+| Klausimas | Atsakymas |
+|---|---|
+| Ar rizikuojam pinigais? | Ne. `paper` begis nieko neatsiskaito, verte niekur nejuda |
+| Kuo mokam? | `PAPER`, ne `FLOP` |
+| Ka siulom? | Tikrus klausimus, kuriu patys atsakyti negalim — ta pati banka kaip kibble darbams |
+| Ar galim priimti savo pacio pasiulyma? | Ne. Scout raktas atmetamas kaip kontrahentas |
+| Kiek pasiulymu? | Vienas atviras, ne dazniau kaip kas valanda |
+
+Kodel `PAPER`, o ne `FLOP`: kambario iprotis — rasyti `FLOP` ir atsiskaityti `paper`. Tai
+ne visai melas, nes begis nurodytas tame paciame kadre, bet praeinanciam pro sali tai
+atrodo kaip pinigu pasiulymas. Jei paaisks, kad `PAPER` pasiulymo niekas nepriima, tai
+bus **matavimas, verta paskelbti**, o ne priezastis persivadinti.
+
+Pirmas pasiulymas isejo 05:23:52Z. **Svetimas agentas ji prieme per 72 sekundes.**
+
+### Ka dabar galima pasitikrinti
+
+```bash
+npm run kibble-score      # ka lenta sako apie mus, su pokyciu nuo praeito karto
+npm run kibble-pairs      # perskaiciuoti pagyrimu biudzeta is juostos
+node tools/quick-status.mjs
+```
+
+> ⚠️ **Lentos skaiciuokle stringa.** 2026-09-03 nuo ~07:55 iki bent 08:30 vietos laiku visi
+> musu rodikliai stovejo iki skaitmens, o `engine_seq` nejudejo nuo 9100924 — nors bendri
+> lentos skaitliukai augo. **Sustoje skaiciai nieko nesako apie mus.** Todel `kibble-score`
+> kiekviena karta iraso ir `engine_seq`, ir tiesiai pasako, kai variklis nepajudejo.
+
+
+---
+
 ## 8. Kas liko
 
 ### Jūsų sprendimai
