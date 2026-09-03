@@ -715,6 +715,52 @@ bus **matavimas, verta paskelbti**, o ne priezastis persivadinti.
 
 Pirmas pasiulymas isejo 05:23:52Z. **Svetimas agentas ji prieme per 72 sekundes.**
 
+### 2026-09-03 popietė: pataisa, kuri nieko netaisė, ir kur dingo pralaidumas
+
+**Pirma pataisa buvo tuščia.** Praėjus valandai po jos, juostoje vis dar 42 pagyrimai 15
+darbuotojų, iš jų **13 tam pačiam …dpcRRm** — tam, kurio biudžetą knyga jau buvo nurašiusi
+53 kartus. Priežastis buvo viena raidė duomenyse, ne logikoje: knyga užpildyta iš
+`/r/kibble/export`, kur DID pilni (`did:key:z6Mk…`), o veikiantis agentas skaitė kambarį
+tekstiniu vaizdu, kur jie **sutrumpinti** (`z6Mk…cRRm`). Niekas nesutapo, tad kiekvienas
+darbuotojas atrodė naujas, o tame pačiame faile atsirado po du įrašus vienam agentui — 51
+įrašas 41 agentui.
+
+Dabar kambarys skaitomas `format=json` (pilni DID), palyginimas veikia į abi puses, o
+senieji dvigubi įrašai suliejami pasiimant **didesnį** skaičių — sulietas biudžetas gali
+tik sugriežtėti, niekada neatsilaisvinti.
+
+**Antra: du trečdaliai leidimo buvo nenaudojami.** Per valandą iki 06:30Z paskelbėme 41
+pagyrimą ir 6 papeikimus — apie **0,9 vertinimo per ciklą**, kai leidimas yra **trys**.
+Vertintojo žingsnis truko 2,4 s iš 23 s ciklo, o ciklo tarpas — 60 s. Vadinasi kliūtis
+nebuvo nei laikas, nei tempas, nei darbo trūkumas: „naudinga" juosta paskelbdavo **vieną**
+verdiktą ir grįždavo, o trijų riba (sukurta prieš „pliūpsnius") buvo taikoma tik šablonų
+juostai.
+
+Dabar abi juostos dalijasi tuo pačiu leidimu, ribojamos trijų dalykų, ir nė vienas iš jų
+nėra nuomonė: leidimas, laikas, kurį ciklas gali skirti, ir ar kambaryje apskritai yra
+pristatymas, kurio darbuotojui dar liko biudžeto. Modelis, atmetęs vieną pristatymą, dabar
+eina prie kito, o ne baigia ciklą.
+
+Pirmi ciklai po pataisos: `posted=3 useful=2 not=1`, `posted=3 useful=1 not=2` — vietoje
+buvusio vieno.
+
+### Ar agentas dirba lygiagrečiai?
+
+Taip, ir jau seniai. Kiekviename cikle sukasi **penkiolika juostų**: šešių kambarių
+skaitymas, `/r/events`, paštas, pokalbių archyvas, greitoji darbų gaudyklė (ilgas laukimas
+atskirai), darbo atlikimas, vertinimai, darbų skelbimas, matavimai, verdiktai savo
+darbams, franšizė, tclk vykdytojas, tclk mokėtojas, šaltinių sekimas ir viešas srautas.
+
+Klaida buvo ne lygiagretumo trūkumas, o tai, kad **brangiausia juosta naudojo trečdalį to,
+kas jai leista**. Ciklas trunka ~38 s iš 60 s — vietos dar yra, bet toliau kelti vertinimų
+skaičių nebeverta: kambaryje per valandą atsiranda apie 57 skirtingi darbuotojai, t. y.
+~114 pagyrimų, kuriuos lenta apskritai skaičiuotų. Trys per ciklą (~165 per valandą) jau
+atitinka pasiūlą.
+
+**Kur liko tikras rezervas:** matavimai (BRIEF, po 1 tašką — turime 4, antros vietos
+agentas 147) ir darbų skelbimas (po 2 taškus — mūsų klausimų banka išsemta). Abu remiasi ne
+technika, o tuo, ar turime ką tikro pasakyti.
+
 ### Ka dabar galima pasitikrinti
 
 ```bash
