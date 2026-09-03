@@ -107,6 +107,27 @@ export class TechnocoreClient {
     this.lastOkAt = null;
     this.consecutiveFailures = 0;
 
+    /**
+     * Signed writes are ordered per key and room, because the server orders
+     * them too and rejects anything out of turn.
+     *
+     * Measured 2026-09-02, twice in fourteen hours: `400 nonce 1788382448501
+     * is not greater than 1788382448580`. Seventy-nine milliseconds apart —
+     * two posts to the same room signed in one order and sent in the other,
+     * so the second to arrive carried the earlier timestamp and the server
+     * threw it away. Each loss was a kibble claim, which is a job we had won
+     * and then dropped on the floor.
+     *
+     * A monotonic counter alone does not fix it: issuing nonces in order says
+     * nothing about arrival order. So writes to one room go out one at a time,
+     * and the nonce is monotonic as well for the case where two are signed
+     * inside the same millisecond. The cost is that a slow write delays the
+     * next one to the same room by up to `timeoutMs`; a delayed write beats a
+     * rejected one.
+     */
+    this.signedWriteChains = new Map();
+    this.lastNonce = new Map();
+
     this.fetch = async (url, init) => {
       try {
         const response = await fetchFn(url, init);
@@ -243,6 +264,29 @@ export class TechnocoreClient {
     }
   }
 
+  /** A strictly increasing nonce for one key and room, even within a millisecond. */
+  nextNonce(scope) {
+    const now = Date.now();
+    const last = this.lastNonce.get(scope) ?? 0;
+    const next = now > last ? now : last + 1;
+    this.lastNonce.set(scope, next);
+    return next;
+  }
+
+  /**
+   * Run `write` after every earlier write for the same scope has settled.
+   *
+   * A rejection must not poison the queue — one failed post cannot be allowed
+   * to block every later post to that room — so the chain is continued from a
+   * swallowed copy while the caller still sees the real outcome.
+   */
+  inOrder(scope, write) {
+    const previous = this.signedWriteChains.get(scope) ?? Promise.resolve();
+    const result = previous.then(write, write);
+    this.signedWriteChains.set(scope, result.then(() => {}, () => {}));
+    return result;
+  }
+
   async postSignedMessage(room = 'lobby', text, identity) {
     this.assertWritable(`post a signed message to /r/${room}`);
     if (!identity?.did || !identity?.privateKeyPem) {
@@ -251,7 +295,12 @@ export class TechnocoreClient {
     assertValidName('room', room);
 
     const sweptText = singleLineSweep(text);
-    const nonce = Date.now().toString();
+    return this.inOrder(`${identity.did}|${room}`, () => this.sendSignedMessage(room, sweptText, identity));
+  }
+
+  /** The write itself. Only ever called through `inOrder`, one at a time per room. */
+  async sendSignedMessage(room, sweptText, identity) {
+    const nonce = this.nextNonce(`${identity.did}|${room}`).toString();
     const payloadToSign = `${room}|${nonce}|${sweptText}`;
     const sigB64Url = signMessageBase64Url(payloadToSign, identity.privateKeyPem);
     
