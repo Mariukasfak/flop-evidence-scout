@@ -45,6 +45,9 @@ import {
   validateDeadlines
 } from './tclk.mjs';
 import { sayOnce } from './log-once.mjs';
+import {
+  loadBudget, saveBudget, canOpenRoom, recordRefusal, isRoomCreationRefusal, minutesBlocked
+} from './room-budget.mjs';
 
 /** How many room messages one look at the offer board reads. */
 const READ_LIMIT = 200;
@@ -93,6 +96,12 @@ export class TclkPayer {
     questionBank = [],
     asset = 'PAPER',
     amount = '1',
+    /**
+     * Shared with the payee lane, because the budget being spent belongs to the
+     * machine and not to either lane. Null keeps it in memory, which is what
+     * tests want.
+     */
+    roomBudgetPath = null,
     now = Date.now,
     minOfferGapMs = MIN_OFFER_GAP_MS
   } = {}) {
@@ -109,7 +118,31 @@ export class TclkPayer {
     this.amount = amount;
     this.now = now;
     this.minOfferGapMs = minOfferGapMs;
+    this.roomBudgetPath = roomBudgetPath;
+    this.budget = roomBudgetPath ? loadBudget(roomBudgetPath) : { blockedUntilMs: 0, refusals: 0, lastRefusalAt: null };
     this.state = null;
+  }
+
+  /**
+   * A deal we cannot announce is a deal we should not open.
+   *
+   * The lock frame has to reach `mb-p-tclk-<contract>`, and that room does not
+   * exist until somebody writes into it. While new rooms are refused, taking an
+   * acceptance would mean locking on the rail and then being unable to say so,
+   * which is worse for a counterparty than never having offered at all.
+   */
+  #roomsOpen() {
+    return canOpenRoom(this.budget, this.now());
+  }
+
+  #noteRefusal(err) {
+    if (!isRoomCreationRefusal(err)) return false;
+    this.budget = recordRefusal(this.budget, this.now());
+    if (this.roomBudgetPath) saveBudget(this.budget, this.roomBudgetPath);
+    sayOnce('room-budget', '[rooms] new rooms refused by the server; standing down for '
+      + minutesBlocked(this.budget, this.now()) + ' min. The service was at 54,456 of 81,920 rooms '
+      + 'when this was last checked, so the limit being hit is ours, not theirs.');
+    return true;
   }
 
   /* ------------------------------------------------------------ state --- */
@@ -176,6 +209,7 @@ export class TclkPayer {
       await this.client.postMessage(room, text, this.identity);
       return true;
     } catch (err) {
+      this.#noteRefusal(err);
       sayOnce(`tclk-payer:post:${frame?.type || 'note'}`, `[tclk] payer post to ${room} failed: ${err.message}`);
       return false;
     }
@@ -200,6 +234,10 @@ export class TclkPayer {
     const since = now - (this.state.lastOfferAt || 0);
     if (since < this.minOfferGapMs) {
       return { action: 'offer_paced', waitMs: this.minOfferGapMs - since };
+    }
+
+    if (!this.#roomsOpen()) {
+      return { action: 'rooms_refused', blockedForMin: minutesBlocked(this.budget, now) };
     }
 
     const spent = new Set(this.state.spentKeys || []);
@@ -352,23 +390,47 @@ export class TclkPayer {
       refundAfterMs: deal.offer.refundAfterMs
     });
     const { ns, key } = paperNote(deal.contract);
-    try {
-      await this.client.setKv(ns, key, record, { ifAbsent: true });
-    } catch (err) {
-      // A 409 means somebody else's bytes are already there; anything else is
-      // the server having a bad minute, and both are "try again next cycle".
-      return { action: 'lock_write_failed', contract: deal.contract, error: err.message };
+
+    /**
+     * Read before writing, because the two halves of this step can come apart.
+     *
+     * Measured 2026-09-03 on this lane's first live deal: the rail write
+     * succeeded, the frame announcing it was refused because the deal room
+     * could not be created, and the next cycle re-ran the whole step -- where
+     * `ifAbsent` met our own note and returned 409, forever. The deal was
+     * wedged by its own successful lock. So a note that is exactly what we
+     * meant to write is read as our lock, not as somebody else's.
+     */
+    const existing = decodePaperRecord(await this.#railValue(ns, key));
+    const alreadyOurs = existing
+      && existing.status === 'locked'
+      && existing.lock === 'hash'
+      && existing.statement === deal.statement
+      && existing.refundAfterMs === deal.offer.refundAfterMs;
+
+    if (!alreadyOurs) {
+      if (existing) {
+        return { action: 'lock_not_ours', contract: deal.contract, railRecord: existing.status };
+      }
+      try {
+        await this.client.setKv(ns, key, record, { ifAbsent: true });
+      } catch (err) {
+        // A 409 means somebody wrote between our read and our write; anything
+        // else is the server having a bad minute. Both are "try next cycle".
+        return { action: 'lock_write_failed', contract: deal.contract, error: err.message };
+      }
     }
 
     // Read back what the rail now holds rather than trusting our own write:
     // the note is world-writable, and the bytes a refund must name are the
     // bytes that are actually there.
-    const raw = await this.client.readNote(ns, key);
-    const value = typeof raw === 'string' ? raw : (raw?.value ?? null);
+    const value = await this.#railValue(ns, key);
     const back = decodePaperRecord(value);
     if (!back || back.status !== 'locked' || back.statement !== deal.statement) {
       return { action: 'lock_not_on_rail', contract: deal.contract, railRecord: back ? back.status : 'absent' };
     }
+    deal.lockedBytes = String(value).trim();     // kept even when the announcement fails
+    this.save();
 
     const posted = await this.#post(deal.room, {
       type: 'lock', from: this.identity.did, contract: deal.contract,
@@ -454,6 +516,12 @@ export class TclkPayer {
     });
     this.#close(deal, 'abandoned', 'payee never revealed before refundAfterMs');
     return { action: 'refunded', contract: deal.contract, payee: deal.payee };
+  }
+
+  /** The rail note's raw value, or null. */
+  async #railValue(ns, key) {
+    const raw = await this.client.readNote(ns, key);
+    return typeof raw === 'string' ? raw : (raw?.value ?? null);
   }
 
   /** Did the payee write anything into the deal room that is not a tclk frame? */

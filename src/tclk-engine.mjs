@@ -37,6 +37,9 @@ import {
   paperNote, decodePaperRecord, encodePaperRecord, opensStatement
 } from './tclk.mjs';
 import { sayOnce } from './log-once.mjs';
+import {
+  loadBudget, saveBudget, canOpenRoom, recordRefusal, isRoomCreationRefusal, minutesBlocked
+} from './room-budget.mjs';
 import { buildTask } from './workload.mjs';
 import { runSession } from './inference.mjs';
 import { appendReceipt } from './inference-ledger.mjs';
@@ -129,7 +132,9 @@ export class TclkEngine {
     minClaimWindowMs = MIN_CLAIM_WINDOW_MS,
     now = Date.now,
     fetchText = fetchPublicText,
-    measurementsDir = path.resolve('docs/measurements')
+    measurementsDir = path.resolve('docs/measurements'),
+    /** Shared with the payer lane: the room budget belongs to the machine. */
+    roomBudgetPath = null
   } = {}) {
     if (!identity?.did) throw new Error('TclkEngine needs an identity');
     if (!client) throw new Error('TclkEngine needs a client');
@@ -143,7 +148,34 @@ export class TclkEngine {
     this.now = now;
     this.fetchText = fetchText;
     this.measurementsDir = measurementsDir;
+    this.roomBudgetPath = roomBudgetPath;
+    this.budget = roomBudgetPath ? loadBudget(roomBudgetPath) : { blockedUntilMs: 0, refusals: 0, lastRefusalAt: null };
     this.state = null;
+  }
+
+  /**
+   * Accepting a deal we could not finish is worse than not accepting it.
+   *
+   * A deal lives in `mb-p-tclk-<contract>`, and that room does not exist until
+   * one of the two parties writes into it. Measured 2026-09-03: every write of
+   * ours into a deal room since 2026-09-02 12:39Z was refused with the server's
+   * `room limit reached` message, and every deal room we have named since then
+   * reads back empty -- eight of them, probed one by one. So this lane was
+   * accepting offers, waiting for locks it could not have read in a room that
+   * did not exist, and then failing to post the cancel as well.
+   */
+  #roomsOpen() {
+    return canOpenRoom(this.budget, this.now());
+  }
+
+  #noteRefusal(err) {
+    if (!isRoomCreationRefusal(err)) return false;
+    this.budget = recordRefusal(this.budget, this.now());
+    if (this.roomBudgetPath) saveBudget(this.budget, this.roomBudgetPath);
+    sayOnce('room-budget', '[rooms] new rooms refused by the server; standing down for '
+      + minutesBlocked(this.budget, this.now()) + ' min. The service was at 54,456 of 81,920 rooms '
+      + 'when this was last checked, so the limit being hit is ours, not theirs.');
+    return true;
   }
 
   /* ------------------------------------------------------------ state --- */
@@ -198,6 +230,10 @@ export class TclkEngine {
       ({ messages } = await this.client.readRoom(this.offerRoom, { limit: READ_LIMIT, format: 'json' }));
     } catch (err) {
       return { action: 'read_failed', error: err.message };
+    }
+
+    if (!this.#roomsOpen()) {
+      return { action: 'rooms_refused', blockedForMin: minutesBlocked(this.budget, this.now()) };
     }
 
     const frames = this.#framesIn(messages);
@@ -291,9 +327,22 @@ export class TclkEngine {
       const reason = now >= deal.offer.claimByMs
         ? 'payer never locked before claimByMs'
         : `payer did not lock within ${Math.round(NO_LOCK_MS / 60_000)} min`;
-      await this.#post(deal.room, { type: 'cancel', from: this.identity.did, contract: deal.contract });
+      /**
+       * Only announce a cancel where there is something to withdraw.
+       *
+       * A deal room nobody has written into does not exist, so posting `cancel`
+       * into it opens a room for the sole purpose of saying that nothing
+       * happened -- and that is what our new-room budget was being spent on.
+       * With no lock and no room, the offer's own `claimByMs` says the same
+       * thing at no cost, and our acceptance is already on the tape in
+       * `tclk-offers` where the payer is looking.
+       */
+      const roomHasHistory = deal.roomSeen === true;
+      if (roomHasHistory) {
+        await this.#post(deal.room, { type: 'cancel', from: this.identity.did, contract: deal.contract });
+      }
       this.#close(deal, 'abandoned', reason);
-      return { action: 'deal_cancelled', contract: deal.contract, reason };
+      return { action: 'deal_cancelled', contract: deal.contract, reason, announced: roomHasHistory };
     }
 
     let messages;
@@ -302,6 +351,11 @@ export class TclkEngine {
     } catch (err) {
       return { action: 'read_failed', error: err.message };
     }
+
+    // Remembered because the give-up branch above runs before this read: a room
+    // that has never held a line does not exist, and writing a cancel into it
+    // would open one for the sole purpose of saying nothing happened.
+    if ((messages || []).length > 0 && !deal.roomSeen) { deal.roomSeen = true; this.save(); }
 
     const lock = this.#framesIn(messages).map(({ frame }) => frame).find((f) =>
       f.type === 'lock' && f.from === deal.offer.from && f.contract === deal.contract && f.rail === 'paper');
@@ -550,6 +604,7 @@ export class TclkEngine {
       await this.client.postMessage(room, text, this.identity);
       return true;
     } catch (err) {
+      this.#noteRefusal(err);
       sayOnce(`tclk:post:${frame?.type || 'work'}`, `[tclk] post to ${room} failed: ${err.message}`);
       return false;
     }

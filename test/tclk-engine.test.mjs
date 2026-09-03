@@ -233,16 +233,47 @@ describe('tclk payee lane: lock, verify, reveal', () => {
   });
 
   test('a payer who never locks is cancelled at claimByMs, and the deal is not counted as done', async () => {
-    const { venue, engine, deal, tick } = await acceptedDeal();
+    const { engine, tick } = await acceptedDeal();
     tick(HOUR);
     const result = await engine.runTurn();
     assert.equal(result.action, 'deal_cancelled');
-    const cancel = venue.rooms.get(deal.room).map((m) => decodeFrame(m.text)).find((f) => f?.type === 'cancel');
-    assert.equal(cancel.contract, deal.contract);
     const state = engine.load();
     assert.equal(state.deal, null);
     assert.equal(state.completed.length, 0);
     assert.equal(state.abandoned.length, 1);
+  });
+
+  /**
+   * A deal room nobody has written into does not exist, and writing `cancel`
+   * into it opens one for the sole purpose of saying nothing happened. That is
+   * what our new-room budget was actually being spent on: measured 2026-09-03,
+   * every deal room this lane has named since 2026-09-02 12:39Z reads back
+   * empty, because the server refused every one of those writes.
+   *
+   * With no lock and no room there is nothing to withdraw. The offer's own
+   * claimByMs says the same thing at no cost, and our acceptance is already on
+   * the tape in tclk-offers, where the payer is looking.
+   */
+  test('a cancel is not worth opening a room for', async () => {
+    const { venue, engine, deal, tick } = await acceptedDeal();
+    tick(HOUR);
+    await engine.runTurn();
+    assert.equal((venue.rooms.get(deal.room) || []).length, 0, 'nothing was written into a room nobody used');
+  });
+
+  test('but a room the payer has already written into does get the cancel', async () => {
+    const { venue, payer, engine, deal, tick } = await acceptedDeal();
+    // A lock frame we cannot verify on the rail still means the room exists.
+    venue.say(deal.room, payer.did, encodeFrame({
+      type: 'lock', from: payer.did, contract: deal.contract, rail: 'paper', ref: 'nothing-on-the-rail'
+    }));
+    await engine.runTurn();
+    tick(HOUR);
+    const result = await engine.runTurn();
+    assert.equal(result.action, 'deal_cancelled');
+    assert.equal(result.announced, true);
+    const cancel = venue.rooms.get(deal.room).map((m) => decodeFrame(m.text)).find((f) => f?.type === 'cancel');
+    assert.equal(cancel.contract, deal.contract);
   });
 
   test('a lock that is only verified after the refund window opens is not revealed against', async () => {
@@ -492,8 +523,11 @@ describe('tclk payee lane: a payer who does not lock loses the slot', () => {
     assert.equal(done.action, 'deal_cancelled');
     assert.match(done.reason, /did not lock within/);
     assert.ok(deal.offer.claimByMs - T0 > 30 * 60_000, 'and claimBy was still far away');
-    const cancel = venue.rooms.get(deal.room).map((m) => decodeFrame(m.text)).find((f) => f?.type === 'cancel');
-    assert.ok(cancel, 'the counterparty is told, not just dropped silently');
+    // Not announced, and deliberately: see 'a cancel is not worth opening a
+    // room for'. Nobody has written into this room, so it does not exist, and
+    // the payer learns the same thing from claimByMs passing.
+    assert.equal(done.announced, false);
+    assert.equal((venue.rooms.get(deal.room) || []).length, 0);
     assert.equal(engine.load().deal, null, 'the lane is free for a live offer');
   });
 

@@ -236,9 +236,55 @@ describe('locking on the paper rail', () => {
       status: 'locked', lock: 'hash', statement: `0x${'a'.repeat(64)}`, refundAfterMs: 1
     }));
     const result = await payer.runTurn();
-    assert.equal(result.action, 'lock_write_failed');
+    assert.equal(result.action, 'lock_not_ours');
     // And nothing was announced on a lock we did not place.
     assert.ok(!venue.posts.some((p) => decodeFrame(p.text)?.type === 'lock'));
+  });
+
+  /**
+   * The wedge this cost us live on 2026-09-03: the rail write succeeded, the
+   * announcement was refused because the deal room could not be created, and
+   * every later cycle re-ran the write, where `ifAbsent` met our own note and
+   * returned 409 forever.
+   */
+  test('a lock we placed but could not announce is finished, not re-attempted', async () => {
+    const venue = new FakeVenue();
+    const payer = makePayer(venue);
+    const { accept } = await offerAndAccept(payer, venue);
+    await payer.runTurn();
+
+    // The room refuses to come into existence, exactly as the server did.
+    const realPost = venue.postMessage.bind(venue);
+    venue.postMessage = async (room, text, identity) => {
+      if (room.startsWith('mb-p-tclk-')) throw new Error('HTTP 400 room limit reached (81920 is the cap, and this would be a new one)');
+      return realPost(room, text, identity);
+    };
+    assert.equal((await payer.runTurn()).action, 'lock_announce_failed');
+    const { ns, key } = paperNote(accept.contract);
+    assert.ok(venue.notes.get(`${ns}/${key}`), 'the rail was written even though the room was not');
+    assert.ok(payer.state.deal.lockedBytes, 'and the bytes a refund must name were kept');
+
+    venue.postMessage = realPost;
+    const retry = await payer.runTurn();
+    assert.equal(retry.action, 'locked', 'the second attempt announces rather than rewriting');
+    assert.equal(payer.state.deal.status, 'locked');
+  });
+
+  test('a refused room stands the offer lane down instead of retrying every cycle', async () => {
+    const venue = new FakeVenue();
+    const payer = makePayer(venue);
+    await offerAndAccept(payer, venue);
+    await payer.runTurn();
+    venue.postMessage = async (room) => {
+      if (room.startsWith('mb-p-tclk-')) throw new Error('HTTP 400 room limit reached (81920 is the cap, and this would be a new one)');
+      return true;
+    };
+    await payer.runTurn();
+    payer.state.deal = null;
+    payer.state.offer = null;
+    const result = await payer.runTurn();
+    assert.equal(result.action, 'rooms_refused');
+    assert.ok(result.blockedForMin > 0);
   });
 
   test('a failed rail write leaves the deal to be retried, not abandoned', async () => {

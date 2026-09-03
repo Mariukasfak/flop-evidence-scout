@@ -48,6 +48,7 @@ export function deriveFrom(o) {
     tclkStatePath: o.tclkStatePath || path.join(dataDir, 'tclk-state.json'),
     tclkPayerStatePath: o.tclkPayerStatePath || path.join(dataDir, 'tclk-payer-state.json'),
     kibblePairsPath: o.kibblePairsPath || path.join(dataDir, 'kibble-useful-pairs.json'),
+    roomBudgetPath: o.roomBudgetPath || path.join(dataDir, 'room-budget.json'),
     consoleLogPath: o.consoleLogPath || path.join(dataDir, 'daemon-console.log'),
     heartbeatPath: o.heartbeatPath || path.join(dataDir, 'scout-heartbeat.json'),
     feedStatePath: o.feedStatePath || path.join(dataDir, 'feed-state.json'),
@@ -394,7 +395,8 @@ export async function runScoutDaemon(options = {}) {
   });
   // Scout takes the deals; Scribe's key is named so its offers are never ours to accept.
   const tclkEngine = new TclkEngine({
-    identity: scoutIdentity, client, statePath: config.tclkStatePath, otherDids: [scribeIdentity.did]
+    identity: scoutIdentity, client, statePath: config.tclkStatePath, otherDids: [scribeIdentity.did],
+    roomBudgetPath: config.roomBudgetPath
   });
   /**
    * The other side of the same convention, on Scribe's key.
@@ -412,7 +414,8 @@ export async function runScoutDaemon(options = {}) {
    */
   const tclkPayer = new TclkPayer({
     identity: scribeIdentity, client, statePath: config.tclkPayerStatePath,
-    otherDids: [scoutIdentity.did], questionBank: QUESTION_BANK
+    otherDids: [scoutIdentity.did], questionBank: QUESTION_BANK,
+    roomBudgetPath: config.roomBudgetPath
   });
 
   // The DID note has advertised a mailbox from the start; this is what finally
@@ -1117,7 +1120,7 @@ export async function runScoutDaemon(options = {}) {
              * looked identical to "nothing to do". A lane that cannot read and
              * a lane with nothing to read must not write the same silence.
              */
-            const quiet = ['no_acceptable_offer', 'waiting_for_lock', 'lock_not_verified'];
+            const quiet = ['no_acceptable_offer', 'waiting_for_lock', 'lock_not_verified', 'rooms_refused'];
             const changed = tclk.action !== lastTclkAction;
             lastTclkAction = tclk.action;
             if (!quiet.includes(tclk.action) || changed) {
@@ -1135,7 +1138,7 @@ export async function runScoutDaemon(options = {}) {
              * read has to be distinguishable from one with nothing to read.
              */
             const payer = await timed('tclkPayer', () => tclkPayer.runTurn());
-            const quietPayer = ['offer_paced', 'waiting_for_accept', 'waiting_for_reveal', 'no_question_left'];
+            const quietPayer = ['offer_paced', 'waiting_for_accept', 'waiting_for_reveal', 'no_question_left', 'rooms_refused'];
             const payerChanged = payer.action !== lastPayerAction;
             lastPayerAction = payer.action;
             if (!quietPayer.includes(payer.action) || payerChanged) {
