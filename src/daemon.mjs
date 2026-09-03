@@ -49,6 +49,7 @@ export function deriveFrom(o) {
     tclkPayerStatePath: o.tclkPayerStatePath || path.join(dataDir, 'tclk-payer-state.json'),
     kibblePairsPath: o.kibblePairsPath || path.join(dataDir, 'kibble-useful-pairs.json'),
     roomBudgetPath: o.roomBudgetPath || path.join(dataDir, 'room-budget.json'),
+    payerRepPath: o.payerRepPath || path.join(dataDir, 'tclk-payers.json'),
     consoleLogPath: o.consoleLogPath || path.join(dataDir, 'daemon-console.log'),
     heartbeatPath: o.heartbeatPath || path.join(dataDir, 'scout-heartbeat.json'),
     feedStatePath: o.feedStatePath || path.join(dataDir, 'feed-state.json'),
@@ -396,7 +397,7 @@ export async function runScoutDaemon(options = {}) {
   // Scout takes the deals; Scribe's key is named so its offers are never ours to accept.
   const tclkEngine = new TclkEngine({
     identity: scoutIdentity, client, statePath: config.tclkStatePath, otherDids: [scribeIdentity.did],
-    roomBudgetPath: config.roomBudgetPath
+    roomBudgetPath: config.roomBudgetPath, payerRepPath: config.payerRepPath
   });
   /**
    * The other side of the same convention, on Scribe's key.

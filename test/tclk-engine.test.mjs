@@ -53,7 +53,7 @@ function makeBackend(text) {
   return { id: 'test-backend', simulated: false, async generate() { return { text, modelId: 'test' }; } };
 }
 
-function payerOffer(payer, { job, claimByMs = T0 + HOUR, refundAfterMs = T0 + 2 * HOUR, rails = ['flop-htlc', 'paper'], lock = 'hash', role = 'payer' } = {}) {
+function payerOffer(payer, { job = { proto: 'a2a', id: 'task-fixture' }, claimByMs = T0 + HOUR, refundAfterMs = T0 + 2 * HOUR, rails = ['flop-htlc', 'paper'], lock = 'hash', role = 'payer' } = {}) {
   const fields = {
     amount: '250', asset: 'FLOP', claimByMs, expiresMs: T0 + HOUR, from: payer.did,
     ...(job ? { job } : {}), lock, nonce: 'aa11bb22cc33dd44', rails, refundAfterMs, role, type: 'offer'
@@ -96,14 +96,59 @@ describe('tclk payee lane: accepting', () => {
     assert.equal('secret' in publicDealView(state), false);
   });
 
-  test('prefers an offer that names a job over one that does not', async () => {
+  test('refuses a payer the room has already watched walk away, before we ever meet them', async () => {
+    const venue = makeVenue(); const me = generateIdentity();
+    const burned = generateIdentity(); const stranger = generateIdentity();
+    const repFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tclk-rep-')), 'payers.json');
+    fs.writeFileSync(repFile, JSON.stringify({
+      updatedAt: new Date().toISOString(),
+      payers: { [burned.did]: { tried: 6, done: 0 } }
+    }));
+
+    venue.say(OFFER_ROOM, burned.did, encodeFrame(payerOffer(burned)));
+    venue.say(OFFER_ROOM, stranger.did, encodeFrame(payerOffer(stranger)));
+    const engine = engineFor(venue, me, { payerRepPath: repFile });
+
+    const result = await engine.runTurn();
+    assert.equal(result.payer, stranger.did,
+      'our own state has never seen either of them; the room has seen enough of one');
+  });
+
+  test('a payer who has finished a deal with somebody wins the slot over one nobody has seen', async () => {
+    const venue = makeVenue(); const me = generateIdentity();
+    const proven = generateIdentity(); const stranger = generateIdentity();
+    const repFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tclk-rep-')), 'payers.json');
+    fs.writeFileSync(repFile, JSON.stringify({
+      updatedAt: new Date().toISOString(),
+      payers: { [proven.did]: { tried: 4, done: 3 } }
+    }));
+
+    venue.say(OFFER_ROOM, proven.did, encodeFrame(payerOffer(proven)));
+    venue.say(OFFER_ROOM, stranger.did, encodeFrame(payerOffer(stranger)));   // newer: would win on a tie
+    const engine = engineFor(venue, me, { payerRepPath: repFile });
+
+    const result = await engine.runTurn();
+    assert.equal(result.payer, proven.did, 'trust outranks recency');
+  });
+
+  test('an unknown payer is still welcome — a first appearance is the second-best signal there is', async () => {
+    const venue = makeVenue(); const me = generateIdentity(); const stranger = generateIdentity();
+    const repFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tclk-rep-')), 'payers.json');
+    fs.writeFileSync(repFile, JSON.stringify({ updatedAt: null, payers: {} }));
+
+    venue.say(OFFER_ROOM, stranger.did, encodeFrame(payerOffer(stranger)));
+    const engine = engineFor(venue, me, { payerRepPath: repFile });
+
+    assert.equal((await engine.runTurn()).payer, stranger.did);
+  });
+
+  test('refuses an offer that names no protocol, however new it is', async () => {
     const venue = makeVenue(); const me = generateIdentity(); const a = generateIdentity(); const b = generateIdentity();
-    venue.say(OFFER_ROOM, a.did, encodeFrame(payerOffer(a)));                                   // no job, newer wins on ties
     venue.say(OFFER_ROOM, b.did, encodeFrame(payerOffer(b, { job: { proto: 'a2a', id: 'x' } })));
-    venue.say(OFFER_ROOM, a.did, encodeFrame({ ...payerOffer(a), nonce: 'ff11bb22cc33dd44', id: undefined }));
+    venue.say(OFFER_ROOM, a.did, encodeFrame(payerOffer(a, { job: null })));                     // newer, and still refused
     const engine = engineFor(venue, me);
     const result = await engine.runTurn();
-    assert.equal(result.payer, b.did);
+    assert.equal(result.payer, b.did, 'the older offer that names a protocol wins over a newer one that names none');
   });
 
   test('refuses everything the spec or the three-party rule says it must', async () => {

@@ -40,6 +40,9 @@ import { sayOnce } from './log-once.mjs';
 import {
   loadBudget, saveBudget, recordRefusal, isRoomCreationRefusal, minutesBlocked
 } from './room-budget.mjs';
+import {
+  loadReputation, isBurned, isTrusted, offerLooksAlive
+} from './tclk-reputation.mjs';
 import { buildTask } from './workload.mjs';
 import { runSession } from './inference.mjs';
 import { appendReceipt } from './inference-ledger.mjs';
@@ -134,7 +137,9 @@ export class TclkEngine {
     fetchText = fetchPublicText,
     measurementsDir = path.resolve('docs/measurements'),
     /** Shared with the payer lane: the room budget belongs to the machine. */
-    roomBudgetPath = null
+    roomBudgetPath = null,
+    /** Who finishes deals, measured over the room rather than over our fourteen. */
+    payerRepPath = null
   } = {}) {
     if (!identity?.did) throw new Error('TclkEngine needs an identity');
     if (!client) throw new Error('TclkEngine needs a client');
@@ -150,6 +155,8 @@ export class TclkEngine {
     this.measurementsDir = measurementsDir;
     this.roomBudgetPath = roomBudgetPath;
     this.budget = roomBudgetPath ? loadBudget(roomBudgetPath) : { blockedUntilMs: 0, refusals: 0, lastRefusalAt: null };
+    this.payerRepPath = payerRepPath;
+    this.payerRep = loadReputation(payerRepPath);
     this.state = null;
   }
 
@@ -249,7 +256,9 @@ export class TclkEngine {
         && o.lock === 'hash'                     // never the unaudited point path
         && o.rails.includes('paper')             // the only rail that exists
         && !this.ours.has(o.from)                // not ours, not our sibling key's
-        && !this.#neverLocked().has(o.from)      // already had their chance and did not take it
+        && !this.#burned().has(o.from)           // already had their chance and did not take it
+        && !isBurned(this.payerRep, o.from)      // and the room says the same about them
+        && offerLooksAlive(o)                    // a shape that has never once settled
         && !accepted.has(o.id)                   // first accept wins; a second is noise
         && offerIdMatches(o)                     // a frame that lies about its own id is not an offer
         && validateDeadlines(o, now).ok
@@ -259,8 +268,16 @@ export class TclkEngine {
       return { action: 'no_acceptable_offer', offers: frames.filter((f) => f.frame.type === 'offer').length };
     }
 
-    // One that names a job over one that does not; then the newest.
+    /**
+     * A payer who has finished a deal with somebody finishes 61.8% of the time;
+     * one nobody has seen before, 30.5%. Both are worth accepting -- there are
+     * not enough proven payers in the room to live on -- but when a cycle offers
+     * a choice, take the proven one. Then a named job, then the newest.
+     */
     candidates.sort((a, b) => {
+      const trust = Number(isTrusted(this.payerRep, b.frame.from))
+                  - Number(isTrusted(this.payerRep, a.frame.from));
+      if (trust !== 0) return trust;
       const job = Number(Boolean(b.frame.job)) - Number(Boolean(a.frame.job));
       return job !== 0 ? job : (b.seq ?? 0) - (a.seq ?? 0);
     });
@@ -475,7 +492,7 @@ export class TclkEngine {
    * nothing and buys back the wait. Only the never-locked reason counts: a deal
    * that ended for any other cause says nothing about the payer.
    */
-  #neverLocked() {
+  #burned() {
     return new Set((this.state.abandoned || [])
       .filter((r) => typeof r.reason === 'string' && r.reason.includes('lock'))
       .map((r) => r.payer)
