@@ -32,9 +32,38 @@ if [ "$(id -u)" -eq 0 ] && ! command -v sudo >/dev/null; then
   sudo() { "$@"; }
 fi
 
-say "1/7  System packages"
+say "1/7  System packages and swap"
 sudo apt-get update -qq
 sudo apt-get install -y -qq git curl unzip ca-certificates
+
+# Swap, but only on a small box.
+#
+# Measured need is about 3.5 GB at peak: the daemon holds ~0.5 GB resident and
+# qwen2.5:3b adds ~2.3 GB while it is loaded. On a 4 GB plan that leaves almost
+# nothing for the system, and a fresh Hetzner image ships with no swap at all,
+# so the kernel's only answer to a spike is to kill something — most likely
+# ollama, mid-inference.
+#
+# The peak is also intermittent rather than constant: measured on the Windows
+# machine 2026-09-04, ollama sits at 58 MB between jobs and only pages the model
+# in when there is work. That is exactly the shape swap handles well.
+#
+# Skipped above 6 GB, where it buys nothing, so this same script stays correct
+# after a later rescale.
+TOTAL_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
+if [ "$TOTAL_MB" -lt 6000 ] && [ -z "$(swapon --show --noheadings 2>/dev/null)" ]; then
+  echo "   ${TOTAL_MB} MB of RAM and no swap — adding 2 GB"
+  sudo fallocate -l 2G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
+  sudo chmod 600 /swapfile
+  sudo mkswap -q /swapfile
+  sudo swapon /swapfile
+  grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
+  # Prefer keeping the model resident over swapping it out at the first excuse.
+  sudo sysctl -q -w vm.swappiness=10
+  grep -q '^vm.swappiness' /etc/sysctl.conf || echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf >/dev/null
+else
+  echo "   ${TOTAL_MB} MB of RAM — no swap needed"
+fi
 
 say "2/7  Node.js 22"
 if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 20 ]; then
