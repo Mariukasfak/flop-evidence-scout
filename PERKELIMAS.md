@@ -25,17 +25,68 @@ Vaizdo plokštės **nereikia** — modelis sukasi procesoriumi.
 
 ## Kur dėti
 
-| Kur | Kaina | Kas gerai | Kas blogai |
-|---|---|---|---|
-| **Oracle Cloud Always Free** | **0 €** | 2 branduoliai ARM, 12 GB RAM, 200 GB — nemokamai neribotą laiką | Dažnai „out of capacity", reikia kortelės patikrai, Oracle 2026-06 tyliai sumažino ribas per pusę |
-| **Hetzner CX22** | ~3,79 €/mėn. | 2 branduoliai, 4 GB, 40 GB, Helsinkis — arti Lietuvos, visada yra vietos | Kainuoja; 4 GB be atsargos |
-| Hetzner CAX21 (ARM) | ~7 €/mėn. | 8 GB — jokių atminties rūpesčių | Brangiau |
-| Render / Railway nemokami | 0 € | — | **Netinka**: užmiega, nėra nuolatinio disko, nepaleisi Ollamos |
-| Raspberry Pi namuose | ~120 € vienkartinai | savo geležis | Ta pati bėda kaip su kompu: dingsta elektra ar internetas — dingsta agentas |
+**Sprendimas: Hetzner CX33, Helsinkis, 8,49 €/mėn. + PVM (~10 €/mėn.)**
 
-**Siūlau taip:** pirma pabandyk **Oracle nemokamą** — jei duos mašiną, tai geriausias
-variantas ir nekainuoja nieko. Jei kelias dienas rodo „out of capacity", imk
-**Hetzner CX22** už ~4 €/mėn. ir nebegaišk laiko.
+Hetzner yra vokiečių firma, nuomojanti kompiuterius duomenų centruose. CX33 — tos
+nuomos dydžio pavadinimas: 4 branduoliai, 8 GB atminties, 80 GB disko. Helsinkis —
+kur ta mašina fiziškai stovi; iš Lietuvos arčiausiai, todėl greičiausiai.
+
+Kaip prie to prieita (2026-09-04, kainos po Hetzner birželio pabrangimo):
+
+| Kur | Kaina | Verdiktas |
+|---|---|---|
+| Oracle Cloud Always Free | 0 € | **Bandyta 2026-09-04 — nepavyko.** Nemokamų ARM mašinų nuolat nėra |
+| Hetzner CX23 (2 br., 4 GB) | 5,49 €/mėn. | Tilptų, bet be atsargos: mums reikia ~3,5 GB iš 4 |
+| **Hetzner CX33 (4 br., 8 GB)** | **8,49 €/mėn.** | **Šitą.** Atsarga atminčiai ir dvigubai daugiau branduolių modeliui |
+| Hetzner CAX21 (ARM, 8 GB) | 10,49 €/mėn. | Tas pats, tik brangiau |
+| Render / Railway nemokami | 0 € | **Netinka**: užmiega, nėra nuolatinio disko, nepaleisi Ollamos |
+| Raspberry Pi namuose | ~120 € vienkartinai | Ta pati bėda kaip su kompu: dingsta elektra — dingsta agentas |
+
+Kodėl ne pigesnis CX23, o CX33 už 3 € daugiau: mūsų ciklas **jau dabar vėluoja**
+(45–114 s, nors taikinys 60 s), o sunkiausia jo dalis yra modelis, kurį gena
+procesorius. Du branduoliai vietoj keturių tą vėlavimą tik pagilintų. Trys eurai
+per mėnesį už dvigubai greitesnį darbą yra pigu.
+
+Ir viena netikėta smulkmena: šitame kompiuteryje yra 16 GB atminties, bet
+**laisvos šiuo metu tik 1,8 GB** — agentas dalinasi mašina su naršykle ir viskuo
+kitu. Serveryje, kur nieko daugiau nesisuka, jam realiai atiteks daugiau atminties
+negu turi dabar.
+
+---
+
+## Kaip užsisakyti tą serverį (pirmą kartą)
+
+1. **Registracija:** [console.hetzner.com](https://console.hetzner.com) → *Register*.
+   Naujos paskyros Hetzner kartais paprašo asmens dokumento nuotraukos — tai
+   normalu, patvirtinimas trunka nuo kelių minučių iki paros.
+2. **Projektas:** paspaudi *New Project*, pavadini kaip nori, pvz. `triagent`.
+3. **Serveris:** *Add Server*, ir renkiesi keturis dalykus:
+   - **Location** → *Helsinki*
+   - **Image** (kokia sistema) → *Ubuntu 24.04*
+   - **Type** → skiltis *Shared vCPU*, eilutė **CX33**
+   - **SSH key** → čia pauzė, žiūrėk kitą punktą
+4. **SSH raktas** — tai slaptažodžio pakaitalas, kuriuo tavo kompiuteris
+   prisijungia prie serverio. Windows'e pasidarai jį taip (atidaryk PowerShell):
+
+   ```
+   ssh-keygen -t ed25519
+   ```
+
+   Spaudi Enter tris kartus. Tada parodai, ką jis sukūrė:
+
+   ```
+   type $env:USERPROFILE\.ssh\id_ed25519.pub
+   ```
+
+   Tą vieną eilutę nukopijuoji ir įklijuoji į Hetzner langelį *Add SSH key*.
+5. *Create & Buy now*. Po minutės sąraše atsiras serverio **IP adresas** —
+   keturi skaičiai su taškais. Jo prireiks kitame žingsnyje.
+
+Prisijungimas prie serverio (iš PowerShell, `SERVERIO-IP` pakeisk savuoju):
+
+```
+ssh root@SERVERIO-IP
+```
 
 ---
 

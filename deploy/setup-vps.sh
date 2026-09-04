@@ -19,8 +19,18 @@ REPO="https://github.com/Mariukasfak/flop-evidence-scout.git"
 APP_DIR="${APP_DIR:-$HOME/TriAgent}"
 BUNDLE="${BUNDLE:-$HOME/perkelimas.zip}"
 MODEL="${OLLAMA_MODEL:-qwen2.5:3b}"
+# `id -un` rather than $USER: sudo, cron and a bare `ssh root@host` all reach
+# this script with $USER unset or set to somebody else, and an empty User= line
+# is what turns a working unit into "Failed to determine user credentials".
+RUN_USER="$(id -un)"
 
 say() { printf '\n\033[1m== %s\033[0m\n' "$1"; }
+
+# Present on the Hetzner Ubuntu image; absent from some minimal ones, and root
+# does not need it. Defining it away is cleaner than sprinkling `if root` about.
+if [ "$(id -u)" -eq 0 ] && ! command -v sudo >/dev/null; then
+  sudo() { "$@"; }
+fi
 
 say "1/7  System packages"
 sudo apt-get update -qq
@@ -72,7 +82,7 @@ say "6/7  Services"
 sudo cp "$APP_DIR/deploy/triagent.service" /etc/systemd/system/
 sudo cp "$APP_DIR/deploy/triagent-scan.service" /etc/systemd/system/
 sudo cp "$APP_DIR/deploy/triagent-scan.timer" /etc/systemd/system/
-sudo sed -i "s|__USER__|$USER|g; s|__APP_DIR__|$APP_DIR|g" \
+sudo sed -i "s|__USER__|$RUN_USER|g; s|__APP_DIR__|$APP_DIR|g" \
   /etc/systemd/system/triagent.service \
   /etc/systemd/system/triagent-scan.service
 sudo systemctl daemon-reload
