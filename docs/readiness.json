@@ -1,60 +1,60 @@
 {
-  "checkedAt": "2026-09-01T14:57:08.939Z",
+  "checkedAt": "2026-09-04T09:41:49.074Z",
   "summary": {
-    "ready": 0,
-    "action": 4,
-    "blocked": 3,
-    "unreachable": 7
+    "ready": 2,
+    "action": 10,
+    "blocked": 2,
+    "unreachable": 0
   },
   "checks": [
     {
       "id": "did-scout",
       "label": "Scout identity published",
-      "state": "UNREACHABLE",
-      "detail": "/kv/did-de/06d2231b8d001c → 503",
-      "fix": "Nothing to do: the server would not answer, so the note was never checked."
+      "state": "ACTION",
+      "detail": "/kv/did-d5/5ca9ce3f56f8f4 → 404",
+      "fix": "Run the daemon once so it republishes its DID note."
     },
     {
       "id": "did-scribe",
       "label": "Scribe identity published",
-      "state": "UNREACHABLE",
-      "detail": "/kv/did-5a/3a9055d1195317 → 503",
-      "fix": "Nothing to do: the server would not answer, so the note was never checked."
+      "state": "ACTION",
+      "detail": "/kv/did-8d/9808c8fd7cbee3 → 404",
+      "fix": "Run the daemon once so it republishes its DID note."
     },
     {
       "id": "state-size",
       "label": "State note fits the server limit",
-      "state": "UNREACHABLE",
-      "detail": "could not be read — the server returned HTTP 503",
-      "fix": "Nothing to do here: this says the server is unwell, not that the note is wrong."
+      "state": "ACTION",
+      "detail": "no state note readable",
+      "fix": "answeredAuthors is pruned by cooldown age on every save. If this is near the cap, something else in the state is growing without bound."
     },
     {
       "id": "collaboration",
-      "label": "Collaboration record could not be read",
-      "state": "UNREACHABLE",
-      "detail": "Technocore unreachable — nothing checked",
+      "label": "Collaboration on record — but only between our own two keys",
+      "state": "ACTION",
+      "detail": "0 verified, 0 rejected; every counterparty is one of our own two DIDs",
       "fix": "Signatures prove key control, nothing more. Two DIDs held by one operator signing each other proves neither independence nor usefulness, and Flop Labs has published no rule for how such a pair is treated. Worth having; not worth counting as reach. An exchange with an agent we do not control is the thing this check is waiting for."
     },
     {
       "id": "state-persistence",
       "label": "State survives restarts",
-      "state": "UNREACHABLE",
-      "detail": "could not be read — the server returned HTTP 503",
-      "fix": "Nothing to do here: the history is in a note the server would not hand over."
+      "state": "ACTION",
+      "detail": "no readable state note yet",
+      "fix": "The daemon must complete at least two turns and write state to /kv/."
     },
     {
       "id": "room-d-flop-facts",
       "label": "Room /r/d-flop-facts",
-      "state": "UNREACHABLE",
-      "detail": "ownership unreadable, existence not checked — server returned 503",
-      "fix": "Technocore was unreachable. Re-run when it answers; nothing here is ours to fix."
+      "state": "ACTION",
+      "detail": "not claimed, exists",
+      "fix": "Room creation is refused while the service-wide room cap is full; the daemon retries."
     },
     {
       "id": "room-d-scout-telemetry",
       "label": "Room /r/d-scout-telemetry",
-      "state": "UNREACHABLE",
-      "detail": "ownership unreadable, existence not checked — server returned 503",
-      "fix": "Technocore was unreachable. Re-run when it answers; nothing here is ours to fix."
+      "state": "READY",
+      "detail": "claimed, exists",
+      "fix": "Room creation is refused while the service-wide room cap is full; the daemon retries."
     },
     {
       "id": "inference-backend",
@@ -66,9 +66,9 @@
     {
       "id": "ledger",
       "label": "Spend ledger is intact",
-      "state": "ACTION",
-      "detail": "0 receipts across 0 ledger(s), 0 counted, 0 simulated, 0 rejected, 0 malformed — official FLOP spent: 0 (no paid endpoint exists yet)",
-      "fix": "Run the agent, or tools/inference-bench.mjs, to start the ledger."
+      "state": "READY",
+      "detail": "30 receipts across 1 ledger(s), 30 counted, 0 simulated, 0 rejected, 0 malformed — official FLOP spent: 0 (no paid endpoint exists yet)",
+      "fix": "Investigate rejected or malformed receipts before trusting the total."
     },
     {
       "id": "source-watch",
@@ -101,8 +101,8 @@
     {
       "id": "continuous-operation",
       "label": "Runs continuously, not in bursts",
-      "state": "BLOCKED",
-      "detail": "Technocore unreachable — the shared record could not be read",
+      "state": "ACTION",
+      "detail": "0 cycle(s) recorded — not enough for a rate yet",
       "fix": "GitHub drops most scheduled runs. Keep the local agent running, or use an always-on host — a rented validator box would run this too, collapsing two decisions into one."
     }
   ],
