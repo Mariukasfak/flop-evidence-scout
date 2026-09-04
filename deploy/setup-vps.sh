@@ -117,14 +117,11 @@ rm -f "$APP_DIR/data/local/lease-holder-id"
 grep -q '^LEASE_HOLDER=' "$APP_DIR/.env.local" 2>/dev/null || echo 'LEASE_HOLDER=vps' >> "$APP_DIR/.env.local"
 
 say "6/7  Services"
-sudo cp "$APP_DIR/deploy/triagent.service" /etc/systemd/system/
-sudo cp "$APP_DIR/deploy/triagent-scan.service" /etc/systemd/system/
-sudo cp "$APP_DIR/deploy/triagent-scan.timer" /etc/systemd/system/
-sudo sed -i "s|__USER__|$RUN_USER|g; s|__APP_DIR__|$APP_DIR|g" \
-  /etc/systemd/system/triagent.service \
-  /etc/systemd/system/triagent-scan.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now triagent.service triagent-scan.timer
+# One place installs the units, and the update timer runs the same script on a
+# schedule — so a unit fixed in the repository deploys itself, exactly like the
+# code does.
+sudo bash "$APP_DIR/deploy/reinstall-units.sh" "$RUN_USER" "$APP_DIR"
+sudo systemctl enable --now triagent.service triagent-scan.timer triagent-update.timer
 
 say "7/7  Check"
 sleep 5

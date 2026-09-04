@@ -1,0 +1,16 @@
+[Unit]
+Description=Check GitHub for new agent code every 10 minutes
+
+[Timer]
+# Ten minutes is chosen against how this repository is actually worked: fixes
+# arrive in small bursts during a session, and a change that reaches the server
+# within ten minutes of the push needs no one to remember to deploy it.
+OnBootSec=3min
+OnUnitActiveSec=10min
+# Spread against the scan timer and against every other server doing the same
+# thing on the hour.
+RandomizedDelaySec=90
+Persistent=true
+
+[Install]
+WantedBy=timers.target

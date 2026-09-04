@@ -1,0 +1,33 @@
+[Unit]
+Description=FLOP evidence scout — pull new code and re-install units
+Documentation=https://github.com/Mariukasfak/flop-evidence-scout
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__APP_DIR__
+
+# Why a pull here, when daemon.mjs deliberately refuses to do one itself.
+#
+# That refusal is about the operator's PC: another agent may be mid-edit there,
+# and fetching over uncommitted work is how somebody's afternoon disappears.
+# This machine is a deployment, not a workstation — nothing is authored here,
+# so the same pull that is reckless at home is simply how the server learns
+# what was decided.
+#
+# --ff-only is the whole safety argument. If this checkout has somehow diverged
+# the pull fails and the timer reports it, rather than inventing a merge nobody
+# reviewed. The daemon then notices HEAD moved, stands down cleanly and comes
+# back on the new code — a mechanism that already exists and is tested.
+ExecStart=/usr/bin/git pull --ff-only
+
+# The unit files travel in the same repository as the code, and a fix to one is
+# as much a deployment as a fix to the other — the data-dir bug on 2026-09-04
+# lived in a unit file, not in any .mjs, and would not have shipped itself.
+ExecStart=/usr/bin/env bash __APP_DIR__/deploy/reinstall-units.sh __USER__ __APP_DIR__
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=triagent-update
