@@ -262,6 +262,47 @@ describe('tclk payee lane: lock, verify, reveal', () => {
     assert.equal(state.completed[0].payer, payer.did);
   });
 
+  /**
+   * The venue is out of rooms, so `mb-p-tclk-<contract>` never opens and the
+   * whole board locks and reveals in `tclk-offers` instead — 1,260 locks and
+   * 872 reveals there in a 4.6-hour window measured 2026-09-04, none anywhere
+   * else. Waiting only in the deal room is what closed 50 of our 55 deals with
+   * "payer did not lock within 5 min".
+   */
+  test('a lock the payer could only post on the offer board is found, and answered there', async () => {
+    const { venue, me, payer, engine, deal } = await acceptedDeal();
+    venue.say(OFFER_ROOM, payer.did, encodeFrame({ type: 'lock', from: payer.did, contract: deal.contract, rail: 'paper', ref: deal.contract }));
+    const { ns, key } = paperNote(deal.contract);
+    venue.notes.set(`${ns}/${key}`, encodePaperRecord({ status: 'locked', lock: 'hash', statement: deal.statement, refundAfterMs: deal.offer.refundAfterMs }));
+
+    assert.equal((await engine.runTurn()).action, 'lock_verified', 'the room a signed frame sits in is not what makes it ours');
+    const claimed = await engine.runTurn();
+    assert.equal(claimed.action, 'deal_claimed');
+    assert.equal(claimed.room, OFFER_ROOM, 'the answer goes where the payer spoke');
+
+    const ours = venue.rooms.get(OFFER_ROOM).filter((m) => m.from === me.did).map((m) => m.text);
+    const reveal = ours.map(decodeFrame).find((f) => f?.type === 'reveal');
+    assert.ok(reveal, 'the reveal is on the board, not in a room that cannot be opened');
+    assert.equal(opensStatement(reveal.secret, deal.statement), true);
+    assert.equal(ours.map(decodeFrame).find((f) => f?.type === 'receipt')?.outcome, 'claimed');
+    assert.equal((venue.rooms.get(deal.room) || []).length, 0, 'and nothing was written into the deal room at all');
+    assert.equal(engine.load().completed.length, 1);
+  });
+
+  test('a lock on the offer board still has to be signed by our payer, for our contract', async () => {
+    const { venue, payer, engine, deal } = await acceptedDeal();
+    const { ns, key } = paperNote(deal.contract);
+    venue.notes.set(`${ns}/${key}`, encodePaperRecord({ status: 'locked', lock: 'hash', statement: deal.statement, refundAfterMs: deal.offer.refundAfterMs }));
+
+    venue.say(OFFER_ROOM, generateIdentity().did, encodeFrame({ type: 'lock', from: payer.did, contract: deal.contract, rail: 'paper', ref: deal.contract }));
+    assert.equal((await engine.runTurn()).action, 'waiting_for_lock', 'a frame whose signer is not its own `from` is noise on any board');
+
+    venue.say(OFFER_ROOM, payer.did, encodeFrame({ type: 'lock', from: payer.did, contract: '0x' + '7'.repeat(64), rail: 'paper', ref: deal.contract }));
+    assert.equal((await engine.runTurn()).action, 'waiting_for_lock', 'somebody else\'s deal on a shared board is not ours');
+
+    assert.equal(venue.posts.filter((p) => p.text.includes('"type":"reveal"')).length, 0);
+  });
+
   test('a rail record that moved under us loses the CAS but the reveal still stands', async () => {
     const { venue, payer, engine, deal } = await acceptedDeal();
     venue.say(deal.room, payer.did, encodeFrame({ type: 'lock', from: payer.did, contract: deal.contract, rail: 'paper', ref: deal.contract }));

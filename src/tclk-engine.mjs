@@ -378,8 +378,50 @@ export class TclkEngine {
     // would open one for the sole purpose of saying nothing happened.
     if ((messages || []).length > 0 && !deal.roomSeen) { deal.roomSeen = true; this.save(); }
 
-    const lock = this.#framesIn(messages).map(({ frame }) => frame).find((f) =>
-      f.type === 'lock' && f.from === deal.offer.from && f.contract === deal.contract && f.rail === 'paper');
+    const isOurLock = (f) => f.type === 'lock' && f.from === deal.offer.from
+      && f.contract === deal.contract && f.rail === 'paper';
+    let lock = this.#framesIn(messages).map(({ frame }) => frame).find(isOurLock);
+    let lockRoom = deal.room;
+
+    /**
+     * ...and if it is not there, the offer room, because the deal room the
+     * spec names cannot be opened on this venue.
+     *
+     * SPEC §2 binds a deal to `mb-p-tclk-<contract>`, and the comment above
+     * `#noteRefusal` records why we can still accept without a room budget:
+     * the *payer* opens that room with the lock. Measured since, that premise
+     * does not hold — the payer cannot open it either. The service is at
+     * 54,456 of 81,920 rooms, every new one is refused, and the whole venue
+     * has moved its deal traffic into `tclk-offers`: upstream's own count over
+     * ~36 hours (flop-labs/tclk#61) is 193 locks and 173 reveals on the offer
+     * board and zero in any deal room. Our own board census on 2026-09-04
+     * agrees — 1,260 locks and 872 reveals in a 4.6-hour window, all of them
+     * there.
+     *
+     * So the strict reading made this lane wait in a room that cannot exist
+     * while the counterparty was locking in plain sight: all 50 of our
+     * abandoned deals closed on "payer did not lock within 5 min", against 5
+     * completed. Upstream proposes exactly this fallback (#62,
+     * `roomBinding=offer-room-fallback`); it is not merged, so this is our
+     * reading of an unmergeable spec, not a spec change.
+     *
+     * What does NOT relax: the frame still has to be signed by the payer named
+     * in the offer, still has to carry our contract id and the paper rail, and
+     * the rail note below is still read and compared term by term before any
+     * work is done. The room a frame sits in was never the thing that made it
+     * trustworthy — the signature is (`#framesIn`), and the contract id is
+     * unique, so there is nothing in `tclk-offers` for it to collide with.
+     */
+    if (!lock) {
+      let onTheBoard;
+      try {
+        ({ messages: onTheBoard } = await this.client.readRoom(this.offerRoom, { limit: READ_LIMIT, format: 'json' }));
+      } catch (err) {
+        return { action: 'read_failed', error: err.message };
+      }
+      lock = this.#framesIn(onTheBoard).map(({ frame }) => frame).find(isOurLock);
+      if (lock) lockRoom = this.offerRoom;
+    }
     if (!lock) return { action: 'waiting_for_lock', contract: deal.contract };
 
     /**
@@ -416,6 +458,12 @@ export class TclkEngine {
      * all; for those the contract id is what both sides already mean.
      */
     deal.railRef = typeof lock.ref === 'string' && lock.ref ? lock.ref : deal.contract;
+    /**
+     * Answer where the payer spoke. A reveal posted into a room that could not
+     * be opened is the work done and the claim never made — the same refusal
+     * that kept the lock off the deal room would swallow our secret.
+     */
+    deal.lockRoom = lockRoom;
     deal.lockSeenAt = now;
     this.save();
     return { action: 'lock_verified', contract: deal.contract };
@@ -432,9 +480,14 @@ export class TclkEngine {
     // 133 get a line that says so, because a reveal with no work behind it is
     // exactly what the spec warns the payer about, and we will not dress it up.
     const work = await this.#work(deal, { backend, real, ledgerPath });
-    await this.#post(deal.room, null, work);
+    // Where the lock was found, which is the deal room when the venue could
+    // open one and `tclk-offers` when it could not. Older deals in flight
+    // across this change carry no `lockRoom`, and for them the deal room is
+    // what both sides already meant.
+    const room = deal.lockRoom || deal.room;
+    await this.#post(room, null, work);
 
-    const revealed = await this.#post(deal.room, {
+    const revealed = await this.#post(room, {
       type: 'reveal', from: this.identity.did, contract: deal.contract, secret: deal.secret
     });
     if (!revealed) return { action: 'post_failed', contract: deal.contract, step: 'reveal' };
@@ -472,7 +525,7 @@ export class TclkEngine {
      */
     const settled = await this.#railStatus(deal.contract);
     if (settled === 'claimed') {
-      await this.#post(deal.room, {
+      await this.#post(room, {
         type: 'receipt', from: this.identity.did, contract: deal.contract, outcome: 'claimed',
         rail: 'paper', ref: deal.railRef || deal.contract
       });
@@ -489,7 +542,7 @@ export class TclkEngine {
     return {
       action: 'deal_claimed',
       contract: deal.contract,
-      room: deal.room,
+      room,
       railClaimed,
       receipt: settled === 'claimed',
       work: work.slice(0, 120)
