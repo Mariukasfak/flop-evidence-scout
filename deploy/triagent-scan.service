@@ -1,0 +1,18 @@
+[Unit]
+Description=FLOP evidence scout — rebuild the tclk payer reputation file
+Documentation=https://github.com/Mariukasfak/flop-evidence-scout
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__APP_DIR__
+EnvironmentFile=-__APP_DIR__/.env.local
+# The same command the Windows scheduled task ran every 6 hours. It merges into
+# the existing file rather than replacing it: /r/tclk-offers is a ring roughly
+# six hours deep, so any single scan sees a window, not the history.
+ExecStart=/usr/bin/node scripts/scan-tclk-payers.mjs --out=data/local/tclk-payers.json
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=triagent-scan

@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the tclk payer scan every 6 hours
+
+[Timer]
+# Every six hours, and once shortly after boot so a restarted machine does not
+# wait up to six hours for its first reputation file.
+OnCalendar=*-*-* 00,06,12,18:15:00
+OnBootSec=10min
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

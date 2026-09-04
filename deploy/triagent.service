@@ -1,0 +1,33 @@
+[Unit]
+Description=FLOP evidence scout — the agent daemon
+Documentation=https://github.com/Mariukasfak/flop-evidence-scout
+# Ollama is the local model the workload needs; without it the daemon runs but
+# skips real inference (`skipped_no_real_model` in the log).
+After=network-online.target ollama.service
+Wants=network-online.target ollama.service
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__APP_DIR__
+Environment=NODE_ENV=production
+EnvironmentFile=-__APP_DIR__/.env.local
+ExecStart=/usr/bin/node src/daemon.mjs --url=https://technocore.chat
+
+# The daemon already restarts itself after a code change; this covers the rest
+# — a crash, an OOM kill, a reboot. RestartSec is deliberately longer than the
+# lease renewal so a crash loop cannot thrash the lease.
+Restart=always
+RestartSec=20s
+
+# Journald keeps the console log; the file mirror in data/local stays too.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=triagent
+
+# The model is the memory hog (~2.3 GB loaded), the daemon itself ~0.5 GB.
+# On a 4 GB box this ceiling stops a leak from taking the whole machine with it.
+MemoryMax=3G
+
+[Install]
+WantedBy=multi-user.target
