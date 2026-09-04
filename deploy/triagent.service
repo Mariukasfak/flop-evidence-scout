@@ -25,6 +25,14 @@ ExecStart=/usr/bin/node src/daemon.mjs --url=https://technocore.chat --interval-
 Restart=always
 RestartSec=20s
 
+# Long enough for the daemon to finish the cycle it is in and hand the lease
+# back. systemd's default is 90s; a cycle on this box runs 100–125s, so a stop
+# during one was killed before it could release, and the next start then sat
+# out the remaining nine minutes of a lease it already owned. Measured that way
+# on 2026-09-04. It matters more now that the update timer restarts the agent
+# on its own: a deploy that costs nine idle minutes is a deploy nobody wants.
+TimeoutStopSec=180
+
 # Journald keeps the console log; the file mirror in data/local stays too.
 StandardOutput=journal
 StandardError=journal
