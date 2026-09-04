@@ -57,12 +57,19 @@ sudo apt-get install -y -qq git curl unzip ca-certificates
 # machine 2026-09-04, ollama sits at 58 MB between jobs and only pages the model
 # in when there is work. That is exactly the shape swap handles well.
 #
+# 4 GB rather than the 2 GB this started with, because the server showed
+# something the Windows measurement never ran long enough to see: llama-server
+# grows about 660 MB an hour and had reached 5.1 GB after 4.5 hours, filling
+# 2 GB of swap exactly. triagent-ollama-recycle.timer is what actually holds
+# that down; the extra swap is the net under it, for the hours when the
+# recycler is broken and nobody has noticed yet.
+#
 # Skipped above 6 GB, where it buys nothing, so this same script stays correct
 # after a later rescale.
 TOTAL_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
 if [ "$TOTAL_MB" -lt 6000 ] && [ -z "$(swapon --show --noheadings 2>/dev/null)" ]; then
-  echo "   ${TOTAL_MB} MB of RAM and no swap — adding 2 GB"
-  sudo fallocate -l 2G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
+  echo "   ${TOTAL_MB} MB of RAM and no swap — adding 4 GB"
+  sudo fallocate -l 4G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096 status=none
   sudo chmod 600 /swapfile
   sudo mkswap -q /swapfile
   sudo swapon /swapfile
@@ -121,7 +128,7 @@ say "6/7  Services"
 # schedule — so a unit fixed in the repository deploys itself, exactly like the
 # code does.
 sudo bash "$APP_DIR/deploy/reinstall-units.sh" "$RUN_USER" "$APP_DIR"
-sudo systemctl enable --now triagent.service triagent-scan.timer triagent-update.timer
+sudo systemctl enable --now triagent.service triagent-scan.timer triagent-update.timer triagent-ollama-recycle.timer
 
 say "7/7  Check"
 sleep 5

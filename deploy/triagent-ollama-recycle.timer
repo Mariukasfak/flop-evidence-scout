@@ -1,0 +1,15 @@
+[Unit]
+Description=Check every quarter hour whether ollama needs recycling
+
+[Timer]
+# At the measured growth rate (~660 MB/h) the threshold is reached in a bit
+# over an hour, so a quarter-hourly check costs almost nothing and never lets
+# the model sit in swap for long. The check itself reads two lines from /proc
+# and usually exits without touching anything.
+OnCalendar=*:0/15
+OnBootSec=20min
+Persistent=false
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,14 @@
+[Unit]
+Description=Recycle ollama when its model server has outgrown this box's RAM
+After=ollama.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=__APP_DIR__
+# Root, not __USER__: this restarts a system unit. Everything it reads lives in
+# /proc, so it needs nothing from the agent's environment.
+User=root
+ExecStart=/usr/bin/bash __APP_DIR__/deploy/ollama-recycle.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=triagent-ollama-recycle

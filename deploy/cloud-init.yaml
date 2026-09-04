@@ -17,7 +17,7 @@ write_files:
       date
       echo "=== 1/5 swap ==="
       if [ -z "$(swapon --show --noheadings)" ]; then
-        fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048
+        fallocate -l 4G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=4096
         chmod 600 /swapfile
         mkswap -q /swapfile
         swapon /swapfile

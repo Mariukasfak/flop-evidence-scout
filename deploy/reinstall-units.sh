@@ -17,7 +17,7 @@ set -euo pipefail
 RUN_USER="${1:?usage: reinstall-units.sh <user> <app-dir>}"
 APP_DIR="${2:?usage: reinstall-units.sh <user> <app-dir>}"
 
-UNITS="triagent.service triagent-scan.service triagent-scan.timer triagent-update.service triagent-update.timer"
+UNITS="triagent.service triagent-scan.service triagent-scan.timer triagent-update.service triagent-update.timer triagent-ollama-recycle.service triagent-ollama-recycle.timer"
 
 changed=0
 agent_changed=0
