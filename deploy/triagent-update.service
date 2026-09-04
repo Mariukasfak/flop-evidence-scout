@@ -21,6 +21,19 @@ WorkingDirectory=__APP_DIR__
 # the pull fails and the timer reports it, rather than inventing a merge nobody
 # reviewed. The daemon then notices HEAD moved, stands down cleanly and comes
 # back on the new code — a mechanism that already exists and is tested.
+# ...but --ff-only refuses over a dirty working copy too, and this checkout is
+# almost never clean: the daemon rewrites docs/ every cycle. Measured on the
+# server 2026-09-04, every run from 15:56 UTC onward aborted on
+# docs/audit-history.json and docs/status.html, and the box sat two commits
+# behind while every unit still reported active — the update was failing
+# quietly, which is the only way a deployment goes stale without anyone
+# noticing.
+#
+# Discarding is safe precisely because nothing authors docs/ here. It is build
+# output: the daemon regenerates it next cycle, and scripts/publish-docs.mjs
+# takes the remote as its base and rebuilds rather than merging two renders.
+ExecStartPre=/usr/bin/git checkout -- docs
+
 ExecStart=/usr/bin/git pull --ff-only
 
 # The unit files travel in the same repository as the code, and a fix to one is
