@@ -86,16 +86,22 @@ export function loadPairs(filePath, { cap = DEFAULT_PAIR_CAP_ENTRIES } = {}) {
     for (const [did, v] of Object.entries(raw)) {
       if (typeof did !== 'string' || !did || !v || typeof v !== 'object') continue;
       const given = Number.isFinite(v.given) ? Math.max(0, Math.floor(v.given)) : 0;
+      const nots = Number.isFinite(v.nots) ? Math.max(0, Math.floor(v.nots)) : 0;
       const praisedUs = v.praisedUs === true;
       // Fold an abbreviated entry into the full DID for the same worker when
       // both are present. Taking the larger count and the stricter reciprocal
       // flag means a merge can only ever tighten a budget, never hand one back.
       const existing = [...workers.keys()].find((k) => k !== did && didsMatch(k, did));
       const key = existing && !isAbbreviatedDid(existing) ? existing : did;
-      const prior = workers.get(key) || workers.get(existing) || { given: 0, praisedUs: false };
+      const prior = workers.get(key) || workers.get(existing) || { given: 0, nots: 0, praisedUs: false };
       if (existing && existing !== key) workers.delete(existing);
       workers.set(key, {
         given: Math.max(prior.given, given),
+        // Same rule as `given`, and the reason this field is read back at all:
+        // a budget that does not survive a restart is not a budget. The lane
+        // spent four turns on one worker in a test that restarted between
+        // them, which is what a daemon does every deploy.
+        nots: Math.max(prior.nots || 0, nots),
         praisedUs: prior.praisedUs || praisedUs
       });
     }
@@ -185,6 +191,46 @@ export function recordUseful(book, workerDid) {
   // first", which is what the cap trims by.
   book.workers.delete(key);
   book.workers.set(key, { ...entry, given: entry.given + 1 });
+  return book;
+}
+
+/**
+ * The same ceiling, applied to `not` verdicts, and the measurement that made
+ * it necessary.
+ *
+ * The useful lane has had a budget since the pair cap was found. The `not`
+ * lane never had one, and it is the lane that runs most: read off the live
+ * tape 2026-09-04, a 1.2-hour window held 105 attestations from us, 85 of them
+ * `not`, spread over just 20 distinct workers — one worker took 43 and the
+ * next 24. Over the same period the board's `attestations_given` moved about
+ * 1.4 an hour against the ~82 an hour we were posting.
+ *
+ * Two is what the only published pair rule allows in the direction we can
+ * check, so it is what this assumes for the other. Even if a third `not` did
+ * score, forty-three verdicts at one peer is forty-one messages of noise and
+ * -3 apiece aimed at somebody who has already been told.
+ */
+export const NOT_CAP = 2;
+
+export function notBudgetLeft(book, workerDid) {
+  return Math.max(0, NOT_CAP - (entryFor(book, workerDid)?.nots || 0));
+}
+
+/** Every worker we have already called out twice — what the thin picker skips. */
+export function notSpentWorkers(book) {
+  const out = new Set();
+  for (const [key] of book.workers) if (notBudgetLeft(book, key) <= 0) out.add(key);
+  return out;
+}
+
+/** Spend one `not` on a worker. After the post lands, exactly like `recordUseful`. */
+export function recordNot(book, workerDid) {
+  const did = String(workerDid ?? '').trim();
+  if (!did) return book;
+  const key = keyFor(book, did) || did;
+  const entry = book.workers.get(key) || { given: 0, praisedUs: false };
+  book.workers.delete(key);
+  book.workers.set(key, { ...entry, nots: (entry.nots || 0) + 1 });
   return book;
 }
 

@@ -55,7 +55,7 @@ import {
 } from './kibble.mjs';
 import { FACTS } from './flop-facts.mjs';
 import {
-  loadPairs, savePairs, cappedWorkers, recordUseful, markPraisedUs, pairSummary
+  loadPairs, savePairs, cappedWorkers, recordUseful, markPraisedUs, pairSummary, recordNot, notSpentWorkers
 } from './kibble-pairs.mjs';
 import { nextQuestion, jobLine, jobIdFor } from './kibble-jobs.mjs';
 import { boardBriefs, instrumentBriefs, nextBrief, briefLine } from './kibble-briefs.mjs';
@@ -1560,6 +1560,10 @@ export class KibbleEngine {
     const found = pickThinDelivery(jobs, {
       selfDid: this.validatorIdentity.did,
       excludeDids: [this.workerIdentity.did],
+      // The budget the useful lane has always had. Measured on the tape
+      // 2026-09-04, this lane without one put 43 verdicts on one worker and 24
+      // on the next inside 1.2 hours — see NOT_CAP in kibble-pairs.mjs.
+      skipWorkerDids: notSpentWorkers(this.pairs),
       skipJobIds: done
     });
     if (!found) {
@@ -1643,6 +1647,11 @@ export class KibbleEngine {
     }
 
     this.validatorGuardrails.recordSent(line);
+    // Spend the worker's `not` budget, after the post landed and never before,
+    // exactly as the useful lane does. Without this the picker had no memory
+    // of who it had already answered and returned to the same few all day.
+    recordNot(this.pairs, found.delivery.from);
+    if (this.pairsPath) savePairs(this.pairs, this.pairsPath);
     this.localState.attestsPosted += 1;
     this.localState.lastAttestJobId = found.job.jobId;
     this.localState.lastAttestAt = new Date().toISOString();

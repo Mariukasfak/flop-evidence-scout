@@ -7,6 +7,7 @@ import path from 'node:path';
 import { generateIdentity } from '../src/identity.mjs';
 import { KibbleEngine, didCardUrl } from '../src/kibble-engine.mjs';
 import { reconstructBoard } from '../src/kibble.mjs';
+import { NOT_CAP } from '../src/kibble-pairs.mjs';
 import { QUESTION_BANK, jobIdFor, jobLine as questionJobLine } from '../src/kibble-jobs.mjs';
 import { boardBriefs, instrumentBriefs, nextBrief, briefLine } from '../src/kibble-briefs.mjs';
 import { PAIR_CAP, usefulBudgetLeft } from '../src/kibble-pairs.mjs';
@@ -532,11 +533,20 @@ describe('KibbleEngine validator batch', () => {
   const OUTSIDER2 = 'did:key:z6MkOutsiderEEEEEEEEEEEEEEEEEEEEEEEEEEEEE';
 
   /** N jobs, each with one template delivery from a stranger. */
-  const roomOfSlop = (n) => Array.from({ length: n }, (_, i) => {
+  /**
+   * One worker per job by default. The fixture used to put every delivery on
+   * one DID, which stopped meaning "a room full of slop" the day the lane
+   * started spending a per-worker budget: the batch would cap out after two
+   * and the test would still pass, while testing nothing about batching.
+   * `sameWorker` keeps the old shape for the test that wants it.
+   */
+  const slopWorker = (i) => OUTSIDER2.slice(0, -4) + String(i).padStart(4, '0');
+  const roomOfSlop = (n, { sameWorker = false } = {}) => Array.from({ length: n }, (_, i) => {
     const id = 'k000000' + String(i).padStart(4, '0');
+    const from = sameWorker ? OUTSIDER2 : slopWorker(i);
     return [
-      { text: `JOB v1 | ${id} | explain | T ${i} | A long enough body to be a real question here.`, from: OUTSIDER2, seq: i * 2 + 1 },
-      { text: `DELIVER v1 | ${id} | Completed work on T ${i} successfully.`, from: OUTSIDER2, seq: i * 2 + 2 }
+      { text: `JOB v1 | ${id} | explain | T ${i} | A long enough body to be a real question here.`, from, seq: i * 2 + 1 },
+      { text: `DELIVER v1 | ${id} | Completed work on T ${i} successfully.`, from, seq: i * 2 + 2 }
     ];
   }).flat();
 
@@ -552,6 +562,31 @@ describe('KibbleEngine validator batch', () => {
     assert.equal(result.action, 'attested_not');
     assert.ok(result.posted > 1, `posted ${result.posted}, the whole point is more than one`);
     assert.equal(client.posts.length, result.posted);
+  });
+
+  /**
+   * Measured on the live tape 2026-09-04: 105 attestations from us inside 1.2
+   * hours, spread over 20 workers, 43 of them landing on one. The useful lane
+   * has had a per-worker budget since the pair cap was found; this lane had
+   * none, and it is the one that runs most.
+   */
+  test('a worker already called out twice is left alone, however much slop they post', async () => {
+    const client = makeClient({ roomMessages: roomOfSlop(12, { sameWorker: true }) });
+    const pairsPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'kibble-pairs-')), 'pairs.json');
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client, pairsPath
+    });
+
+    let posted = 0;
+    for (let turn = 0; turn < 4; turn++) posted += (await engine.runValidatorTurn({ maxMs: 5000 })).posted || 0;
+    assert.equal(posted, NOT_CAP, `posted ${posted} verdicts at one worker; the budget is ${NOT_CAP}`);
+
+    // And the budget survives a restart, because it is the file the next
+    // process loads, not anything held in this one.
+    const reloaded = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client, pairsPath
+    });
+    assert.equal((await reloaded.runValidatorTurn({ maxMs: 5000 })).posted || 0, 0);
   });
 
   test('but paces itself rather than emptying the room in one go', async () => {

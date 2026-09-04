@@ -409,17 +409,43 @@ function isOneOfOurs(candidate, selfDid, excludeDids = []) {
  * attested — the board ignores duplicate ATTESTs per DID, and attesting our own
  * work is the first thing the spec forbids.
  */
-export function pickThinDelivery(jobs, { selfDid, excludeDids = [], skipJobIds = new Set() } = {}) {
+export function pickThinDelivery(jobs, {
+  selfDid, excludeDids = [], skipJobIds = new Set(), skipWorkerDids = new Set()
+} = {}) {
   for (const job of [...jobs.values()].sort((a, b) => (b.postedSeq ?? 0) - (a.postedSeq ?? 0))) {
     if (skipJobIds.has(job.jobId)) continue;
     if (job.poster && isOneOfOurs(job.poster, selfDid, excludeDids)) continue;
     if (job.attests.some((a) => sameDid(a.from, selfDid))) continue;
 
     const delivery = job.results.find((r) => !isOneOfOurs(r.from, selfDid, excludeDids)
+      && !isCappedWorker(skipWorkerDids, r.from)
       && isThinDelivery(r.summary));
     if (delivery) return { job, delivery };
   }
   return null;
+}
+
+/**
+ * Is this worker's budget spent? Exact first, then the abbreviated leftovers.
+ *
+ * Both the budget book and the board now hold full DIDs, so the Set lookup
+ * answers almost every call in constant time. The loop exists only for entries
+ * banked before that was true, and it touches nothing else: a full DID that
+ * did not match exactly cannot match one either.
+ *
+ * Shared by both pickers. It lived inside `pickRealDelivery` while only the
+ * useful lane had a budget, and passing `skipWorkerDids` to the thin picker
+ * before this existed did nothing at all — the option was accepted in name and
+ * dropped on the floor.
+ */
+function isCappedWorker(skipWorkerDids, did) {
+  if (!skipWorkerDids || skipWorkerDids.size === 0) return false;
+  if (skipWorkerDids.has(did)) return true;
+  const loose = isAbbreviatedDid(did);
+  for (const entry of skipWorkerDids) {
+    if ((loose || isAbbreviatedDid(entry)) && didsMatch(entry, did)) return true;
+  }
+  return false;
 }
 
 /**
@@ -610,24 +636,7 @@ export function pickRealDelivery(jobs, {
   selfDid, excludeDids = [], skipJobIds = new Set(), minBodyChars = 80,
   skipWorkerDids = new Set(), maxPeerUseful = 2
 } = {}) {
-  /**
-   * Exact first, then the abbreviated leftovers.
-   *
-   * Both the budget book and the board now hold full DIDs, so the Set lookup
-   * answers almost every call in constant time. The loop exists only for
-   * entries banked before that was true, and it touches nothing else: a full
-   * DID that did not match exactly cannot match one either.
-   */
-  const capped = (did) => {
-    if (skipWorkerDids.has(did)) return true;
-    // A scan is only needed where one side is abbreviated: two different full
-    // DIDs that failed the exact test cannot match under any reading.
-    const loose = isAbbreviatedDid(did);
-    for (const entry of skipWorkerDids) {
-      if ((loose || isAbbreviatedDid(entry)) && didsMatch(entry, did)) return true;
-    }
-    return false;
-  };
+  const capped = (did) => isCappedWorker(skipWorkerDids, did);
   for (const job of [...jobs.values()].sort((a, b) => (b.postedSeq ?? 0) - (a.postedSeq ?? 0))) {
     if (skipJobIds.has(job.jobId)) continue;
     if (!job.known) continue;          // we cannot judge an answer to a question we never read
