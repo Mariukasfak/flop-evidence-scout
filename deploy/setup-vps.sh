@@ -16,13 +16,22 @@
 set -euo pipefail
 
 REPO="https://github.com/Mariukasfak/flop-evidence-scout.git"
-APP_DIR="${APP_DIR:-$HOME/TriAgent}"
-BUNDLE="${BUNDLE:-$HOME/perkelimas.zip}"
-MODEL="${OLLAMA_MODEL:-qwen2.5:3b}"
+
 # `id -un` rather than $USER: sudo, cron and a bare `ssh root@host` all reach
 # this script with $USER unset or set to somebody else, and an empty User= line
 # is what turns a working unit into "Failed to determine user credentials".
 RUN_USER="$(id -un)"
+
+# ollama reads $HOME to find its model store and panics without it. cloud-init
+# runcmd and cron both hand a script an environment with no HOME; measured on
+# the Helsinki box 2026-09-04, where the model pull died three times over for
+# exactly this. It has to be resolved before the paths below, which use it, and
+# before `set -u` turns an unset HOME into an abort three lines in.
+export HOME="${HOME:-$(getent passwd "$RUN_USER" | cut -d: -f6)}"
+
+APP_DIR="${APP_DIR:-$HOME/TriAgent}"
+BUNDLE="${BUNDLE:-$HOME/perkelimas.zip}"
+MODEL="${OLLAMA_MODEL:-qwen2.5:3b}"
 
 say() { printf '\n\033[1m== %s\033[0m\n' "$1"; }
 

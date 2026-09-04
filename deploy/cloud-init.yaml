@@ -10,6 +10,9 @@ write_files:
     content: |
       #!/usr/bin/env bash
       exec >>/root/PARUOSIMAS.txt 2>&1
+      # cloud-init paleidzia runcmd be $HOME, o ollama be jo nezino kur laikyti
+      # modelius ir krenta su "panic: $HOME is not defined". Ismatuota 2026-09-04.
+      export HOME=/root
       set -x
       date
       echo "=== 1/5 swap ==="
