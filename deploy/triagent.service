@@ -12,7 +12,12 @@ User=__USER__
 WorkingDirectory=__APP_DIR__
 Environment=NODE_ENV=production
 EnvironmentFile=-__APP_DIR__/.env.local
-ExecStart=/usr/bin/node src/daemon.mjs --url=https://technocore.chat
+# These flags are the ones paleisti-nuolat.bat has always passed, and they are
+# not decoration: without --data-dir the daemon resolves `data`, not
+# `data/local`, and quietly starts from an empty state beside the real one.
+# Measured on the first server boot 2026-09-04 — it ran for eleven minutes with
+# the right identity and no memory of five completed contracts.
+ExecStart=/usr/bin/node src/daemon.mjs --url=https://technocore.chat --interval-ms=60000 --data-dir=data/local --docs-dir=data/local/docs
 
 # The daemon already restarts itself after a code change; this covers the rest
 # — a crash, an OOM kill, a reboot. RestartSec is deliberately longer than the
