@@ -131,7 +131,13 @@ describe('tclk payee lane: accepting', () => {
     assert.equal(result.payer, proven.did, 'trust outranks recency');
   });
 
-  test('an unknown payer is still welcome — a first appearance is the second-best signal there is', async () => {
+  /**
+   * A file we cannot judge by must not close the lane. `loadReputation`
+   * degrades to empty rather than throwing, so "nobody is proven" is what an
+   * unbuilt file and a room of strangers both look like — and only one of
+   * those is a reason to accept nobody.
+   */
+  test('an empty reputation file means accept carefully, never accept nobody', async () => {
     const venue = makeVenue(); const me = generateIdentity(); const stranger = generateIdentity();
     const repFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tclk-rep-')), 'payers.json');
     fs.writeFileSync(repFile, JSON.stringify({ updatedAt: null, payers: {} }));
@@ -140,6 +146,31 @@ describe('tclk payee lane: accepting', () => {
     const engine = engineFor(venue, me, { payerRepPath: repFile });
 
     assert.equal((await engine.runTurn()).payer, stranger.did);
+  });
+
+  /**
+   * Measured on the board 2026-09-04: an offer from a payer who has finished
+   * before reaches a lock 33.8% of the time, one from a payer nobody has seen
+   * 2.0% — worse than a payer already watched to walk away (7.7%). A first
+   * appearance is the weakest signal here, not the second-best one, and 65% of
+   * offers come from proven payers, so refusing the rest costs no throughput.
+   */
+  test('once the file can judge, a stranger is refused however new the offer is', async () => {
+    const venue = makeVenue(); const me = generateIdentity();
+    const proven = generateIdentity(); const stranger = generateIdentity();
+    const repFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tclk-rep-')), 'payers.json');
+    const payers = { [proven.did]: { tried: 4, done: 3 } };
+    for (let i = 0; i < 120; i++) payers['did:key:z6Mkfill' + i] = { tried: 3, done: 1 };
+    fs.writeFileSync(repFile, JSON.stringify({ updatedAt: new Date().toISOString(), payers }));
+
+    venue.say(OFFER_ROOM, proven.did, encodeFrame(payerOffer(proven)));
+    venue.say(OFFER_ROOM, stranger.did, encodeFrame(payerOffer(stranger)));   // newer: would win on a tie
+    assert.equal((await engineFor(venue, me, { payerRepPath: repFile }).runTurn()).payer, proven.did);
+
+    const alone = makeVenue();
+    alone.say(OFFER_ROOM, stranger.did, encodeFrame(payerOffer(stranger)));
+    const result = await engineFor(alone, me, { payerRepPath: repFile }).runTurn();
+    assert.equal(result.action, 'no_acceptable_offer', 'a board of strangers is a board to sit out');
   });
 
   test('refuses an offer that names no protocol, however new it is', async () => {
@@ -641,8 +672,10 @@ describe('the lane remembers what a deal taught it', () => {
     const repFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tclk-rep-')), 'payers.json');
     const engine = engineFor(venue, me, { payerRepPath: repFile });
 
-    // Five hundred payers arrive from the room after we loaded an empty store.
-    const scanned = {};
+    // Five hundred payers arrive from the room after we loaded an empty store,
+    // our payer among them — the lane will not accept a stranger once the file
+    // is big enough to judge by.
+    const scanned = { [payer.did]: { tried: 2, done: 1 } };
     for (let i = 0; i < 500; i++) scanned['did:key:z6Mkscan' + i] = { tried: 2, done: 1 };
     fs.writeFileSync(repFile, JSON.stringify({ updatedAt: new Date().toISOString(), payers: scanned }));
 
@@ -655,7 +688,7 @@ describe('the lane remembers what a deal taught it', () => {
 
     const after = JSON.parse(fs.readFileSync(repFile, 'utf8'));
     assert.equal(Object.keys(after.payers).length, 501, 'the scan survives our one deal');
-    assert.deepEqual(after.payers[payer.did], { tried: 1, done: 0 });
+    assert.deepEqual(after.payers[payer.did], { tried: 3, done: 1 }, 'our outcome merges into their record');
     assert.deepEqual(after.payers['did:key:z6Mkscan0'], { tried: 2, done: 1 });
     assert.ok(engine);
   });

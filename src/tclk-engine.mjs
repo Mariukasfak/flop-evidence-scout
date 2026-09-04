@@ -75,6 +75,14 @@ export const NO_LOCK_MS = 5 * 60_000;
 const READ_LIMIT = 200;
 
 /**
+ * How much of the room the reputation file must hold before the lane is
+ * willing to require a record of a payer. Below this it is a file that has not
+ * been built yet, not a room full of strangers, and the difference decides
+ * whether an empty file means "accept carefully" or "accept nobody".
+ */
+const MIN_REP_PAYERS = 100;
+
+/**
  * The most task text we will pull from a URL a stranger's offer points at.
  * The second offer this lane accepted (2026-09-02, contract 0x476cfe24af79cd89…)
  * pointed at a 13 KB article; the prompt has room for that, and a page that
@@ -251,6 +259,18 @@ export class TclkEngine {
     const accepted = new Set(frames.filter(({ frame }) => frame.type === 'accept').map(({ frame }) => frame.ref));
     const now = this.now();
 
+    /**
+     * Whether the reputation file is worth filtering on.
+     *
+     * `loadReputation` degrades to empty rather than throwing, on purpose, so
+     * that an absent or unreadable file never stops the lane. That kindness
+     * turns lethal the moment a filter *requires* a good record: with nothing
+     * to judge by, every payer looks unproven and the lane would accept
+     * nobody, silently, forever. So the requirement below applies only once
+     * the file holds enough of the room to mean something.
+     */
+    const repUsable = Object.keys(this.payerRep?.payers ?? {}).length >= MIN_REP_PAYERS;
+
     const candidates = frames
       .filter(({ frame }) => frame.type === 'offer')
       .filter(({ frame: o }) =>
@@ -260,6 +280,7 @@ export class TclkEngine {
         && !this.ours.has(o.from)                // not ours, not our sibling key's
         && !this.#burned().has(o.from)           // already had their chance and did not take it
         && !isBurned(this.payerRep, o.from)      // and the room says the same about them
+        && (!repUsable || isTrusted(this.payerRep, o.from))   // and has finished one before
         && offerLooksAlive(o)                    // a shape that has never once settled
         && !accepted.has(o.id)                   // first accept wins; a second is noise
         && offerIdMatches(o)                     // a frame that lies about its own id is not an offer
@@ -271,10 +292,32 @@ export class TclkEngine {
     }
 
     /**
-     * A payer who has finished a deal with somebody finishes 61.8% of the time;
-     * one nobody has seen before, 30.5%. Both are worth accepting -- there are
-     * not enough proven payers in the room to live on -- but when a cycle offers
-     * a choice, take the proven one. Then a named job, then the newest.
+     * Proven payers only, and the measurement that changed this from a
+     * preference into a requirement.
+     *
+     * This used to rank a proven payer above an unknown one and accept either,
+     * on the reading that a first appearance is the second-best signal there
+     * is and that there were not enough proven payers to live on. Both halves
+     * were wrong, and the old numbers had measured the wrong denominator: what
+     * matters is not how often an accepted payer finishes, but how often an
+     * offer sitting in front of us ends in a lock.
+     *
+     * Board census, 4,071 offers, 2026-09-04, split by what the reputation
+     * file already knew about each payer:
+     *
+     *   finished a deal before   2,639 offers   892 reached a lock  (33.8%)
+     *   never seen before          256 offers     5 reached a lock  ( 2.0%)
+     *   seen, never finished     1,176 offers    91 reached a lock  ( 7.7%)
+     *
+     * A first-time payer is not a neutral signal, it is the worst one on the
+     * board — worse than a payer we have already watched walk away. And 65% of
+     * offers come from payers who have finished before, so waiting for one
+     * costs nothing: at ~570 proven offers an hour, a lane that holds one deal
+     * at a time is never short of them. Our own record under the old rule was
+     * 8 completed against 50 abandoned, every abandonment a payer who never
+     * locked at all.
+     *
+     * Among the proven, the old order still applies: a named job, then newest.
      */
     candidates.sort((a, b) => {
       const trust = Number(isTrusted(this.payerRep, b.frame.from))
