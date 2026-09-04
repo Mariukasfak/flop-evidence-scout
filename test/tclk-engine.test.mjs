@@ -706,13 +706,13 @@ describe('tclk payee lane: a payer who does not lock loses the slot', () => {
  * `outcome: 'claimed'` regardless, while the rail still read `locked`.
  */
 describe('tclk payee lane: the receipt may not contradict the rail', () => {
-  async function lockVerified() {
+  async function lockVerified({ ref = null } = {}) {
     const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
     venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer)));
     const engine = engineFor(venue, me);
     await engine.runTurn();
     const deal = engine.load().deal;
-    venue.say(deal.room, payer.did, encodeFrame({ type: 'lock', from: payer.did, contract: deal.contract, rail: 'paper', ref: deal.contract }));
+    venue.say(deal.room, payer.did, encodeFrame({ type: 'lock', from: payer.did, contract: deal.contract, rail: 'paper', ref: ref ?? deal.contract }));
     const { ns, key } = paperNote(deal.contract);
     venue.notes.set(`${ns}/${key}`, encodePaperRecord({ status: 'locked', lock: 'hash', statement: deal.statement, refundAfterMs: deal.offer.refundAfterMs }));
     assert.equal((await engine.runTurn()).action, 'lock_verified');
@@ -756,6 +756,28 @@ describe('tclk payee lane: the receipt may not contradict the rail', () => {
     assert.equal(result.receipt, true);
     const receipt = framesFrom(venue, deal, me.did).find((f) => f.type === 'receipt');
     assert.equal(receipt.outcome, 'claimed');
+    assert.equal(receipt.rail, 'paper');
+    assert.equal(receipt.ref, deal.contract, 'this payer locked naming the contract, so the receipt does too');
+  });
+
+  /**
+   * tclk#51, merged upstream 2026-09-03, extended the outcome check to the
+   * settlement pair: a receipt whose `rail` or `ref` disagrees with what the
+   * contract recorded is rejected. `decodeFrame` constrains a lock's
+   * `contract` and `rail` but leaves `ref` free-form, so a payer may perfectly
+   * legally name the note instead of the contract — and we hard-coded the
+   * contract id into every receipt we posted. The rail half was never at risk
+   * (the lock search only matches `paper`); this half was.
+   */
+  test('the receipt names the ref the payer locked with, not the one we assumed', async () => {
+    const { venue, me, engine, deal } = await lockVerified({ ref: 'paper:note/settlement-42' });
+
+    const result = await engine.runTurn();
+
+    assert.equal(result.receipt, true);
+    const receipt = framesFrom(venue, deal, me.did).find((f) => f.type === 'receipt');
+    assert.equal(receipt.ref, 'paper:note/settlement-42',
+      'a receipt naming a different ref than the contract recorded is the frame #51 now rejects');
     assert.equal(receipt.rail, 'paper');
   });
 

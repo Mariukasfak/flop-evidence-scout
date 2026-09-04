@@ -404,6 +404,18 @@ export class TclkEngine {
 
     deal.status = 'locked';
     deal.railRecord = String(value).trim();  // the exact bytes the claim's CAS must name
+    /**
+     * The settlement reference the *payer* put on the contract, kept so the
+     * receipt can echo it instead of asserting one. tclk#51 (merged
+     * 2026-09-03) widened the 2026-09-02 outcome check to the pair: a receipt
+     * whose `rail` or `ref` contradicts what the contract recorded is now
+     * rejected. Our rail cannot contradict — the lock search above only
+     * matches `paper` — but our `ref` was hard-coded to the contract id, so a
+     * payer who locked naming anything else would have got a false receipt
+     * from us and, after #51, a rejected one. Older locks carry no `ref` at
+     * all; for those the contract id is what both sides already mean.
+     */
+    deal.railRef = typeof lock.ref === 'string' && lock.ref ? lock.ref : deal.contract;
     deal.lockSeenAt = now;
     this.save();
     return { action: 'lock_verified', contract: deal.contract };
@@ -461,7 +473,8 @@ export class TclkEngine {
     const settled = await this.#railStatus(deal.contract);
     if (settled === 'claimed') {
       await this.#post(deal.room, {
-        type: 'receipt', from: this.identity.did, contract: deal.contract, outcome: 'claimed', rail: 'paper', ref: deal.contract
+        type: 'receipt', from: this.identity.did, contract: deal.contract, outcome: 'claimed',
+        rail: 'paper', ref: deal.railRef || deal.contract
       });
       try {
         const { ns, key } = statePointer(deal.contract);
