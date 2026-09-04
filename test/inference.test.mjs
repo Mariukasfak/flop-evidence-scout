@@ -288,12 +288,22 @@ test('an empty state plans no work rather than inventing some', () => {
   assert.deepEqual(planWorkload({}), []);
 });
 
-test('backend selection falls back to simulated and says it is not real', async () => {
+test('backend selection reports honestly whichever backend the machine offers', async () => {
   const { backend, real } = await selectBackend({});
-  // On a machine with no model installed this is the simulated backend; on one
-  // with Ollama running it is Ollama. Either way `real` must match `simulated`.
+  /**
+   * The invariant is the first line: whatever gets picked, `real` must agree
+   * with `simulated`. That is the property the rest of the daemon trusts —
+   * receipts marked genuine have to be genuine.
+   *
+   * The id list is not a prediction about this machine and must not become
+   * one. It read ['simulated', 'ollama'] and went red the day an inference API
+   * key was configured on the operator's PC, because selectBackend then
+   * correctly preferred the api backend. Nothing was broken; the test was
+   * asserting the absence of a file in .secrets, which is not its business.
+   */
   assert.equal(real, backend.simulated !== true);
-  assert.ok(['simulated', 'ollama'].includes(backend.id));
+  assert.ok(['simulated', 'ollama', 'api', 'flop-session'].includes(backend.id),
+    `unexpected backend id: ${backend.id}`);
 });
 
 test('the ollama backend reports unavailable rather than throwing when absent', async () => {

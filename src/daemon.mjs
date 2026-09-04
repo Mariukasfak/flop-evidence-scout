@@ -61,6 +61,8 @@ export function deriveFrom(o) {
 export function parseArgs(argv) {
   const options = {
     intervalMs: 60_000,
+    /** Null means "take the interval-proportional share", which is the old behaviour. */
+    workDeadlineMs: null,
     dryRun: false,
     /**
      * One real cycle, then exit. This is what a scheduled cloud run needs.
@@ -91,6 +93,21 @@ export function parseArgs(argv) {
     if (arg === '--dry-run') options.dryRun = true;
     else if (arg === '--once') options.once = true;
     else if (arg.startsWith('--interval-ms=')) options.intervalMs = Number(arg.slice(14)) || options.intervalMs;
+    /**
+     * How long the inference burst may run, when the machine cannot afford the
+     * default share of the interval.
+     *
+     * Measured on the Helsinki box 2026-09-04, over its own receipts only:
+     * classify-message took 40% of all inference time to read 187 tokens and
+     * write 6 — bookkeeping — while the kibble lanes that carry the score
+     * queued behind it. A controlled request of that size answers in 2.1s and
+     * the median under load was 6.8s, so two thirds of the wait was the queue,
+     * not the work. On two shared vCPUs the burst is what to shrink: it is the
+     * one consumer whose output nobody outside this repository reads.
+     *
+     * Unset, nothing changes — the PC keeps the interval-proportional default.
+     */
+    else if (arg.startsWith('--work-deadline-ms=')) options.workDeadlineMs = Number(arg.slice(19)) || null;
     else if (arg === '--no-lease') options.lease = false;
     else if (arg.startsWith('--lease-name=')) options.leaseName = arg.slice(13);
     else if (arg.startsWith('--identity=')) options.identityPath = path.resolve(arg.slice(11));
@@ -1232,7 +1249,9 @@ export async function runScoutDaemon(options = {}) {
           seen: seenWork,
           backend,
           identity: scoutIdentity,
-          deadlineMs: Math.max(20_000, Math.floor(config.intervalMs * 0.4)),
+          deadlineMs: config.workDeadlineMs
+            ? Math.max(2_000, config.workDeadlineMs)
+            : Math.max(20_000, Math.floor(config.intervalMs * 0.4)),
           ledgerPath
         });
         trimSeen(seenWork);

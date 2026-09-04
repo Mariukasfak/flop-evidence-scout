@@ -17,7 +17,15 @@ EnvironmentFile=-__APP_DIR__/.env.local
 # `data/local`, and quietly starts from an empty state beside the real one.
 # Measured on the first server boot 2026-09-04 — it ran for eleven minutes with
 # the right identity and no memory of five completed contracts.
-ExecStart=/usr/bin/node src/daemon.mjs --url=https://technocore.chat --interval-ms=60000 --data-dir=data/local --docs-dir=data/local/docs
+#
+# --work-deadline-ms is this machine's own number, not a default worth copying.
+# Measured here 2026-09-04 from server-era receipts alone: classify-message ran
+# 40% of all inference time to read 187 tokens and write 6, while the kibble
+# lanes — which carry 455 of our 461 points — waited behind it. A request that
+# size answers in 2.1s unloaded and took 6.8s under load, so most of that wait
+# was queue. Two shared vCPUs cannot buy both, and the burst is the half nobody
+# outside this repository reads.
+ExecStart=/usr/bin/node src/daemon.mjs --url=https://technocore.chat --interval-ms=60000 --work-deadline-ms=8000 --data-dir=data/local --docs-dir=data/local/docs
 
 # The daemon already restarts itself after a code change; this covers the rest
 # — a crash, an OOM kill, a reboot. RestartSec is deliberately longer than the
