@@ -32,8 +32,27 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-/** The server's own words when a new room is refused, whatever the real cause. */
-const REFUSAL = /room limit reached|would be a new one/i;
+/**
+ * The server's own words when a new room is refused. There are two of them.
+ *
+ * technocore-chat 0.11.4 refuses a room two different ways, and until
+ * 2026-09-04 this only knew the first:
+ *
+ *   400  room limit reached (<cap> is the cap, and this would be a new one)
+ *        — service-wide `max_rooms`, fail-closed. A moving boundary: idle rooms
+ *          are reaped continuously and each freed slot is taken within seconds,
+ *          so /rooms reading well under the cap an hour later says nothing about
+ *          whether it was reached at the instant of the refusal.
+ *
+ *   429  room-creation budget spent: … this IP has created its 20 rooms for the
+ *        day — the per-client `new_rooms_per_day_per_ip`, with Retry-After.
+ *
+ * Missing the 429 was the worse half: a budget refusal would not have been
+ * recognised as one, so the lane would have retried into it every cycle, which
+ * is the exact failure this module exists to stop. Distinction and status codes
+ * documented by the technocore maintainer on flop-labs/tclk#61.
+ */
+const REFUSAL = /room limit reached|would be a new one|room-creation budget spent|rooms for the day/i;
 
 export function isRoomCreationRefusal(error) {
   return REFUSAL.test(String(error?.message ?? error ?? ''));
