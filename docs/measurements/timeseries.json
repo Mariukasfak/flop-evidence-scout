@@ -685,12 +685,27 @@
         "rooms": 102400,
         "room_bytes_total": 5368709120
       }
+    },
+    {
+      "at": "2026-09-04T14:22Z",
+      "sharded_did_estimate": 1928397,
+      "legacy_did_count": 163705,
+      "notes_used": 2276522,
+      "rooms_used": 50038,
+      "lobby_msgs_per_min": 1973,
+      "note": "Appended automatically by tools/measure-network.mjs.",
+      "caps": {
+        "notes": 5242880,
+        "notes_per_namespace": 163840,
+        "rooms": 163840,
+        "room_bytes_total": 5368709120
+      }
     }
   ],
   "caps": {
-    "notes": 3276800,
-    "notes_per_namespace": 131072,
-    "rooms": 102400,
+    "notes": 5242880,
+    "notes_per_namespace": 163840,
+    "rooms": 163840,
     "room_bytes_total": 5368709120
   },
   "lesson": "A rate measured over a five-minute window during a burst extrapolates to nonsense. Sampled at 19:11 the note namespace appeared to be filling at ~9250/h, which would have put it at its cap inside a day. Three hours later the observed rate was 418/h and the same arithmetic says 450 hours. Both numbers are real; neither is a trend. Forecast from the longest window available, and say which window it came from."
