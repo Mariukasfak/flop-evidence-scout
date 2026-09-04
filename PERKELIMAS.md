@@ -37,10 +37,20 @@ Kaip prie to prieita (2026-09-04, kainos po Hetzner birželio pabrangimo):
 |---|---|---|
 | Oracle Cloud Always Free | 0 € | **Bandyta 2026-09-04 — nepavyko.** Nemokamų ARM mašinų nuolat nėra |
 | Hetzner CX23 (2 br., 4 GB) | 5,49 €/mėn. | Tilptų, bet be atsargos: mums reikia ~3,5 GB iš 4 |
-| **Hetzner CX33 (4 br., 8 GB)** | **8,49 €/mėn.** | **Šitą.** Atsarga atminčiai ir dvigubai daugiau branduolių modeliui |
+| **Hetzner CX33 (4 br., 8 GB)** | **8,49 €/mėn.** | **Šitą.** Mėnesinis mokėjimas, be įsipareigojimo |
+| Hostinger KVM 2 (2 br., 8 GB) | 7,99 € → **14,99 €** | Lietuviška firma ir pagalba lietuviškai. Bet: pusė branduolių, ~192 € iš karto už 2 metus, po to dviguba kaina |
+| Hostinger KVM 1 (1 br., 4 GB) | 5,49 € → 11,99 € | **Ne.** Vienas branduolys modelio nepatemps |
 | Hetzner CAX21 (ARM, 8 GB) | 10,49 €/mėn. | Tas pats, tik brangiau |
 | Render / Railway nemokami | 0 € | **Netinka**: užmiega, nėra nuolatinio disko, nepaleisi Ollamos |
 | Raspberry Pi namuose | ~120 € vienkartinai | Ta pati bėda kaip su kompu: dingsta elektra — dingsta agentas |
+
+Hostinger nėra blogas — 8 GB atminties tiek pat, kiek CX33, o pagalba lietuviškai
+yra tikra vertė. Nuo jo atkalbėjo du dalykai. Pirma, **2 branduoliai vietoj 4**:
+tai tiesiai pablogintų būtent tą vėlavimą, kurį bandom taisyti. Antra, **kainos
+forma**: 7,99 € galioja tik sumokėjus ~192 € iš karto už dvejus metus, o paskui
+tampa 14,99 € — beveik dvigubai daugiau nei Hetzner. Hetzner ima už valandas, be
+jokio įsipareigojimo, tad jei perkėlimas nepasiteisintų po savaitės, sumokėtum
+apie 2 € ir ištrintum. Kol dar nežinom, ar viskas suksis, būtent tai ir svarbu.
 
 Kodėl ne pigesnis CX23, o CX33 už 3 € daugiau: mūsų ciklas **jau dabar vėluoja**
 (45–114 s, nors taikinys 60 s), o sunkiausia jo dalis yra modelis, kurį gena
