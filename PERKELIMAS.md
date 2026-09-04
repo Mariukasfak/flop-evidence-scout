@@ -25,11 +25,21 @@ Vaizdo plokštės **nereikia** — modelis sukasi procesoriumi.
 
 ## Kur dėti
 
-**Sprendimas: Hetzner CX33, Helsinkis, 8,49 €/mėn. + PVM (~10 €/mėn.)**
+**Sprendimas: Hetzner CX23, Helsinkis, 7,25 €/mėn. su PVM** (6,64 € serveris +
+0,61 € IPv4 adresas).
 
-Hetzner yra vokiečių firma, nuomojanti kompiuterius duomenų centruose. CX33 — tos
-nuomos dydžio pavadinimas: 4 branduoliai, 8 GB atminties, 80 GB disko. Helsinkis —
-kur ta mašina fiziškai stovi; iš Lietuvos arčiausiai, todėl greičiausiai.
+Hetzner yra vokiečių firma, nuomojanti kompiuterius duomenų centruose. CX23 — tos
+nuomos dydžio pavadinimas: 2 branduoliai, 4 GB atminties, 40 GB disko. Helsinkis —
+kur ta mašina fiziškai stovi.
+
+Norėjom CX33 (4 branduoliai, 8 GB). **Jo nėra** — patikrinta 2026-09-04 konsolėje,
+ne iš kainoraščio: CX33 Helsinkyje pilkas, o Falkenstein'e ir Nurnberge Hetzner
+atsako raudona juosta „Preselected server type is not available". Tas pats ir su
+ARM CAX21. Tad CX23 yra ne pasirinkimas iš kelių, o vienintelis esamas.
+
+Tai nėra aklavietė: Hetzner leidžia **padidinti serverį vėliau** (*Rescale*) be
+perdiegimo. Kai CX33 atsilaisvins, pereinam į jį per perkrovimą. Iki tol 4 GB
+atlaiko dėl swap, kurį susikuria diegimo skriptas.
 
 Kaip prie to prieita (2026-09-04, kainos po Hetzner birželio pabrangimo):
 
@@ -139,13 +149,23 @@ scp ~/Desktop/perkelimas.zip vartotojas@serverio-ip:~/perkelimas.zip
 
 **Serveryje (Ubuntu 24.04):**
 
+Jei užsakant į laukelį *Cloud config* buvo įdėtas [deploy/cloud-init.yaml](deploy/cloud-init.yaml),
+serveris **pats** pirmo paleidimo metu susidiegia Node, Ollamą, parsisiunčia modelį,
+susikuria swap ir parsisiunčia kodą — kol tu nieko nedarai. Eiga matoma:
+
 ```bash
-git clone https://github.com/Mariukasfak/flop-evidence-scout.git TriAgent
+cat /root/PARUOSIMAS.txt
+```
+
+Kai ten pasirodo `PARUOSTA` (apie 5–10 min. po sukūrimo), lieka vienas žingsnis:
+
+```bash
 bash TriAgent/deploy/setup-vps.sh
 ```
 
-Skriptas pats susidiegia Node, Ollamą, parsisiunčia modelį, išpakuoja būseną,
-sukuria `systemd` servisus ir paleidžia. Užtrunka ~10 min., daugiausia dėl modelio.
+Skriptas idempotentiškas — tai, ką cloud-init jau padarė, jis praleidžia, ir
+atlieka tik likusią dalį: išpakuoja būseną, sukuria `systemd` servisus, paleidžia.
+Be cloud-init tas pats skriptas padaro viską nuo nulio, tik užtrunka ilgiau.
 
 **Patikrinimas:**
 

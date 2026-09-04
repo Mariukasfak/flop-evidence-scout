@@ -1,0 +1,43 @@
+#cloud-config
+# TriAgent: paruosia serveri pirmo paleidimo metu.
+# Eiga matoma faile /root/PARUOSIMAS.txt
+package_update: true
+packages: [git, curl, unzip, ca-certificates]
+
+write_files:
+  - path: /root/paruosti.sh
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env bash
+      exec >>/root/PARUOSIMAS.txt 2>&1
+      set -x
+      date
+      echo "=== 1/5 swap ==="
+      if [ -z "$(swapon --show --noheadings)" ]; then
+        fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048
+        chmod 600 /swapfile
+        mkswap -q /swapfile
+        swapon /swapfile
+        echo '/swapfile none swap sw 0 0' >> /etc/fstab
+        sysctl -q -w vm.swappiness=10
+        echo 'vm.swappiness=10' >> /etc/sysctl.conf
+      fi
+      echo "=== 2/5 node ==="
+      curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+      apt-get install -y nodejs
+      node -v
+      echo "=== 3/5 ollama ==="
+      curl -fsSL https://ollama.com/install.sh | sh
+      systemctl enable --now ollama
+      for i in $(seq 60); do curl -sf http://127.0.0.1:11434/api/tags >/dev/null && break; sleep 2; done
+      echo "=== 4/5 modelis (~2 GB, letiausia dalis) ==="
+      for i in 1 2 3; do ollama pull qwen2.5:3b && break; sleep 20; done
+      ollama list
+      echo "=== 5/5 kodas ==="
+      git clone https://github.com/Mariukasfak/flop-evidence-scout.git /root/TriAgent
+      free -h
+      date
+      echo "PARUOSTA"
+
+runcmd:
+  - [bash, /root/paruosti.sh]
