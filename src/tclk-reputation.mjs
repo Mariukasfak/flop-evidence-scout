@@ -45,8 +45,20 @@ export const DEAD_PROTOS = new Set(['acp', 'tdex1']);
  * we filter.
  */
 
+/**
+ * How many contract ids we remember having counted.
+ *
+ * The board is a ring: measured 2026-09-04, `/r/tclk-offers/export` held 5.9
+ * hours (8.99 MiB, seq 34751-49700) where the day before it held 25. So a scan
+ * sees a moving window, and the only way a count over "every deal we ever saw"
+ * survives is to remember which deals are already in it. 50k ids is weeks of
+ * this room at 43 records a minute, and the oldest are the ones the venue
+ * itself has long since dropped.
+ */
+export const SEEN_LIMIT = 50_000;
+
 export function emptyReputation() {
-  return { updatedAt: null, payers: {} };
+  return { updatedAt: null, payers: {}, seen: [] };
 }
 
 export function loadReputation(file) {
@@ -56,7 +68,11 @@ export function loadReputation(file) {
     if (!parsed || typeof parsed !== 'object' || typeof parsed.payers !== 'object' || !parsed.payers) {
       return emptyReputation();
     }
-    return { updatedAt: parsed.updatedAt ?? null, payers: parsed.payers };
+    return {
+      updatedAt: parsed.updatedAt ?? null,
+      payers: parsed.payers,
+      seen: Array.isArray(parsed.seen) ? parsed.seen : []
+    };
   } catch {
     // A reputation we cannot read is a reputation we do not have. Never fatal:
     // the lane must keep working on the day this file is first introduced.
@@ -72,13 +88,25 @@ export function saveReputation(rep, file) {
   fs.renameSync(temp, file);
 }
 
-/** One more deal for this payer, and whether it ended claimed. */
-export function recordOutcome(rep, payer, completed) {
+/**
+ * One more deal for this payer, and whether it ended claimed.
+ *
+ * `contract` makes it idempotent, which matters because two writers count the
+ * same deals: this lane as each of its own closes, and the scan every few hours
+ * over a window that overlaps the last one. Without it a payer's `tried` climbs
+ * by one per scan for a deal that happened once. Called without a contract the
+ * count still lands -- older callers and tests keep working -- it just cannot
+ * be deduplicated.
+ */
+export function recordOutcome(rep, payer, completed, contract = null) {
   if (!payer) return rep;
+  const seen = Array.isArray(rep.seen) ? rep.seen : [];
+  if (contract && seen.includes(contract)) return rep;          // already counted
   const payers = { ...rep.payers };
   const prior = payers[payer] || { tried: 0, done: 0 };
   payers[payer] = { tried: prior.tried + 1, done: prior.done + (completed ? 1 : 0) };
-  return { updatedAt: new Date().toISOString(), payers };
+  const nextSeen = contract ? [...seen, contract].slice(-SEEN_LIMIT) : seen;
+  return { updatedAt: new Date().toISOString(), payers, seen: nextSeen };
 }
 
 /**

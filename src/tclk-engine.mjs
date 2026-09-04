@@ -640,7 +640,7 @@ export class TclkEngine {
     this.state[bucket] = [...(this.state[bucket] || []), record].slice(-50);
     this.state.deal = null;
     this.save();
-    this.#learn(deal.offer.from, bucket === 'completed');
+    this.#learn(deal.offer.from, bucket === 'completed', deal.contract);
   }
 
   /**
@@ -655,13 +655,13 @@ export class TclkEngine {
    * Never allowed to fail a turn: a deal that settled is not un-settled by a
    * full disk, and the lane must not care whether this file exists at all.
    */
-  #learn(payer, completed) {
+  #learn(payer, completed, contract = null) {
     if (!this.payerRepPath || !payer) return;
     try {
       // Re-read before writing. `scripts/scan-tclk-payers.mjs` rewrites this
       // same file from the whole room while we run, and saving a copy loaded at
       // construction would discard five hundred payers in order to record one.
-      this.payerRep = recordOutcome(loadReputation(this.payerRepPath), payer, completed);
+      this.payerRep = recordOutcome(loadReputation(this.payerRepPath), payer, completed, contract);
       saveReputation(this.payerRep, this.payerRepPath);
       this.payerRepStamp = null;                    // our own write; re-read next turn
     } catch { /* reputation is an optimisation, never a precondition */ }

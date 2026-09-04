@@ -10,11 +10,16 @@
  * the deal actually ended. Reads only; it never writes to the venue and never
  * opens a room.
  *
+ * The board is a ring -- 5.9 hours of history on 2026-09-04, 25 the day before --
+ * so this MERGES into whatever the file already holds rather than replacing it.
+ * Replacing would throw away every payer who has not spoken in six hours, which
+ * on the first measured day was more than half of them.
+ *
  * Usage:  node scripts/scan-tclk-payers.mjs [--out=data/local/tclk-payers.json]
  *                                           [--url=https://technocore.chat]
  *                                           [--max=0] [--delay-ms=140]
  */
-import { saveReputation } from '../src/tclk-reputation.mjs';
+import { loadReputation, saveReputation, recordOutcome } from '../src/tclk-reputation.mjs';
 
 const arg = (name, fallback) => {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -63,8 +68,9 @@ deals.sort((x, y) => y.seq - x.seq);              // newest first, so --max stay
 const work = deals.slice(0, max === Infinity ? deals.length : max);
 console.log(`[scan] ${accepts.size} accepted deals, ${work.length} to probe`);
 
-const payers = {};
-let claimed = 0, probed = 0;
+let rep = loadReputation(outFile);
+const before = Object.keys(rep.payers).length;
+let claimed = 0, probed = 0, fresh = 0;
 
 for (const d of work) {
   let done = false;
@@ -82,18 +88,19 @@ for (const d of work) {
     }
   } catch { /* an unreadable room is not a claim; it counts as unfinished */ }
 
-  const prior = payers[d.payer] || { tried: 0, done: 0 };
-  payers[d.payer] = { tried: prior.tried + 1, done: prior.done + (done ? 1 : 0) };
+  const merged = recordOutcome(rep, d.payer, done, d.contract);
+  if (merged !== rep) fresh++;                       // a contract we had not counted
+  rep = merged;
   if (done) claimed++;
   if (++probed % 200 === 0) console.log(`[scan]   ${probed}/${work.length}`);
   await sleep(delayMs);
 }
 
-const rep = { updatedAt: new Date().toISOString(), payers };
-saveReputation(rep, outFile);
+saveReputation({ ...rep, updatedAt: new Date().toISOString() }, outFile);
 
-const dids = Object.values(payers);
+const dids = Object.values(rep.payers);
 const burned = dids.filter((r) => r.tried > 0 && r.done === 0).length;
 const trusted = dids.filter((r) => r.done > 0).length;
 console.log(`[scan] wrote ${outFile}`);
-console.log(`[scan] payers ${dids.length} | trusted ${trusted} | burned ${burned} | claimed deals ${claimed}/${work.length}`);
+console.log(`[scan] payers ${dids.length} (was ${before}) | trusted ${trusted} | burned ${burned}`);
+console.log(`[scan] deals probed ${work.length}, new to the store ${fresh}, claimed ${claimed}`);

@@ -39,6 +39,26 @@ describe('Reviving a dead local Ollama', () => {
     assert.equal(findOllamaBinary({ env: {}, platform: 'linux', exists: () => false }), 'ollama');
   });
 
+  test('a binary that is not there does not take the daemon down with it', async () => {
+    // spawn reports ENOENT on the child, asynchronously, not by throwing. An
+    // 'error' with no listener is an uncaught exception; this is a Linux runner
+    // with no ollama, which is where it was found.
+    const handlers = {};
+    const spawnFn = () => ({
+      on(event, fn) { handlers[event] = fn; },
+      unref() {}
+    });
+    const state = { lastAttemptAt: 0 };
+
+    const result = await reviveOllama({
+      host: 'http://127.0.0.1:11434', state, now: () => 5_000_000, spawnFn, binary: 'ollama'
+    });
+
+    assert.equal(result.attempted, true, 'we did try');
+    assert.equal(typeof handlers.error, 'function', 'and something is listening for the failure');
+    assert.doesNotThrow(() => handlers.error(Object.assign(new Error('spawn ollama ENOENT'), { code: 'ENOENT' })));
+  });
+
   test('a revive spawns once, detached, and then respects the cooldown', async () => {
     const calls = [];
     const spawnFn = (bin, args, opts) => { calls.push({ bin, args, opts }); return { unref() { calls.push('unref'); } }; };

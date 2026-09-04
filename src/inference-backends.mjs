@@ -71,7 +71,10 @@ export function shouldReviveOllama({ host = OLLAMA_HOST, lastAttemptAt = 0, now 
 export function findOllamaBinary({ env = process.env, platform = process.platform, exists = fs.existsSync } = {}) {
   if (env.OLLAMA_BIN && exists(env.OLLAMA_BIN)) return env.OLLAMA_BIN;
   if (platform === 'win32' && env.LOCALAPPDATA) {
-    const installed = path.join(env.LOCALAPPDATA, 'Programs', 'Ollama', 'ollama.exe');
+    // path.win32, not path: the platform is an argument here, so the separator
+    // must follow the argument and not the host. On a Linux runner path.join
+    // produced 'C:\Users\x/Programs/Ollama/ollama.exe' and the lookup missed.
+    const installed = path.win32.join(env.LOCALAPPDATA, 'Programs', 'Ollama', 'ollama.exe');
     if (exists(installed)) return installed;
   }
   return 'ollama';
@@ -90,6 +93,21 @@ export async function reviveOllama({
   state.lastAttemptAt = now();
   try {
     const child = spawnFn(binary, ['serve'], { detached: true, stdio: 'ignore', windowsHide: true });
+    /**
+     * A missing binary does not throw here.
+     *
+     * `spawn` reports ENOENT asynchronously on the child's 'error' event, and an
+     * 'error' event with no listener is an uncaught exception that takes the
+     * daemon down with it — so the try/catch below never sees it. Measured on a
+     * Linux CI runner with no ollama installed: `spawn ollama ENOENT`,
+     * uncaughtException, and the whole cycle dead. On the operator's machine
+     * ollama is installed, which is the only reason this never bit at home.
+     */
+    if (typeof child?.on === 'function') {
+      child.on('error', (err) => {
+        sayOnce('ollama:revive-failed', `[Ollama] Could not start it: ${err.message}. Start it by hand.`);
+      });
+    }
     // Detached and unreferenced: the cycle must not wait on it, and a daemon
     // restart must not take it down.
     if (typeof child?.unref === 'function') child.unref();

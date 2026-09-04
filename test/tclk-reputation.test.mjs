@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import {
   emptyReputation, loadReputation, saveReputation, recordOutcome,
-  isBurned, isTrusted, offerLooksAlive, DEAD_PROTOS
+  isBurned, isTrusted, offerLooksAlive, DEAD_PROTOS, SEEN_LIMIT
 } from '../src/tclk-reputation.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'tclk-rep-'));
@@ -41,6 +41,53 @@ describe('who is worth a deal slot', () => {
   test('an outcome without a payer changes nothing', () => {
     const r = emptyReputation();
     assert.deepEqual(recordOutcome(r, null, true), r);
+  });
+});
+
+describe('counting the same deal twice', () => {
+  const C = '0x' + 'ab'.repeat(32);
+
+  test('a contract already counted does not move the numbers again', () => {
+    let r = recordOutcome(emptyReputation(), 'payer', false, C);
+    assert.deepEqual(r.payers.payer, { tried: 1, done: 0 });
+    const again = recordOutcome(r, 'payer', false, C);
+    assert.equal(again, r, 'the same object comes back, so a caller can see nothing happened');
+    assert.deepEqual(again.payers.payer, { tried: 1, done: 0 });
+  });
+
+  test('a different contract from the same payer does count', () => {
+    let r = recordOutcome(emptyReputation(), 'payer', false, C);
+    r = recordOutcome(r, 'payer', true, '0x' + 'cd'.repeat(32));
+    assert.deepEqual(r.payers.payer, { tried: 2, done: 1 });
+  });
+
+  test('without a contract it still counts, because old callers and tests pass none', () => {
+    let r = recordOutcome(emptyReputation(), 'payer', false);
+    r = recordOutcome(r, 'payer', false);
+    assert.deepEqual(r.payers.payer, { tried: 2, done: 0 });
+  });
+
+  test('the seen list is bounded, oldest dropped first', () => {
+    let r = emptyReputation();
+    for (let i = 0; i < SEEN_LIMIT + 5; i++) r = recordOutcome(r, 'p', false, 'c' + i);
+    assert.equal(r.seen.length, SEEN_LIMIT);
+    assert.equal(r.seen.includes('c0'), false, 'the oldest fell off');
+    assert.equal(r.seen.includes('c' + (SEEN_LIMIT + 4)), true, 'the newest is kept');
+  });
+
+  test('a file written before seen existed loads as having seen nothing', () => {
+    const file = path.join(tmp(), 'old.json');
+    fs.writeFileSync(file, JSON.stringify({ updatedAt: null, payers: { a: { tried: 3, done: 1 } } }));
+    const r = loadReputation(file);
+    assert.deepEqual(r.seen, []);
+    assert.deepEqual(r.payers.a, { tried: 3, done: 1 }, 'and the payers it did hold survive');
+  });
+
+  test('seen survives a round trip, so a scan does not recount after a restart', () => {
+    const file = path.join(tmp(), 'rt.json');
+    saveReputation(recordOutcome(emptyReputation(), 'p', true, C), file);
+    const back = loadReputation(file);
+    assert.equal(recordOutcome(back, 'p', true, C), back, 'still deduplicated');
   });
 });
 
