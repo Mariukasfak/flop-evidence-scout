@@ -79,6 +79,44 @@ async function fromListing() {
   }
 }
 
+/**
+ * The names a FLOP faucet would plausibly be given, asked for by name.
+ *
+ * `/rooms` answers with fifty rooms and a different fifty each time — measured
+ * 2026-09-05, one read from this repo's machine listed `faucet` and a read
+ * from CI ninety seconds later did not, out of the same venue. So the listing
+ * is a sample, not an index, and a detector that only samples will miss the
+ * thing it exists to catch roughly whenever it matters.
+ *
+ * Asking by name is deterministic. A room that does not exist answers 200 with
+ * zero messages, so traffic is the discriminator, not the status code.
+ */
+const PROBE_NAMES = [
+  'faucet', 'flop-faucet', 'faucet-flop', 'testnet-faucet',
+  'flop-testnet-faucet', 'drip', 'flop-drip', 'tap'
+];
+
+async function fromProbe() {
+  const found = [];
+  for (const room of PROBE_NAMES) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const res = await fetch(`${BASE_URL}/r/${encodeURIComponent(room)}?format=json&limit=3`, { signal: controller.signal });
+      if (!res.ok) continue;
+      const json = await res.json();
+      const count = (json.messages || []).length;
+      if (count > 0) found.push(room);
+    } catch {
+      // One unreachable name is not a reason to skip the rest.
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  console.log(`Named probe: ${found.length ? found.join(', ') : 'no traffic in any candidate name'}`);
+  return found;
+}
+
 /** Whatever a daemon pass on this same machine happened to record. */
 function fromAlertFile() {
   for (const rel of ALERT_PATHS) {
@@ -103,15 +141,16 @@ function fromAlertFile() {
  */
 async function main() {
 const listed = await fromListing();
+const probed = await fromProbe();
 const filed = fromAlertFile();
-const rooms = [...new Set([...listed, ...filed.rooms])];
+const rooms = [...new Set([...listed, ...probed, ...filed.rooms])];
 
 if (rooms.length === 0) {
   console.log('Faucet radar clear — nothing faucet-shaped in the room listing or the alert file.');
   return;
 }
 
-console.log(`Faucet radar: ${rooms.join(', ')} (listing: ${listed.length}, file: ${filed.rooms.length})`);
+console.log(`Faucet radar: ${rooms.join(', ')} (listing: ${listed.length}, probe: ${probed.length}, file: ${filed.rooms.length})`);
 
 if (!process.env.GH_TOKEN && !process.env.GITHUB_TOKEN) {
   console.log('No GH token here; skipping the issue.');
@@ -129,7 +168,13 @@ gh(['label', 'create', 'faucet-radar', '--color', 'B60205', '--description', 'Te
 const body = [
   'Rooms whose names look like a faucet:',
   '',
-  ...rooms.map((r) => `- \`${r}\`${listed.includes(r) ? ' — listed in `/rooms` now' : ' — seen announced on `/r/events`'}`),
+  ...rooms.map((r) => {
+    const how = [];
+    if (probed.includes(r)) how.push('answered by name with traffic');
+    if (listed.includes(r)) how.push('in the `/rooms` sample');
+    if (filed.rooms.includes(r)) how.push('recorded by a daemon pass');
+    return `- \`${r}\` — ${how.join(', ') || 'seen announced on `/r/events`'}`;
+  }),
   '',
   filed.detectedAt ? `Alert file (${filed.file}) recorded: ${filed.detectedAt} (events seq #${filed.seq ?? '?'})` : 'No alert file on this machine; detected from the live room listing.',
   '',
