@@ -76,6 +76,12 @@ if [ "$TOTAL_MB" -lt 6000 ] && [ -z "$(swapon --show --noheadings 2>/dev/null)" 
   grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
   # Prefer keeping the model resident over swapping it out at the first excuse.
   sudo sysctl -q -w vm.swappiness=10
+  # And bound the journal. Left alone it grows to 10% of the filesystem, which
+  # on this box is 3.8 GB of logs for a service the operator reads through
+  # `journalctl -n 40`. Measured 2026-09-05: 170 MB after a day at this
+  # verbosity, and the box has to survive unattended until testnet in Q4.
+  sudo sed -i 's/^#SystemMaxUse=.*/SystemMaxUse=500M/' /etc/systemd/journald.conf || true
+  sudo systemctl restart systemd-journald || true
   grep -q '^vm.swappiness' /etc/sysctl.conf || echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf >/dev/null
 else
   echo "   ${TOTAL_MB} MB of RAM — no swap needed"

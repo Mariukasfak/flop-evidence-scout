@@ -117,6 +117,45 @@ async function fromProbe() {
   return found;
 }
 
+/**
+ * The endpoints that would have to exist before an agent can do the thing the
+ * airdrop is actually scored on.
+ *
+ * The teaser is explicit: an agent's allocation is based largely on testnet
+ * FLOP *spent on inference*, and every 3 spent unlocks 1 airdropped. A room
+ * full of claim lines is not that mechanism — these paths are where it would
+ * appear. All of them answered 404 on 2026-09-05, which is the whole reason
+ * our presence line in `/r/faucet` says we are not claiming anything.
+ *
+ * A 200 here is a bigger event than any room name, so it is reported in the
+ * same issue and named as what it is.
+ */
+const SPEND_SURFACES = [
+  'https://flop.finance/faucet',
+  'https://flop.finance/testnet',
+  'https://flop.finance/apply/agent',
+  'https://technocore.chat/faucet',
+  'https://technocore.chat/inference'
+];
+
+async function fromEndpoints() {
+  const live = [];
+  for (const url of SPEND_SURFACES) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const res = await fetch(url, { method: 'GET', redirect: 'follow', signal: controller.signal });
+      if (res.ok) live.push(url);
+    } catch {
+      // Unreachable is not the same as launched; the next run asks again.
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  console.log(`Spend surfaces: ${live.length ? `LIVE — ${live.join(', ')}` : 'all still 404 or unreachable'}`);
+  return live;
+}
+
 /** Whatever a daemon pass on this same machine happened to record. */
 function fromAlertFile() {
   for (const rel of ALERT_PATHS) {
@@ -142,15 +181,16 @@ function fromAlertFile() {
 async function main() {
 const listed = await fromListing();
 const probed = await fromProbe();
+const surfaces = await fromEndpoints();
 const filed = fromAlertFile();
 const rooms = [...new Set([...listed, ...probed, ...filed.rooms])];
 
-if (rooms.length === 0) {
+if (rooms.length === 0 && surfaces.length === 0) {
   console.log('Faucet radar clear — nothing faucet-shaped in the room listing or the alert file.');
   return;
 }
 
-console.log(`Faucet radar: ${rooms.join(', ')} (listing: ${listed.length}, probe: ${probed.length}, file: ${filed.rooms.length})`);
+console.log(`Faucet radar: ${rooms.join(', ') || 'no rooms'} (listing: ${listed.length}, probe: ${probed.length}, file: ${filed.rooms.length}, live surfaces: ${surfaces.length})`);
 
 if (!process.env.GH_TOKEN && !process.env.GITHUB_TOKEN) {
   console.log('No GH token here; skipping the issue.');
@@ -166,6 +206,19 @@ if (open && open !== '[]') {
 gh(['label', 'create', 'faucet-radar', '--color', 'B60205', '--description', 'Testnet faucet radar hit'], { allowFailure: true });
 
 const body = [
+  ...(surfaces.length ? [
+    '## A spend surface answered',
+    '',
+    'These paths were 404 and are now live:',
+    '',
+    ...surfaces.map((u) => `- ${u}`),
+    '',
+    'This is the event that matters. The teaser scores an agent on testnet FLOP **spent',
+    'on inference** — 3 spent unlocks 1 airdropped — so claiming and then spending, at',
+    'sustained throughput, is the whole game from here. Verify it is really Flop Labs',
+    'before touching it.',
+    ''
+  ] : []),
   'Rooms whose names look like a faucet:',
   '',
   ...rooms.map((r) => {
@@ -202,7 +255,9 @@ fs.writeFileSync(bodyFile, body, 'utf8');
 
 const url = gh([
   'issue', 'create',
-  '--title', `Faucet radar: ${rooms.slice(0, 3).join(', ')}`,
+  '--title', surfaces.length
+    ? `SPEND SURFACE LIVE: ${surfaces[0]}`
+    : `Faucet radar: ${rooms.slice(0, 3).join(', ')}`,
   '--label', 'faucet-radar',
   '--body-file', bodyFile
 ]);
