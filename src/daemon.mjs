@@ -690,6 +690,32 @@ export async function runScoutDaemon(options = {}) {
   const seenWork = loadSeen(seenWorkPath);
   if (seenWork.size > 0) console.log(`[Work] Resuming with ${seenWork.size} jobs already done.`);
 
+  /**
+   * What the previous cycle gathered, so this one's burst can start immediately.
+   *
+   * Measured on the server 2026-09-05 over 38 cycles: a 65.5s cycle spent 27.4s
+   * in the burst and 21.6s in network steps (scout 6.5, scribe 4.5, tclk 3.2,
+   * mailbox 2.9, rooms 2.9, events 1.1, surface 0.5) during which the CPU sat at
+   * 4-12% while ollama did nothing. Sampling every 2s showed the box pinned at
+   * 100% for the whole burst and idle either side of it, so the two halves of the
+   * cycle each waited for a resource the other was not using.
+   *
+   * The burst therefore starts at the top of the cycle on the PREVIOUS cycle's
+   * messages, and is awaited where it always was. One cycle of staleness is the
+   * price: a room read returns mostly what it returned a minute ago, and the
+   * planner already refuses anything whose template it has classified before, so
+   * the work is the same work a minute later.
+   */
+  let carriedWorkState = null;
+
+  /**
+   * One deadline, computed once, used by both the overlapped and the first-cycle
+   * path — they must not drift apart.
+   */
+  const workDeadlineMs = config.workDeadlineMs
+    ? Math.max(2_000, config.workDeadlineMs)
+    : Math.max(20_000, Math.floor(config.intervalMs * 0.4));
+
   const useLease = config.lease !== false;
   const lease = useLease
     ? new Lease({
@@ -827,6 +853,62 @@ export async function runScoutDaemon(options = {}) {
         const at = Date.now();
         try { return await fn(); } finally { steps[name] = Date.now() - at; }
       };
+
+      const ledgerPath = path.join(config.dataDir, 'inference-receipts.jsonl');
+
+      /**
+       * Pick the backend before anything else, because the burst below needs it.
+       *
+       * It used to be selected beside the burst, halfway down the cycle. Nothing
+       * else here depends on it, so moving it up costs one reachability check at
+       * a different moment and buys the whole overlap.
+       */
+      let cycleBackend = null;
+      let cycleReal = false;
+      try {
+        const picked = await timed('backend', () => selectBackend({}));
+        cycleBackend = picked.backend;
+        cycleReal = picked.real;
+        if (cycleReal !== lastBackendWasReal) {
+          console.log(cycleReal
+            ? `[Work] Real model reachable again — ${cycleBackend.id}${cycleBackend.model ? ` (${cycleBackend.model})` : ''}.`
+            : '[Work] NO REAL MODEL — falling back to the simulator. These sessions count for nothing. '
+              + 'Start Ollama, or set an inference API key.');
+          lastBackendWasReal = cycleReal;
+        }
+      } catch (err) {
+        console.log(`[Work] Backend selection failed — ${err.message}`);
+      }
+
+      /**
+       * The burst runs alongside the network lanes instead of after them.
+       *
+       * Not awaited here on purpose — it is awaited at Step D, where it always
+       * was, so the ordering of everything that reads `work` is unchanged. The
+       * catch is attached now rather than there: an un-awaited promise that
+       * rejects in between would be an unhandled rejection, which on this daemon
+       * means the process, not the cycle.
+       *
+       * The kibble lanes still call the same model and will now queue behind
+       * this. That is deliberate and it is the trade: measured 2026-09-05, the
+       * board's scorer sits half a million messages behind a room that retains
+       * an hour and a half, so those lanes are writing into a hole, while this
+       * one is the throughput the testnet is scored on.
+       */
+      let burstInFlight = null;
+      if (carriedWorkState && cycleBackend) {
+        burstInFlight = runBurst({
+          state: carriedWorkState,
+          seen: seenWork,
+          backend: cycleBackend,
+          identity: scoutIdentity,
+          deadlineMs: workDeadlineMs,
+          ledgerPath
+        }).catch((err) => {
+          console.log(`[Work] Burst failed — ${err.message}`);
+          return { planned: 0, scheduled: 0, completed: 0, genuineSessions: 0, genuineSpend: 0, elapsedMs: 0, byTask: {}, stoppedBecause: `failed: ${err.message}` };
+        });
+      }
 
       // Step A: Scout Agent Turn (/r/lobby)
       const scoutResult = await timed('scout', () => scoutEngine.runTurn({ room: config.room }));
@@ -1031,28 +1113,15 @@ export async function runScoutDaemon(options = {}) {
       // actually scored on, and until now the runner existed without ever being
       // called. The deadline keeps a slow model from eating the whole cycle.
       let work = { genuineSessions: 0, genuineSpend: 0, completed: 0 };
-      const ledgerPath = path.join(config.dataDir, 'inference-receipts.jsonl');
       try {
-        const { backend, real } = await selectBackend({});
         /**
-         * Say it out loud when the model is gone.
-         *
-         * Falling back to the simulator is silent by design — nothing errors, the
-         * cycle completes, sessions are counted. But a simulated receipt can
-         * never be evidence, so an agent quietly running on it is doing work
-         * that scores zero, indefinitely. Ollama does not start with Windows, so
-         * one reboot is all it takes.
-         *
-         * Announced on the transition rather than every cycle: a warning that
-         * repeats sixty times an hour is one nobody reads.
+         * Both picked at the top of the cycle now, so the burst could start
+         * against them while the network lanes ran. The announce-on-transition
+         * logic moved up with them; a model that vanishes is still said once.
          */
-        if (real !== lastBackendWasReal) {
-          console.log(real
-            ? `[Work] Real model reachable again — ${backend.id}${backend.model ? ` (${backend.model})` : ''}.`
-            : '[Work] NO REAL MODEL — falling back to the simulator. These sessions count for nothing. '
-              + 'Start Ollama, or set an inference API key.');
-          lastBackendWasReal = real;
-        }
+        const backend = cycleBackend;
+        const real = cycleReal;
+        if (!backend) throw new Error('no backend this cycle');
 
         // Step D0: the kibble board. Scout answers one job for real (never on
         // the simulator) and Scribe hygiene-attests one thin delivery — the two
@@ -1230,30 +1299,40 @@ export async function runScoutDaemon(options = {}) {
           }
         }
 
-        work = await runBurst({
-          /**
-           * All four sources of work, not just the one.
-           *
-           * The planner reads five task kinds and only ever received messages to
-           * classify, so 10,792 of 10,792 receipts on disk were one task —
-           * measurable proof that three capabilities were built, tested and then
-           * never handed an input. The series and the questions were already in
-           * scope here; nothing was missing but the wiring.
-           */
-          state: {
-            unclassified: recentMessages,
-            sourceChange: readSourceChange(config.dataDir),
-            measurements: readMeasurements(),
-            pendingQuestions: pendingQuestions.map((q) => ({ text: q.text, facts: FACTS }))
-          },
-          seen: seenWork,
-          backend,
-          identity: scoutIdentity,
-          deadlineMs: config.workDeadlineMs
-            ? Math.max(2_000, config.workDeadlineMs)
-            : Math.max(20_000, Math.floor(config.intervalMs * 0.4)),
-          ledgerPath
-        });
+        /**
+         * All four sources of work, not just the one.
+         *
+         * The planner reads five task kinds and only ever received messages to
+         * classify, so 10,792 of 10,792 receipts on disk were one task —
+         * measurable proof that three capabilities were built, tested and then
+         * never handed an input. The series and the questions were already in
+         * scope here; nothing was missing but the wiring.
+         */
+        const gathered = {
+          unclassified: recentMessages,
+          sourceChange: readSourceChange(config.dataDir),
+          measurements: readMeasurements(),
+          pendingQuestions: pendingQuestions.map((q) => ({ text: q.text, facts: FACTS }))
+        };
+
+        /**
+         * Either the burst that has been running since the top of this cycle, or
+         * — on the very first cycle, when there was nothing carried to run — the
+         * old inline burst on what we just gathered. After the first cycle the
+         * inline path is never taken again.
+         */
+        work = burstInFlight
+          ? await burstInFlight
+          : await runBurst({
+            state: gathered,
+            seen: seenWork,
+            backend,
+            identity: scoutIdentity,
+            deadlineMs: workDeadlineMs,
+            ledgerPath
+          });
+
+        carriedWorkState = gathered;
         trimSeen(seenWork);
         saveSeen(seenWork, seenWorkPath);
         if (work.scheduled > 0) {
