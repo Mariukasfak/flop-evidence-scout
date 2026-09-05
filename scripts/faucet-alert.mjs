@@ -53,10 +53,22 @@ async function fromListing() {
     }
     const json = await res.json();
     const rows = Array.isArray(json) ? json : (json.rooms || []);
-    return rows
+    const names = rows
       .map((row) => (typeof row === 'string' ? row : (row?.room ?? row?.name ?? '')))
       .map((name) => String(name).trim())
-      .filter((name) => name && looksLikeFaucet(name));
+      .filter(Boolean);
+    const hits = names.filter(looksLikeFaucet);
+    /**
+     * Say what was seen, not just what matched. A silent "clear" is the same
+     * answer whether the listing held fifty rooms and none looked like a
+     * faucet, or held nothing this reader could parse — and those want
+     * opposite fixes. The first run of this in CI printed "clear" against a
+     * listing that demonstrably contained `faucet`, and there was no way to
+     * tell which of the two had happened.
+     */
+    console.log(`Room listing: ${names.length} rooms, ${hits.length} faucet-shaped`
+      + `${names.length ? ` (first: ${names.slice(0, 5).join(', ')})` : ` — raw keys: ${JSON.stringify(Object.keys(json || {})).slice(0, 120)}`}`);
+    return hits;
   } catch (err) {
     // A radar that fails the build when the venue has a bad minute is worse
     // than one that misses a tick: the next run is fifteen minutes away.
