@@ -155,6 +155,7 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
   const mockKv = new Map();
   const postedMessages = [];
   const claimedRooms = [];
+  let listedRooms = [];
 
   before(async () => {
     server = http.createServer((req, res) => {
@@ -163,6 +164,14 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
       if (req.method === 'GET' && url.pathname === '/health') {
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ status: 'ok', version: 'technocore-0.9' }));
+        return;
+      }
+
+      // The venue's room listing. `listedRooms` is what a test wants the
+      // listing to hold; the real one answers with objects, so this does too.
+      if (req.method === 'GET' && url.pathname === '/rooms') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ rooms: listedRooms.map((room) => ({ room })) }));
         return;
       }
 
@@ -657,6 +666,36 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
     assert.equal(result.discoveredRooms >= 2, true);
     assert.equal(result.faucetDiscovered, true);
     assert.equal(result.faucetAlerts[0].room, 'flop-testnet-faucet');
+  });
+
+  /**
+   * The events feed is a ring, so a room whose `created` line has scrolled out
+   * is invisible to a watcher that reads only events. That is not a corner
+   * case: `/r/faucet` took 20,468 messages from 20,440 DIDs in half an hour on
+   * 2026-09-05 while this radar reported clear, because its creation line was
+   * long gone. The listing is the second eye.
+   */
+  test('scribe faucet radar also sees a room that only the listing knows about', async () => {
+    const { ScribeEngine } = await import('../src/scribe-engine.mjs');
+
+    listedRooms = ['lobby', 'faucet', 'gpu-miners'];
+    const scribe = new ScribeEngine({
+      identity: generateIdentity(),
+      scoutIdentity: generateIdentity(),
+      client: new TechnocoreClient({ baseUrl: serverUrl }),
+      guardrails: new Guardrails({ minCooldownMs: 0 })
+    });
+
+    const first = await scribe.runTurn({ eventsRoom: 'lobby', lobbyRoom: 'lobby' });
+    const viaListing = (first.faucetAlerts || []).filter((h) => h.via === 'rooms');
+    assert.deepEqual(viaListing.map((h) => h.room), ['faucet'], 'the listed faucet room is reported, gpu-miners is not');
+
+    // And a standing room is news once. Re-reporting it every turn is how a
+    // notifier that fires on a 15-minute tick buries the signal it exists for.
+    const second = await scribe.runTurn({ eventsRoom: 'lobby', lobbyRoom: 'lobby' });
+    assert.equal((second.faucetAlerts || []).filter((h) => h.via === 'rooms').length, 0);
+
+    listedRooms = [];
   });
 
   test('room ownership claim signs the documented room-owners payload', async () => {

@@ -200,6 +200,34 @@ export class ScribeEngine {
       }
     }
 
+    /**
+     * The same radar, pointed at the room list instead of the creation feed.
+     *
+     * On 2026-09-05 `/r/faucet` was listed in `/rooms` and taking eleven
+     * messages a second while this engine reported "faucet radar: clear" —
+     * because it only ever read `created` lines, and that one had long since
+     * scrolled out of the events ring. An hour of that room is the event this
+     * whole lane exists to catch, and it was invisible.
+     *
+     * Already-known rooms are filtered out here rather than in the alert, so a
+     * standing room does not re-fire on every turn: this reports a room once,
+     * the first turn we see it, whichever read found it.
+     */
+    try {
+      const known = new Set((this.localState.faucetHits || []).map((h) => h.room));
+      for (const roomName of await this.client.listRooms()) {
+        if (known.has(roomName) || !looksLikeFaucet(roomName)) continue;
+        this.localState.faucetDiscovered = true;
+        const hit = { room: roomName, seq: 0, at: new Date().toISOString(), via: 'rooms' };
+        this.localState.faucetHits = [...(this.localState.faucetHits || []), hit].slice(-10);
+        faucetAlerts.push(hit);
+        known.add(roomName);
+      }
+    } catch {
+      // A listing we cannot read is not a reason to fail the turn; the events
+      // lane above still runs, and the next turn tries again.
+    }
+
     // 4. Check for co-op peer sync with Scout Agent
     const scoutKey = this.scoutIdentity?.did ? getDidShardedPath(this.scoutIdentity.did).key : null;
     const scoutMailbox = scoutKey ? `mb-p-scout-${scoutKey}` : null;

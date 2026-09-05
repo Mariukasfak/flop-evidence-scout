@@ -153,6 +153,40 @@ export class TechnocoreClient {
     if (this.readOnly) throw new Error(`refusing to ${what}: ${this.readOnlyReason || 'dry run'}`);
   }
 
+  /**
+   * The room names this venue currently lists.
+   *
+   * `/r/events` says only what was *created*, and it is a ring. A room whose
+   * creation line scrolled past before we read it is invisible to an
+   * events-only watcher forever — not hypothetically: `/r/faucet` took 20,468
+   * messages from 20,440 DIDs in half an hour on 2026-09-05 while our faucet
+   * radar, which watched creation events alone, never learned the room
+   * existed. The two reads are complementary. Events catch a room the second
+   * it appears; the listing catches the one we were not watching for.
+   *
+   * Names only, and treated as data: a room name is a string a stranger chose.
+   */
+  async listRooms() {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await this.fetch(`${this.baseUrl}/rooms?format=json`, {
+        headers: { 'user-agent': 'FLOP-Evidence-Scout/1.0', accept: 'application/json' },
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      if (!response.ok) throw new Error(`Technocore rooms error: HTTP ${response.status}`);
+      const json = await response.json();
+      const rows = Array.isArray(json) ? json : (json.rooms || []);
+      return rows
+        .map((row) => (typeof row === 'string' ? row : (row?.room ?? row?.name ?? '')))
+        .map((name) => String(name).trim())
+        .filter(Boolean);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async readRoom(room = 'lobby', { since = null, wait = 0, limit = 50, format = 'text' } = {}) {
     const params = new URLSearchParams();
     if (since !== null && since !== undefined) params.set('since', String(since));
