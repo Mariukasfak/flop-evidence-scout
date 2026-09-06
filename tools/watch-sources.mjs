@@ -60,7 +60,15 @@ const SOURCES = [
   // gained a link to it. Watching the apex was never going to be enough, so the
   // teaser is watched directly AND link discovery below reports any new path.
   { id: 'flop-teaser', url: 'https://flop.finance/teaser/', kind: 'html' },
-  { id: 'upstream-commits', url: 'https://api.github.com/repos/flop-labs/technocore-chat/commits?per_page=5', kind: 'gh' },
+    /**
+   * Thirty, because five was a window and not a record.
+   *
+   * The page size only bounds how far behind this watch may fall before it
+   * starts losing commits outright. At the observed upstream rate an hourly
+   * run needs a handful; thirty covers a run that fails for most of a day.
+   * `windowOverflowed` says when even that was not enough.
+   */
+  { id: 'upstream-commits', url: 'https://api.github.com/repos/flop-labs/technocore-chat/commits?per_page=30', kind: 'gh' },
   { id: 'upstream-releases', url: 'https://api.github.com/repos/flop-labs/technocore-chat/releases?per_page=1', kind: 'gh' },
   /**
    * Hayes writes here, and this list did not have him.
@@ -149,6 +157,34 @@ function normalise(kind, body) {
       .trim();
   }
   return body.trim();
+}
+
+/**
+ * Every commit the fetch returned, newest first, so a change can name the ones
+ * that landed rather than only the last one.
+ *
+ * `summarise` reports the newest commit and always did. That was the whole bug:
+ * the request asked for five commits and the summary read `[0]`, so four of
+ * every five were fetched, parsed and thrown away. Two of the largest upstream
+ * changes of 2026-09-05 — the 0.12.1 release and `feat(humans)`, which added
+ * did:key sign-in, passkeys and agent delegation — landed between hourly runs
+ * behind a newer commit and were never reported. The operator brought both to
+ * this project by hand.
+ *
+ * It is the same failure this project reported upstream as
+ * flop-labs/technocore-chat#481 on 2026-09-05: a consumer that falls further
+ * behind than its window silently loses records and cannot tell. Worth saying
+ * plainly, since we filed that one.
+ */
+function commitList(body) {
+  try {
+    return JSON.parse(body).map((c) => ({
+      sha: c.sha.slice(0, 7),
+      title: c.commit.message.split('\n')[0].slice(0, 100)
+    }));
+  } catch {
+    return undefined;
+  }
 }
 
 /** A human-readable marker per source, so a diff says something, not just "hash changed". */
@@ -245,11 +281,30 @@ async function main() {
         : undefined;
 
       const links = source.kind === 'html' ? discoverLinks(body) : undefined;
+      const commits = source.id === 'upstream-commits' ? commitList(body) : undefined;
 
-      sources[source.id] = { url: source.url, digest, summary, signals, paths, links, checkedAt: now };
+      sources[source.id] = { url: source.url, digest, summary, signals, paths, links, commits, checkedAt: now };
 
       const before = prevSources[source.id];
-      if (before && before.digest !== digest) {
+
+      /**
+       * A source coming back from an outage is not a content change.
+       *
+       * `hayes-substack` has answered the scheduled runner 403 since 2026-08-30
+       * while answering this machine 200, so its stored digest is null. Compared
+       * against null, every local run reported the whole feed as "changed" and
+       * every word in it as a fresh signal — "SIGNAL: genesis", hourly, about a
+       * feed nobody had edited. This file already warns twice that an alert
+       * which cries wolf is one nobody reads; this was the third time.
+       */
+      const recovered = Boolean(before && !before.digest && before.error);
+      if (recovered) {
+        changes.push({ id: source.id, url: source.url, recovered: true,
+          was: `unreachable ×${before.consecutiveFailures || 1} since ${(before.failingSince || '').slice(0, 10)}`,
+          now: summary });
+      }
+
+      if (before && before.digest && before.digest !== digest) {
         const change = { id: source.id, url: source.url, was: before.summary, now: summary };
 
         // A route appearing is the event; the digest moving is just how we noticed.
@@ -267,6 +322,20 @@ async function main() {
           if (removed.length) change.removedPaths = removed;
         }
 
+        /**
+         * Name every commit since the last run, not just the newest.
+         *
+         * When every commit in the page is new the gap is at least the page and
+         * possibly larger, which is the one thing a windowed consumer can still
+         * honestly say about what it lost.
+         */
+        if (commits && Array.isArray(before.commits)) {
+          const seen = new Set(before.commits.map((c) => c.sha));
+          const added = commits.filter((c) => !seen.has(c.sha));
+          if (added.length) change.addedCommits = added;
+          if (added.length === commits.length) change.windowOverflowed = commits.length;
+        }
+
         if (source.kind === 'text') {
           const beforeLines = new Set((before.body || '').split('\n'));
           const added = normalised.split('\n')
@@ -280,7 +349,7 @@ async function main() {
 
       // Report a signal word the first time it shows up in a source that never
       // carried it, whether or not anything else about the source changed.
-      if (before) {
+      if (before && !recovered) {
         const seenBefore = new Set((before.signals || []).map((s) => s.split('×')[0]));
         const fresh = signals.map((s) => s.split('×')[0]).filter((w) => !seenBefore.has(w));
         if (fresh.length) {
@@ -389,9 +458,19 @@ async function main() {
 
   console.log(`[watch] ${changes.length} source change(s), ${newRooms.length} new room(s), ${signalAlerts.length} signal-word alert(s).`);
   for (const c of changes) {
-    console.log(`  ${c.id}: ${c.was}  ->  ${c.now}`);
+    console.log(`  ${c.id}: ${c.was}  ->  ${c.now}${c.recovered ? '   (source recovered — not a content change)' : ''}`);
     if (c.addedPaths) console.log(`    NEW ROUTES: ${c.addedPaths.join(', ')}`);
     if (c.addedLinks) console.log(`    NEW PAGES: ${c.addedLinks.join(', ')}`);
+    // Every commit since the last run, oldest last, because a list that shows
+    // only its newest entry is the bug this reporting exists to end.
+    if (c.addedCommits) {
+      console.log(`    ${c.addedCommits.length} NEW COMMIT(S):`);
+      for (const k of c.addedCommits) console.log(`      ${k.sha}  ${k.title}`);
+    }
+    if (c.windowOverflowed) {
+      console.log(`    WINDOW OVERFLOWED: all ${c.windowOverflowed} fetched commits were new, `
+        + 'so at least that many landed and possibly more were missed.');
+    }
   }
   for (const r of newRooms) console.log(`  new room: ${r}`);
   for (const a of signalAlerts) console.log(`  SIGNAL in ${a.id}: ${a.words.join(', ')}`);
