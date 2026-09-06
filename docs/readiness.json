@@ -1,8 +1,8 @@
 {
-  "checkedAt": "2026-09-06T19:12:38.950Z",
+  "checkedAt": "2026-09-06T21:23:15.868Z",
   "summary": {
-    "ready": 1,
-    "action": 11,
+    "ready": 2,
+    "action": 10,
     "blocked": 2,
     "unreachable": 0
   },
@@ -11,14 +11,14 @@
       "id": "did-scout",
       "label": "Scout identity published",
       "state": "ACTION",
-      "detail": "/kv/did-e8/791c48f78edc77 → 404",
+      "detail": "/kv/did-c4/6fe2837597b509 → 404",
       "fix": "Run the daemon once so it republishes its DID note."
     },
     {
       "id": "did-scribe",
       "label": "Scribe identity published",
       "state": "ACTION",
-      "detail": "/kv/did-cf/72e6d6fcac456b → 404",
+      "detail": "/kv/did-5e/9c519121a4a3b8 → 404",
       "fix": "Run the daemon once so it republishes its DID note."
     },
     {
@@ -66,9 +66,9 @@
     {
       "id": "ledger",
       "label": "Spend ledger is intact",
-      "state": "ACTION",
-      "detail": "0 receipts across 0 ledger(s), 0 counted, 0 simulated, 0 rejected, 0 malformed — official FLOP spent: 0 (no paid endpoint exists yet)",
-      "fix": "Run the agent, or tools/inference-bench.mjs, to start the ledger."
+      "state": "READY",
+      "detail": "29 receipts across 1 ledger(s), 29 counted, 0 simulated, 0 rejected, 0 malformed — official FLOP spent: 0 (no paid endpoint exists yet)",
+      "fix": "Investigate rejected or malformed receipts before trusting the total."
     },
     {
       "id": "source-watch",
