@@ -108,10 +108,14 @@ test('a receipt carries no prompt and no completion', async () => {
 
 test('a backend failure is recorded rather than thrown', async () => {
   const session = buildTask('classify-message', { text: 'gm', room: 'lobby' });
-  const { receipt, error } = await runSession(session, { backend: flopSessionBackend, identity });
+  const { receipt, error } = await runSession(session, { backend: flopSessionBackend(), identity });
 
   assert.equal(receipt.result.ok, false);
-  assert.match(error, /No Flop inference endpoint exists/);
+  assert.match(error, /No Flop inference endpoint is configured/);
+  // The wording moved from "exists" to "is configured" when the route became an
+  // environment variable: the endpoint may well exist by now, we just have not
+  // been given it. What must not move is the reason it refuses to look for one.
+  assert.match(error, /waits for the route to be documented rather than guessing it/);
   assert.equal(receipt.result.responseHash, null);
   assert.equal(isEvidenceOfWork(receipt), false);
 });

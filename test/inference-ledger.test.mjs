@@ -97,7 +97,7 @@ test('simulated receipts are stored as history and never counted', async () => {
 test('a failed session is recorded and excluded from the total', async () => {
   const p = tempLedger();
   const session = buildTask('classify-message', { text: 'gm', room: 'lobby' });
-  const { receipt } = await runSession(session, { backend: flopSessionBackend, identity });
+  const { receipt } = await runSession(session, { backend: flopSessionBackend(), identity });
   appendReceipt(receipt, p);
 
   const totals = ledgerTotals(p);

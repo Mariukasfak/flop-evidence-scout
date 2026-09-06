@@ -347,18 +347,120 @@ export function apiBackend({ config = loadApiConfig(), timeoutMs = 60_000 } = {}
  * Kept as an explicit refusal rather than an absence, so the shape of the switch
  * is visible and the reason for the refusal is stated where someone will read it.
  */
-export const flopSessionBackend = {
-  id: 'flop-session',
-  simulated: false,
-  available: async () => false,
-  async generate() {
-    throw new Error(
-      'No Flop inference endpoint exists. The teaser puts testnet in Q4 2026 and no session '
-      + 'route is published in technocore.chat/openapi.json. auth.md asks that nobody probe for '
-      + 'unpublished paths, so this backend waits for the route to be documented rather than guessing it.'
-    );
-  }
-};
+/**
+ * The backend the whole project is waiting for, and the one thing that must not
+ * need a deploy on the day it arrives.
+ *
+ * It stayed `available: async () => false` because no session route is published
+ * and auth.md asks that nobody probe for unpublished paths. That reasoning still
+ * holds and is unchanged here: with no `FLOP_SESSION_URL` set, this backend is
+ * unavailable and `generate` throws the same explanation it always did. Nothing
+ * is guessed and nothing is probed.
+ *
+ * What changes is who supplies the route. Before, it was this file — so faucet
+ * day meant editing code, running tests, pushing, waiting for the update timer
+ * and verifying a restart, on the one day when the queue is 20,000 agents deep.
+ * Now it is an environment variable, so faucet day is one line in `.env.local`
+ * and a restart the daemon already does by itself.
+ *
+ * `maxConcurrency` is 4 rather than Ollama's 1 on this file's own reasoning:
+ * concurrency "only buys something against a backend served by many machines,
+ * which is exactly what the Flop network is meant to be". Tunable, because the
+ * right number is a property of the network and we cannot know it yet.
+ *
+ * The request shape below is the ordinary one — model, prompt, a token ceiling —
+ * and the reply is read from whichever of the usual fields carries the text.
+ * When the route is published, THIS is the function to check against the spec,
+ * and it is the only one: everything downstream of it — receipts, the signed
+ * ledger, spend totals, the budget that stops the burst — is already proven by
+ * `test/flop-session-backend.test.mjs` against a stand-in server.
+ */
+export function flopSessionBackend({
+  url = process.env.FLOP_SESSION_URL,
+  token = process.env.FLOP_SESSION_TOKEN,
+  model = process.env.FLOP_SESSION_MODEL || 'flop-default',
+  maxConcurrency = Number(process.env.FLOP_SESSION_CONCURRENCY) || 4,
+  timeoutMs = 120_000
+} = {}) {
+  const headers = () => ({
+    'content-type': 'application/json',
+    ...(token ? { authorization: `Bearer ${token}` } : {})
+  });
+
+  return {
+    id: 'flop-session',
+    simulated: false,
+    model,
+    maxConcurrency,
+
+    /**
+     * Unset means unavailable, and that is the whole of the old behaviour.
+     *
+     * When it is set, the check is against the exact URL we were handed — not a
+     * `/health` or `/status` beside it, which would be the guessing this backend
+     * exists to avoid. Any answer below 500 counts as reachable, because a route
+     * that refuses a bare GET with 404 or 405 is still a route that is there;
+     * only a dead socket or a broken server is not.
+     */
+    async available() {
+      if (!url) return false;
+      try {
+        const res = await fetch(url, { method: 'GET', headers: headers(), signal: AbortSignal.timeout(4000) });
+        return res.status < 500;
+      } catch {
+        return false;
+      }
+    },
+
+    async generate({ prompt, request }) {
+      if (!url) {
+        throw new Error(
+          'No Flop inference endpoint is configured. The teaser puts testnet in Q4 2026 and no '
+          + 'session route is published in technocore.chat/openapi.json. auth.md asks that nobody '
+          + 'probe for unpublished paths, so this backend waits for the route to be documented '
+          + 'rather than guessing it. Set FLOP_SESSION_URL once it is.'
+        );
+      }
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({
+          model,
+          prompt,
+          max_tokens: request?.maxTokens ?? 512
+        }),
+        signal: AbortSignal.timeout(Math.min(timeoutMs, (request?.maxLatencyMs ?? timeoutMs) * 2))
+      });
+      if (!res.ok) throw new Error(`flop session route returned ${res.status}`);
+      const body = await res.json();
+
+      const text = body.text ?? body.response ?? body.output ?? body.completion ?? '';
+
+      return {
+        text,
+        modelId: body.model ?? model,
+        promptTokens: body.prompt_tokens ?? body.usage?.prompt_tokens,
+        completionTokens: body.completion_tokens ?? body.usage?.completion_tokens,
+        parameters: null,
+        /**
+         * What the network says this cost, kept verbatim beside the receipt.
+         *
+         * The fee that reaches the ledger today is `costPerSession`, decided by
+         * the caller before the request. If the published route reports the fee
+         * it actually charged, this is where it arrives, and reconciling the two
+         * is the second edit faucet day needs — the spend total is the number
+         * the allocation is computed from, so it must be theirs, not our estimate.
+         */
+        raw: {
+          reportedFeeFlop: body.fee_flop ?? body.feeFlop ?? null,
+          sessionId: body.session_id ?? body.id ?? null,
+          minerId: body.miner ?? body.miner_id ?? null
+        }
+      };
+    }
+  };
+}
 
 /**
  * Pick the best backend actually available, preferring real inference.
@@ -372,7 +474,7 @@ export async function selectBackend({ preferred = null, model } = {}) {
   if (preferred) candidates.push(preferred);
   // Local Ollama outranks the API: no rate limits, no text leaving the machine.
   // The API outranks the simulator: real inference beats none.
-  candidates.push(flopSessionBackend, ollamaBackend({ ...(model ? { model } : {}) }), apiBackend(), simulatedBackend);
+  candidates.push(flopSessionBackend(), ollamaBackend({ ...(model ? { model } : {}) }), apiBackend(), simulatedBackend);
 
   for (const backend of candidates) {
     if (await backend.available()) {
