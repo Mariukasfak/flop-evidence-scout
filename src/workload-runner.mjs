@@ -80,6 +80,36 @@ export const TASK_PRIORITY = Object.freeze({
   'classify-message': 8           // useful, endless, and the natural filler
 });
 
+/**
+ * The handful of tasks worth a stronger model than the one on this box.
+ *
+ * Ollama runs qwen2.5:3b on two shared vCPUs and does 79% of all sessions —
+ * `classify-message`, endlessly, on room text nobody reads twice. A 3B model is
+ * the right tool for that and the wrong one for the few outputs a stranger
+ * actually reads.
+ *
+ * These four are chosen on measured volume, not on taste. Across the last 2,500
+ * receipts: classify-message 1,980, kibble-answer 343, kibble-judge 164,
+ * kibble-reason 8, explain-measurement 5. So this set is roughly 0.5% of
+ * sessions — about thirty a day — which fits inside a free tier with room to
+ * spare, while the 99.5% stays local where it costs nothing and leaks nothing.
+ *
+ * What they have in common: rare, public, and judged by a human or another
+ * agent rather than by a regex. A source change misread is a protocol change
+ * missed. A drafted answer and a kibble reason are read by a stranger, in
+ * public, under our signature.
+ *
+ * Deliberately NOT here: kibble-answer and kibble-judge. They are public too,
+ * but at 507 sessions per 2,500 they would drain the quota in an afternoon and
+ * buy nothing — the board that scores them is half a million messages behind.
+ */
+export const STRONG_TASKS = Object.freeze(new Set([
+  'summarise-source-change',
+  'draft-answer',
+  'kibble-reason',
+  'explain-measurement'
+]));
+
 export function prioritise(plan) {
   return [...plan].sort(
     (a, b) => (TASK_PRIORITY[a.taskId] ?? 99) - (TASK_PRIORITY[b.taskId] ?? 99)
@@ -112,6 +142,14 @@ export async function runWorkload({
   identity,
   budget = Infinity,
   costPerSession = DEFAULT_SESSION_COST,
+  /**
+   * An optional better model for the tasks in STRONG_TASKS.
+   *
+   * Optional on purpose: unset, every job runs exactly where it ran before. The
+   * daemon supplies it only when an API backend is configured AND is not
+   * already the primary, since routing a backend to itself buys nothing.
+   */
+  strongBackend = null,
   concurrency = backend?.maxConcurrency ?? DEFAULT_CONCURRENCY,
   deadlineMs = null,
   model,
@@ -168,7 +206,30 @@ export async function runWorkload({
       return null;
     }
 
-    const { receipt, completion } = await runSession(session, { backend, identity, now });
+    /**
+     * Try the better model where it earns its keep, and never lose a job to it.
+     *
+     * A free tier answers 429 without warning, and the local model is sitting
+     * right there. So a failed strong attempt is recorded — the ledger keeps
+     * failures, that is its contract — and the work is then done locally rather
+     * than dropped. The cost of the strong model being down is one wasted round
+     * trip, not a missing answer.
+     */
+    const useStrong = strongBackend && STRONG_TASKS.has(job.taskId);
+    let attempt = await runSession(session, {
+      backend: useStrong ? strongBackend : backend, identity, now
+    });
+
+    if (useStrong && !attempt.receipt.result.ok) {
+      try { appendReceipt(attempt.receipt, ledgerPath); } catch { /* never lose the run */ }
+      outcome.receipts.push(attempt.receipt);
+      outcome.strongFailed = (outcome.strongFailed || 0) + 1;
+      attempt = await runSession(session, { backend, identity, now });
+    } else if (useStrong) {
+      outcome.strongServed = (outcome.strongServed || 0) + 1;
+    }
+
+    const { receipt, completion } = attempt;
     outcome.ran.push(job);
 
     // Ledger every receipt, including failures and simulated runs. The ledger
@@ -229,12 +290,12 @@ export async function runWorkload({
  * point whose behaviour does not change when the faucet appears — only the
  * budget and the backend do.
  */
-export async function runBurst({ state = {}, backend, identity, budget = Infinity, costPerSession = DEFAULT_SESSION_COST, deadlineMs = 10 * 60 * 1000, model, ledgerPath, seen = null, now } = {}) {
+export async function runBurst({ state = {}, backend, strongBackend = null, identity, budget = Infinity, costPerSession = DEFAULT_SESSION_COST, deadlineMs = 10 * 60 * 1000, model, ledgerPath, seen = null, now } = {}) {
   const plan = planWorkload({ ...state, seen });
   if (plan.length === 0) {
     return { planned: 0, scheduled: 0, completed: 0, failed: 0, invalidOutput: 0, spend: 0, receipts: [], stoppedBecause: 'nothing to do', elapsedMs: 0, genuineSessions: 0, genuineSpend: 0, byTask: {} };
   }
-  const outcome = await runWorkload({ plan, backend, identity, budget, costPerSession, deadlineMs, model, ledgerPath, now });
+  const outcome = await runWorkload({ plan, backend, strongBackend, identity, budget, costPerSession, deadlineMs, model, ledgerPath, now });
 
   /**
    * Mark what actually RAN, not what was scheduled.

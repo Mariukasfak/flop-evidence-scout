@@ -14,7 +14,7 @@ import { recordCycle } from './shared-state.mjs';
 import { runBurst } from './workload-runner.mjs';
 import { loadSeen, saveSeen, trimSeen } from './seen-work.mjs';
 import { compactIfLarge } from './inference-ledger.mjs';
-import { selectBackend } from './inference-backends.mjs';
+import { selectBackend, apiBackend } from './inference-backends.mjs';
 import { TelemetryFeed } from './telemetry-feed.mjs';
 import { FACTS } from './flop-facts.mjs';
 import { updateDashboardFile } from './dashboard.mjs';
@@ -895,12 +895,26 @@ export async function runScoutDaemon(options = {}) {
        * an hour and a half, so those lanes are writing into a hole, while this
        * one is the throughput the testnet is scored on.
        */
+      /**
+       * A better model for the few tasks that earn one — see STRONG_TASKS.
+       *
+       * Only when an API key is configured, and only when it is not already the
+       * primary: if Ollama is down and the API took over, routing it to itself
+       * is a wasted branch. Unset, every job runs exactly where it ran before.
+       */
+      let strongBackend = null;
+      if (cycleBackend && cycleBackend.id !== 'api') {
+        const api = apiBackend();
+        if (await api.available()) strongBackend = api;
+      }
+
       let burstInFlight = null;
       if (carriedWorkState && cycleBackend) {
         burstInFlight = runBurst({
           state: carriedWorkState,
           seen: seenWork,
           backend: cycleBackend,
+          strongBackend,
           identity: scoutIdentity,
           deadlineMs: workDeadlineMs,
           ledgerPath
@@ -1327,6 +1341,7 @@ export async function runScoutDaemon(options = {}) {
             state: gathered,
             seen: seenWork,
             backend,
+            strongBackend,
             identity: scoutIdentity,
             deadlineMs: workDeadlineMs,
             ledgerPath
