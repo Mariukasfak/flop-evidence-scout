@@ -347,6 +347,40 @@ async function main() {
         changes.push(change);
       }
 
+      /**
+       * Announce a set the first time we are able to diff it, instead of
+       * adopting it in silence.
+       *
+       * Every `added*` comparison here is guarded on the previous state having
+       * the field — `Array.isArray(before.links)` and its siblings. That guard
+       * is correct, but it means the run that INTRODUCES a field can never
+       * report anything: whatever exists at that moment goes straight into the
+       * baseline unannounced and is invisible from then on, because it is never
+       * again "added".
+       *
+       * That is not hypothetical. flop.finance links `/apply/miner`,
+       * `/apply/validator` and `/apply/kol` — the only official application
+       * surfaces that exist, and the validator one asks nothing we cannot
+       * answer. All three sat in `docs/watch/state.json` under `flop-finance`
+       * from the day link discovery was added, and across 49 alert comments on
+       * the watch issue not one of them was ever mentioned. They were found on
+       * 2026-09-06 by reading the state file by hand.
+       *
+       * So a field that appears for the first time reports its whole contents
+       * once. Noisy exactly once per field per source, which is the correct
+       * price for never silently swallowing a set again.
+       */
+      if (before) {
+        const firstSeen = {};
+        if (links && !Array.isArray(before.links)) firstSeen.links = links;
+        if (paths && !Array.isArray(before.paths)) firstSeen.paths = paths;
+        if (commits && !Array.isArray(before.commits)) firstSeen.commits = commits.map((c) => `${c.sha} ${c.title}`);
+        if (Object.keys(firstSeen).length) {
+          changes.push({ id: source.id, url: source.url, firstSeen,
+            was: 'not watched at this level before', now: summary });
+        }
+      }
+
       // Report a signal word the first time it shows up in a source that never
       // carried it, whether or not anything else about the source changed.
       if (before && !recovered) {
@@ -467,6 +501,12 @@ async function main() {
       console.log(`    ${c.addedCommits.length} NEW COMMIT(S):`);
       for (const k of c.addedCommits) console.log(`      ${k.sha}  ${k.title}`);
     }
+    if (c.firstSeen) {
+      for (const [what, items] of Object.entries(c.firstSeen)) {
+        console.log(`    FIRST SEEN (${what}, never diffed before — reported once):`);
+        for (const i of items.slice(0, 40)) console.log(`      ${i}`);
+      }
+    }
     if (c.windowOverflowed) {
       console.log(`    WINDOW OVERFLOWED: all ${c.windowOverflowed} fetched commits were new, `
         + 'so at least that many landed and possibly more were missed.');
@@ -476,7 +516,43 @@ async function main() {
   for (const a of signalAlerts) console.log(`  SIGNAL in ${a.id}: ${a.words.join(', ')}`);
 }
 
-main().catch((err) => {
-  console.error('[watch] failed:', err.message);
-  process.exit(1);
-});
+/**
+ * What the watch currently knows, as opposed to what changed since last time.
+ *
+ * The file reports deltas, which is right for an alert and useless for the
+ * question "what is on flop.finance today". Answering that needed opening
+ * docs/watch/state.json in an editor, so nobody did, so three official
+ * application forms went unread for as long as they existed. One flag turns the
+ * standing picture into something a person can look at.
+ *
+ *   node tools/watch-sources.mjs --inventory
+ */
+function printInventory() {
+  const previous = fs.existsSync(STATE_PATH)
+    ? JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'))
+    : {};
+  const sources = previous.sources || {};
+  console.log(`[watch] inventory as of ${previous.checkedAt || 'never'}\n`);
+  for (const [id, s] of Object.entries(sources)) {
+    const health = s.error
+      ? `UNREACHABLE (${s.error}, ${s.consecutiveFailures || 1} in a row since ${(s.failingSince || '').slice(0, 10)})`
+      : (s.summary || 'ok');
+    console.log(`${id}\n  ${s.url}\n  ${health}`);
+    if (s.links?.length) console.log(`  pages:   ${s.links.join(' ')}`);
+    if (s.paths?.length) console.log(`  routes:  ${s.paths.length} (${s.paths.slice(0, 6).join(' ')}${s.paths.length > 6 ? ' …' : ''})`);
+    if (s.commits?.length) console.log(`  newest:  ${s.commits[0].sha} ${s.commits[0].title}`);
+    if (s.signals?.length) console.log(`  signals: ${s.signals.join(' ')}`);
+    console.log('');
+  }
+  const rooms = previous.interestingRooms || [];
+  if (rooms.length) console.log(`rooms of interest: ${rooms.join(' ')}`);
+}
+
+if (process.argv.includes('--inventory')) {
+  printInventory();
+} else {
+  main().catch((err) => {
+    console.error('[watch] failed:', err.message);
+    process.exit(1);
+  });
+}
