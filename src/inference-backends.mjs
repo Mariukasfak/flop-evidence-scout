@@ -286,6 +286,18 @@ export function loadApiConfig({ env = process.env, secretsPath = '.secrets/infer
  * minute, which comfortably covers a cycle's burst; a 429 is surfaced as a
  * failed session rather than retried in a loop that would double the pressure.
  */
+/**
+ * When the account said it was out of money, and for how long we believe it.
+ *
+ * Module-level rather than per-instance because `apiBackend()` is constructed
+ * fresh every cycle; state on the object would be forgotten before it was ever
+ * read.
+ */
+let apiExhaustedUntil = 0;
+
+/** A 429 that a refill will fix, versus one only a payment will. */
+const DEPLETED = /prepayment credits are depleted|billing|quota.*exceeded.*plan|RESOURCE_EXHAUSTED/i;
+
 export function apiBackend({ config = loadApiConfig(), timeoutMs = 60_000 } = {}) {
   return {
     id: 'api',
@@ -296,6 +308,10 @@ export function apiBackend({ config = loadApiConfig(), timeoutMs = 60_000 } = {}
     maxConcurrency: 2,
 
     async available() {
+      // An account we watched run out is not available, whatever the config
+      // says. Re-offered after the cooldown so a top-up is picked up without
+      // a restart.
+      if (Date.now() < apiExhaustedUntil) return false;
       // Configured means available. A probe request would spend the same free
       // quota the work needs, and a wrong key surfaces on the first real call
       // with a clear 401 instead of a silent fallback to the simulator.
@@ -319,7 +335,31 @@ export function apiBackend({ config = loadApiConfig(), timeoutMs = 60_000 } = {}
       });
 
       if (res.status === 429) {
-        throw new Error('api backend rate limited (HTTP 429) — the free tier will refill on its own');
+        /**
+         * Two different 429s wear the same number, and the old message asserted
+         * the wrong one.
+         *
+         * It said "the free tier will refill on its own". Measured 2026-09-06,
+         * the body actually said `Your prepayment credits are depleted` — a
+         * balance at zero, which no amount of waiting fixes. A message that
+         * tells the next reader to wait for something that will never arrive is
+         * worse than no message: it was still being believed a day later, by
+         * the process that wrote it.
+         *
+         * So the body decides the wording, and a depleted account also stops
+         * being offered for an hour. `available()` deliberately does not probe
+         * — a probe spends the quota the work needs — so without this every
+         * routed task would pay a full round trip to a wall, every cycle,
+         * forever.
+         */
+        const body = await res.text().catch(() => '');
+        // Never echo the body itself: an error body can quote the credential.
+        if (DEPLETED.test(body)) {
+          apiExhaustedUntil = Date.now() + 60 * 60_000;
+          throw new Error('api backend has no credit left (HTTP 429, RESOURCE_EXHAUSTED) — this does '
+            + 'NOT refill on its own; the account needs topping up. Standing down for an hour.');
+        }
+        throw new Error('api backend rate limited (HTTP 429) — a per-minute ceiling, which does refill');
       }
       if (res.status === 401 || res.status === 403) {
         // Deliberately does not echo anything from the response: an auth error
