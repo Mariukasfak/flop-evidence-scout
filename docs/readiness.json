@@ -1,5 +1,5 @@
 {
-  "checkedAt": "2026-09-06T17:05:03.078Z",
+  "checkedAt": "2026-09-06T19:12:38.950Z",
   "summary": {
     "ready": 1,
     "action": 11,
@@ -11,14 +11,14 @@
       "id": "did-scout",
       "label": "Scout identity published",
       "state": "ACTION",
-      "detail": "/kv/did-ac/328d4844cba72b → 404",
+      "detail": "/kv/did-e8/791c48f78edc77 → 404",
       "fix": "Run the daemon once so it republishes its DID note."
     },
     {
       "id": "did-scribe",
       "label": "Scribe identity published",
       "state": "ACTION",
-      "detail": "/kv/did-c4/6770f34eb4581a → 404",
+      "detail": "/kv/did-cf/72e6d6fcac456b → 404",
       "fix": "Run the daemon once so it republishes its DID note."
     },
     {

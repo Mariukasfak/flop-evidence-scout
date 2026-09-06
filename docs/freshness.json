@@ -1,5 +1,5 @@
 {
-  "checkedAt": "2026-09-06T17:05:03.388Z",
+  "checkedAt": "2026-09-06T19:12:39.219Z",
   "stale": 1,
   "combined": {
     "cycles": 0,
@@ -19,16 +19,16 @@
       "file": "docs/measurements/timeseries.json",
       "cadenceMin": 140,
       "toleranceMin": 480,
-      "newest": "2026-09-06T17:03:00.000Z",
-      "ageMin": 2.0518833333333335,
+      "newest": "2026-09-06T19:11:00.000Z",
+      "ageMin": 1.6497166666666667,
       "blockedBy": null,
       "state": "FRESH",
       "duty": {
-        "records": 72,
-        "spanHours": 291.05,
-        "expected": 125,
-        "ratio": 0.576,
-        "meanGapMin": 245.95774647887325,
+        "records": 73,
+        "spanHours": 293.18333333333334,
+        "expected": 126,
+        "ratio": 0.5793650793650794,
+        "meanGapMin": 244.31944444444446,
         "medianGapMin": 195,
         "worstGapMin": 1125,
         "apparentlyMissed": 65
@@ -40,8 +40,8 @@
       "file": "docs/watch/state.json",
       "cadenceMin": 140,
       "toleranceMin": 480,
-      "newest": "2026-09-06T17:03:23.477Z",
-      "ageMin": 1.6606,
+      "newest": "2026-09-06T19:11:16.951Z",
+      "ageMin": 1.3672,
       "blockedBy": null,
       "state": "FRESH",
       "duty": null
@@ -53,7 +53,7 @@
       "cadenceMin": 15,
       "toleranceMin": 90,
       "newest": "2026-09-06T14:04:21.667Z",
-      "ageMin": 180.69078333333334,
+      "ageMin": 308.28861666666666,
       "blockedBy": null,
       "state": "STALE",
       "duty": {
@@ -74,7 +74,7 @@
       "cadenceMin": 240,
       "toleranceMin": 2880,
       "newest": "2026-08-28T00:00:46.187Z",
-      "ageMin": 13984.282133333334,
+      "ageMin": 14111.879966666667,
       "blockedBy": null,
       "state": "QUIET",
       "duty": null
