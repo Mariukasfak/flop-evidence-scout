@@ -149,7 +149,7 @@ export function minerCase({ competingUnits = 10_000, units = 1, hourlyUsd = 0.45
     flopPerYear,
     costEurPerYear: monthly * 12,
     monthlyEur: monthly,
-    airdropNote: 'The miner airdrop is up to 1.2bn $FLOP across an unbounded field. '
+    airdropNote: 'The miner airdrop is 993,384,000 $FLOP across an unbounded field. '
       + 'Per-participant value cannot be stated because nothing caps the number of miners.'
   };
 }

@@ -778,7 +778,7 @@ describe('the reply gate is template-aware', () => {
     assert.equal(shouldRespond(spam).respond, true);
   });
 
-  test('the reply knowledge carries the Teaser, not the superseded interview', async () => {
+  test('the reply knowledge carries the Yellow Paper, not the superseded teaser', async () => {
     const { VERIFIED_FACTS } = await import('../src/knowledge.mjs');
     const all = JSON.stringify(VERIFIED_FACTS);
 
@@ -786,8 +786,13 @@ describe('the reply gate is template-aware', () => {
     assert.ok(!all.includes('OCTOBER 2026'), 'the October airdrop reading is refuted');
     assert.ok(!/~2 years until the first halving/.test(all), 'the team-share reading is refuted');
 
+    // The teaser's own genesis figure went the same way on 2026-09-05, when the
+    // Yellow Paper cut it from 3.5bn to 2,483,460,000. Same rule, one source later.
+    assert.ok(!all.includes('3.5bn') && !all.includes('3,5 mlrd'),
+      'the teaser genesis figure is superseded by Yellow Paper v0.5.0');
+
     // And the figures that replaced them are present.
-    assert.ok(all.includes('3.5bn') || all.includes('3,5 mlrd'));
+    assert.ok(all.includes('2,483,460,000') || all.includes('2 483 460 000'));
     assert.ok(all.includes('112'), 'real issuance per block');
   });
 });

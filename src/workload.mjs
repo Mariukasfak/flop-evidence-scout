@@ -220,9 +220,9 @@ export const TASKS = Object.freeze({
        * 100,000,000 FLOP. Agent allocation: 20% to core team and partners.
        * Other allocations: 30% to liquidity mining..." and collected five
        * useful attestations for it. Every figure is invented: this repository's
-       * own CONFIRMED facts put the genesis airdrop at 3,500,000,000 of a ~17.2bn
-       * supply, split miners 1.2bn / agents 1.2bn / validators 305,505,000 /
-       * reserve 794,495,000, and separately record that there is no token sale
+       * own CONFIRMED facts put the genesis supply at 2,483,460,000, split
+       * miners 993,384,000 / agents 596,030,400 / validators 305,505,000 /
+       * reserve 588,540,600, and separately record that there is no token sale
        * and no investor allocation at all.
        *
        * So the board pays for confident invention and docks honest hedging,

@@ -70,18 +70,20 @@ test('the derived per-block split sums to exactly the block reward', () => {
 
 test('the agent airdrop frees at most a quarter of itself by inference', () => {
   const u = deriveAgentUnlock(GENESIS_AIRDROP.agents);
-  assert.equal(u.maxLiquid, 300_000_000);
-  assert.equal(u.inferenceRequired, 900_000_000);
+  // Yellow Paper v0.5.0 cut the agent pool from 1.2bn to 596,030,400; the ratio
+  // is the invariant under test, and it does not move with the pool size.
+  assert.equal(u.maxLiquid, 149_007_600);
+  assert.equal(u.inferenceRequired, 447_022_800);
   assert.equal(u.liquidShare, 0.25);
   // Every unlock consumes four tokens: three spent, one freed.
   assert.equal(u.maxLiquid + u.inferenceRequired, GENESIS_AIRDROP.agents);
 });
 
-test('the genesis airdrop breakdown adds up to the stated 3.5bn', () => {
+test('the genesis airdrop breakdown adds up to the stated 2.48bn', () => {
   const sum = GENESIS_AIRDROP.miners + GENESIS_AIRDROP.agents
     + GENESIS_AIRDROP.validators + GENESIS_AIRDROP.reserve;
   assert.equal(sum, GENESIS_AIRDROP.total);
-  assert.equal(sum, 3_500_000_000);
+  assert.equal(sum, 2_483_460_000);
 });
 
 test('the validator genesis pool divides into exactly 305,505 per seat', () => {

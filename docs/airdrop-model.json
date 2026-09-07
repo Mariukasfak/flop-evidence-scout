@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-28T11:38:48.806Z",
+  "generatedAt": "2026-09-07T12:14:31.523Z",
   "source": {
     "title": "The Flop Network — Teaser",
     "version": "0.1 (draft)",
@@ -55,11 +55,11 @@
     }
   },
   "genesisAirdrop": {
-    "miners": 1200000000,
-    "agents": 1200000000,
+    "miners": 993384000,
+    "agents": 596030400,
     "validators": 305505000,
-    "reserve": 794495000,
-    "total": 3500000000
+    "reserve": 588540600,
+    "total": 2483460000
   },
   "reconciliation": {
     "equivalents": 122202000,
@@ -159,12 +159,12 @@
     }
   ],
   "agent": {
-    "pool": 1200000000,
+    "pool": 596030400,
     "unlock": {
-      "allocation": 1200000000,
+      "allocation": 596030400,
       "unlockRatio": 3,
-      "maxLiquid": 300000000,
-      "inferenceRequired": 900000000,
+      "maxLiquid": 149007600,
+      "inferenceRequired": 447022800,
       "liquidShare": 0.25,
       "note": "Inference route only. Locked $FLOP is itself the spendable balance, so each unlock consumes 3 spent plus 1 freed. Staking is the other permitted use and its yield is unstated."
     },
@@ -212,41 +212,41 @@
             "participants": 1000,
             "multiple": 1,
             "share": 0.001,
-            "gross": 1200000,
-            "maxLiquid": 300000,
-            "inferenceRequired": 900000
+            "gross": 596030.4,
+            "maxLiquid": 149007.6,
+            "inferenceRequired": 447022.80000000005
           },
           {
             "participants": 1000,
             "multiple": 2,
             "share": 0.002,
-            "gross": 2400000,
-            "maxLiquid": 600000,
-            "inferenceRequired": 1800000
+            "gross": 1192060.8,
+            "maxLiquid": 298015.2,
+            "inferenceRequired": 894045.6000000001
           },
           {
             "participants": 1000,
             "multiple": 5,
             "share": 0.005,
-            "gross": 6000000,
-            "maxLiquid": 1500000,
-            "inferenceRequired": 4500000
+            "gross": 2980152,
+            "maxLiquid": 745038,
+            "inferenceRequired": 2235114
           },
           {
             "participants": 1000,
             "multiple": 10,
             "share": 0.01,
-            "gross": 12000000,
-            "maxLiquid": 3000000,
-            "inferenceRequired": 9000000
+            "gross": 5960304,
+            "maxLiquid": 1490076,
+            "inferenceRequired": 4470228
           },
           {
             "participants": 1000,
             "multiple": 25,
             "share": 0.025,
-            "gross": 30000000,
-            "maxLiquid": 7500000,
-            "inferenceRequired": 22500000
+            "gross": 14900760,
+            "maxLiquid": 3725190,
+            "inferenceRequired": 11175570
           }
         ]
       },
@@ -259,41 +259,41 @@
             "participants": 5000,
             "multiple": 1,
             "share": 0.0002,
-            "gross": 240000,
-            "maxLiquid": 60000,
-            "inferenceRequired": 180000
+            "gross": 119206.08,
+            "maxLiquid": 29801.52,
+            "inferenceRequired": 89404.56
           },
           {
             "participants": 5000,
             "multiple": 2,
             "share": 0.0004,
-            "gross": 480000,
-            "maxLiquid": 120000,
-            "inferenceRequired": 360000
+            "gross": 238412.16,
+            "maxLiquid": 59603.04,
+            "inferenceRequired": 178809.12
           },
           {
             "participants": 5000,
             "multiple": 5,
             "share": 0.001,
-            "gross": 1200000,
-            "maxLiquid": 300000,
-            "inferenceRequired": 900000
+            "gross": 596030.4,
+            "maxLiquid": 149007.6,
+            "inferenceRequired": 447022.80000000005
           },
           {
             "participants": 5000,
             "multiple": 10,
             "share": 0.002,
-            "gross": 2400000,
-            "maxLiquid": 600000,
-            "inferenceRequired": 1800000
+            "gross": 1192060.8,
+            "maxLiquid": 298015.2,
+            "inferenceRequired": 894045.6000000001
           },
           {
             "participants": 5000,
             "multiple": 25,
             "share": 0.005,
-            "gross": 6000000,
-            "maxLiquid": 1500000,
-            "inferenceRequired": 4500000
+            "gross": 2980152,
+            "maxLiquid": 745038,
+            "inferenceRequired": 2235114
           }
         ]
       },
@@ -306,41 +306,41 @@
             "participants": 25000,
             "multiple": 1,
             "share": 0.00004,
-            "gross": 48000.00000000001,
-            "maxLiquid": 12000.000000000002,
-            "inferenceRequired": 36000.00000000001
+            "gross": 23841.216,
+            "maxLiquid": 5960.304,
+            "inferenceRequired": 17880.912
           },
           {
             "participants": 25000,
             "multiple": 2,
             "share": 0.00008,
-            "gross": 96000.00000000001,
-            "maxLiquid": 24000.000000000004,
-            "inferenceRequired": 72000.00000000001
+            "gross": 47682.432,
+            "maxLiquid": 11920.608,
+            "inferenceRequired": 35761.824
           },
           {
             "participants": 25000,
             "multiple": 5,
             "share": 0.0002,
-            "gross": 240000,
-            "maxLiquid": 60000,
-            "inferenceRequired": 180000
+            "gross": 119206.08,
+            "maxLiquid": 29801.52,
+            "inferenceRequired": 89404.56
           },
           {
             "participants": 25000,
             "multiple": 10,
             "share": 0.0004,
-            "gross": 480000,
-            "maxLiquid": 120000,
-            "inferenceRequired": 360000
+            "gross": 238412.16,
+            "maxLiquid": 59603.04,
+            "inferenceRequired": 178809.12
           },
           {
             "participants": 25000,
             "multiple": 25,
             "share": 0.001,
-            "gross": 1200000,
-            "maxLiquid": 300000,
-            "inferenceRequired": 900000
+            "gross": 596030.4,
+            "maxLiquid": 149007.6,
+            "inferenceRequired": 447022.80000000005
           }
         ]
       },
@@ -353,41 +353,41 @@
             "participants": 533000,
             "multiple": 1,
             "share": 0.000001876172607879925,
-            "gross": 2251.40712945591,
-            "maxLiquid": 562.8517823639775,
-            "inferenceRequired": 1688.5553470919324
+            "gross": 1118.2559099437149,
+            "maxLiquid": 279.5639774859287,
+            "inferenceRequired": 838.6919324577862
           },
           {
             "participants": 533000,
             "multiple": 2,
             "share": 0.00000375234521575985,
-            "gross": 4502.81425891182,
-            "maxLiquid": 1125.703564727955,
-            "inferenceRequired": 3377.110694183865
+            "gross": 2236.5118198874297,
+            "maxLiquid": 559.1279549718574,
+            "inferenceRequired": 1677.3838649155723
           },
           {
             "participants": 533000,
             "multiple": 5,
             "share": 0.000009380863039399625,
-            "gross": 11257.03564727955,
-            "maxLiquid": 2814.2589118198875,
-            "inferenceRequired": 8442.776735459662
+            "gross": 5591.279549718574,
+            "maxLiquid": 1397.8198874296436,
+            "inferenceRequired": 4193.459662288931
           },
           {
             "participants": 533000,
             "multiple": 10,
             "share": 0.00001876172607879925,
-            "gross": 22514.0712945591,
-            "maxLiquid": 5628.517823639775,
-            "inferenceRequired": 16885.553470919323
+            "gross": 11182.559099437149,
+            "maxLiquid": 2795.639774859287,
+            "inferenceRequired": 8386.919324577862
           },
           {
             "participants": 533000,
             "multiple": 25,
             "share": 0.000046904315196998124,
-            "gross": 56285.17823639775,
-            "maxLiquid": 14071.294559099437,
-            "inferenceRequired": 42213.88367729831
+            "gross": 27956.39774859287,
+            "maxLiquid": 6989.0994371482175,
+            "inferenceRequired": 20967.298311444654
           }
         ]
       },
@@ -400,41 +400,41 @@
             "participants": 2000000,
             "multiple": 1,
             "share": 5e-7,
-            "gross": 600,
-            "maxLiquid": 150,
-            "inferenceRequired": 450
+            "gross": 298.0152,
+            "maxLiquid": 74.5038,
+            "inferenceRequired": 223.51139999999998
           },
           {
             "participants": 2000000,
             "multiple": 2,
             "share": 0.000001,
-            "gross": 1200,
-            "maxLiquid": 300,
-            "inferenceRequired": 900
+            "gross": 596.0304,
+            "maxLiquid": 149.0076,
+            "inferenceRequired": 447.02279999999996
           },
           {
             "participants": 2000000,
             "multiple": 5,
             "share": 0.0000025,
-            "gross": 3000.0000000000005,
-            "maxLiquid": 750.0000000000001,
-            "inferenceRequired": 2250.0000000000005
+            "gross": 1490.076,
+            "maxLiquid": 372.519,
+            "inferenceRequired": 1117.557
           },
           {
             "participants": 2000000,
             "multiple": 10,
             "share": 0.000005,
-            "gross": 6000.000000000001,
-            "maxLiquid": 1500.0000000000002,
-            "inferenceRequired": 4500.000000000001
+            "gross": 2980.152,
+            "maxLiquid": 745.038,
+            "inferenceRequired": 2235.114
           },
           {
             "participants": 2000000,
             "multiple": 25,
             "share": 0.0000125,
-            "gross": 15000,
-            "maxLiquid": 3750,
-            "inferenceRequired": 11250
+            "gross": 7450.38,
+            "maxLiquid": 1862.595,
+            "inferenceRequired": 5587.785
           }
         ]
       }

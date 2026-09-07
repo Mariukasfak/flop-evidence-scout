@@ -5,7 +5,7 @@
  * inference over the testnet". Write that out and almost everything cancels.
  *
  * If the faucet hands every agent the same amount F, and an agent spends a
- * fraction u of it, then that agent's share of the 1.2bn pool is
+ * fraction u of it, then that agent's share of the 596,030,400 pool is
  *
  *     share = (F x u_ours) / (N x F x u_avg)  =  u_ours / (N x u_avg)  =  M / N
  *

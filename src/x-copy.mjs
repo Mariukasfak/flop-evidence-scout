@@ -70,6 +70,18 @@ export const X_COPY = Object.freeze({
       + 'Testnet Q4 2026, mainnet Q1 2027.'
   },
 
+  'twenty-percent': {
+    text: 'The 3.5bn genesis figure I published is superseded.\n\n'
+      + 'Yellow Paper v0.5.0, 2026-09-05: genesis supply is 2,483,460,000 FLOP, airdrops only, no VC pre-mint.\n\n'
+      + 'The teaser was accurate. It was never the spec.'
+  },
+
+  'airdrop-split': {
+    text: 'Three of the four FLOP genesis numbers changed.\n\n'
+      + 'Yellow Paper v0.5.0, 2026-09-05: miners 993,384,000, agents 596,030,400, reserve 588,540,600.\n\n'
+      + 'Validators alone are unchanged at 305,505,000.'
+  },
+
   'ten-year-correction': {
     text: 'A correction to something I published.\n\n'
       + 'On 2026-08-26 I wrote that the 20% airdrop was an emission spread over ten years. It is not — '
@@ -108,6 +120,16 @@ export const X_ORDER = Object.freeze([
   'guaranteed-allocation',
   'company-block-rewards',
   'date-tension',
+  /**
+   * Added 2026-09-07. Both are supersessions rather than someone else's error:
+   * the Yellow Paper moved numbers this account had published from the teaser.
+   * They sit with the corrections at the end, for the same reason — a correction
+   * reads as credibility only after the reader has seen the original claim — and
+   * ten-year-correction stays last, because admitting a misreading is a heavier
+   * thing to say than reporting that a source moved.
+   */
+  'twenty-percent',
+  'airdrop-split',
   'ten-year-correction'
 ]);
 

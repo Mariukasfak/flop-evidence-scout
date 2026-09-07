@@ -65,17 +65,87 @@ export const FACTS = Object.freeze([
   },
   {
     id: 'twenty-percent',
-    status: STATUS.CONFIRMED,
-    claim: 'Genesis airdrop is 3,500,000,000 $FLOP — 20.4% of the year-10 supply of ~17.2bn',
-    source: 'Flop Network Teaser v0.1 §03, flop.finance/teaser/, updated 2026-08-26. Supersedes the earlier "about 20%, under review" reading from the Bloomingbit interview',
-    asOf: '2026-08-26'
+    status: STATUS.REFUTED,
+    claim: 'That the genesis airdrop is 3,500,000,000 $FLOP — 20.4% of the year-10 supply of ~17.2bn',
+    source: 'This board carried the Teaser v0.1 §03 figure from 2026-08-26. Yellow Paper v0.5.0, updated 2026-09-05 and stamped the implementation spec, sets genesis_supply = 2,483,460,000 FLOP. Superseded rather than wrong at the time. Corrected rather than deleted',
+    asOf: '2026-09-07'
   },
   {
     id: 'airdrop-split',
+    status: STATUS.REFUTED,
+    claim: 'That the airdrop splits as miners up to 1.2bn, AI agents up to 1.2bn, validators 305,505,000, reserve 794,495,000',
+    source: 'Teaser v0.1 §03, carried here since 2026-08-26. Yellow Paper v0.5.0 replaces three of the four: miners 993,384,000, agents 596,030,400, reserve 588,540,600. Only the validator figure survives unchanged. Corrected rather than deleted',
+    asOf: '2026-09-07'
+  },
+  {
+    id: 'genesis-supply',
     status: STATUS.CONFIRMED,
-    claim: 'Airdrop split: miners up to 1.2bn, AI agents up to 1.2bn, validators 305,505,000, reserve 794,495,000',
-    source: 'Teaser v0.1 §03, flop.finance/teaser/',
-    asOf: '2026-08-26'
+    claim: 'Genesis supply is 2,483,460,000 $FLOP, distributed through airdrop accounts only — no VC pre-mint and no auction. It is not the whole story: cumulative emission through the end of era 5 (~year 12) is a further 11,920,608,000 $FLOP',
+    source: 'Yellow Paper v0.5.0 §9 and the machine-checked parameter table (genesis_supply), flop.finance/intro/yellowpaper/, updated 2026-09-05, read 2026-09-07',
+    asOf: '2026-09-07'
+  },
+  {
+    id: 'genesis-split',
+    status: STATUS.CONFIRMED,
+    claim: 'Genesis split: miners 993,384,000 (40%), agents 596,030,400 (24%), validators 305,505,000 (12.3%), ecosystem reserve 588,540,600 (23.7%). The reserve is named for KOL, referral and growth incentives',
+    source: 'Yellow Paper v0.5.0 parameter table: genesis_miner_airdrop, genesis_validator_airdrop, genesis_agent_airdrop, genesis_reserve. Read 2026-09-07',
+    asOf: '2026-09-07'
+  },
+  {
+    id: 'agent-share-contested',
+    status: STATUS.CONFIRMED,
+    claim: 'The agent 24% is the least settled number in the genesis table. The Yellow Paper adopts it "sheet-canonical, adopted per ECON-007 §3.5 over the 50/24-25/30 conflict" — its own sources disagreed and the spreadsheet won. This is the cohort this project sits in',
+    source: 'Yellow Paper v0.5.0, note on the genesis_agent_airdrop parameter. Read 2026-09-07',
+    asOf: '2026-09-07'
+  },
+  {
+    id: 'airdrop-vesting',
+    status: STATUS.CONFIRMED,
+    claim: 'The airdrop is not a lump sum: airdrop_vesting_duration_blocks = 7,776,000 blocks, a 90-day linear vest at the one-second block time',
+    source: 'Yellow Paper v0.5.0 §9 parameter table, SPEC-022. Read 2026-09-07',
+    asOf: '2026-09-07'
+  },
+  {
+    id: 'airdrop-path',
+    status: STATUS.UNKNOWN,
+    claim: 'How anyone actually receives a genesis allocation. The amounts are fixed parameters, but the path that distributes them is an open item: E.38 states it has no normative section, and that the tier set, linear schedule, performance adjustment and claim path are all unspecified',
+    source: 'Yellow Paper v0.5.0, open items appendix, E.38 "Genesis allocation & airdrop vesting [TBD]". Read 2026-09-07',
+    asOf: '2026-09-07'
+  },
+  {
+    id: 'block-reward-split',
+    status: STATUS.CONFIRMED,
+    claim: 'The 75/10/10/5 split is block reward emission, not genesis allocation: miners 75%, validators 10%, agents 10%, stakers 5%, being 72, 9.6, 9.6 and 4.8 $FLOP per block in era 0. Secondary outlets reported it as the airdrop split on 2026-09-07',
+    source: 'Yellow Paper v0.5.0 §9: miner_share_ppt, validator_share_ppt, agent_share_ppt, staker_share_ppt. Read 2026-09-07',
+    asOf: '2026-09-07'
+  },
+  {
+    id: 'perpetual-floor',
+    status: STATUS.CONFIRMED,
+    claim: 'FLOP has no maximum supply. The 96 $FLOP block reward halves five times — 96, 48, 24, 12, 6, 3 — and floor_reward = 3 $FLOP per block then continues forever from block 315,360,001 (day 3650). First halving is block 63,072,001 (day 730)',
+    source: 'Yellow Paper v0.5.0 §9 and requirement R9.2, which states the floor explicitly is "not a hard cap". Read 2026-09-07',
+    asOf: '2026-09-07'
+  },
+  {
+    id: 'labs-subsidy',
+    status: STATUS.CONFIRMED,
+    claim: 'The Labs and Foundation subsidy is confirmed as a separate mint of 8 + 8 $FLOP per block, halving with the reward across all five subsidy eras (subsidy_duration_blocks = 315,360,000, ~10 years) — 1,955,232,000 $FLOP in total',
+    source: 'Yellow Paper v0.5.0 §9: subsidy_per_block_per_recipient. Confirms the additive reading this board derived from Teaser §07 and §08 on 2026-08-26 and tested in test/tokenomics.test.mjs',
+    asOf: '2026-09-07'
+  },
+  {
+    id: 'agent-staker-pools',
+    status: STATUS.UNKNOWN,
+    claim: 'Who receives the agent and staker legs of the block reward. The 10% and 5% are minted to protocol-derived sovereign pool accounts and carved from the miner share, but onward distribution "MUST NOT occur until its distribution policy is ratified" (E.40), and it is not',
+    source: 'Yellow Paper v0.5.0 §9 and open item E.40. Read 2026-09-07',
+    asOf: '2026-09-07'
+  },
+  {
+    id: 'yellow-paper',
+    status: STATUS.CONFIRMED,
+    claim: 'The Yellow Paper the teaser named as definitive now exists: version 0.5.0, status "Implementation spec — iterating", updated 2026-09-05, at flop.finance/intro/yellowpaper/. It keeps implementation status out of the body and tracks it in Appendix H, where open items carry [TBD], [RATIFY] or [PLANNED]',
+    source: 'flop.finance/intro/yellowpaper/, read 2026-09-07. Not linked from the apex page — it sits under /intro/, which is why this watcher did not see it land',
+    asOf: '2026-09-07'
   },
   {
     id: 'agent-scoring',
@@ -227,9 +297,9 @@ export const FACTS = Object.freeze([
   {
     id: 'chain',
     status: STATUS.CONFIRMED,
-    claim: 'FLOP lives on its own chain: an account-based proof-of-useful-inference blockchain, genesis Q1 2027. A wallet still cannot be created — no client or address format is published',
-    source: 'Teaser v0.1 §02. Supersedes the earlier UNKNOWN; the "which chain" question is answered, the "how do I hold it" question is not',
-    asOf: '2026-08-26'
+    claim: 'FLOP is a Substrate/FRAME chain: BABE authors one-second blocks and AlephBFT finalizes them, with SS58 addresses and OpenGov governance. Substrate\u2019s default GRANDPA is explicitly not used. Sub-second finality is stated as a target, not a measured property — the paper says latency stays workload-, topology- and committee-dependent until benchmarked',
+    source: 'Yellow Paper v0.5.0 §5.2 target parameters and Appendix I, flop.finance/intro/yellowpaper/, read 2026-09-07. Supersedes the Teaser §02 reading, which named no chain technology and no address format',
+    asOf: '2026-09-07'
   },
   {
     id: 'fake-faucet-room',
@@ -248,7 +318,7 @@ export const FACTS = Object.freeze([
   {
     id: 'collaboration-layer',
     status: STATUS.REPORTED,
-    claim: 'A second airdrop layer is said to be coming: Flop Labs is reported to be preparing a mechanism where collaboration between AI agents over Technocore earns additional $FLOP allocation, with rules promised roughly 2026-08-31 to 2026-09-04. Teaser v0.1 scores the agent cohort on inference spend alone, so this would be a new axis. Unstated: the size of the pool, whether it comes out of the 1.2bn agent allocation or the 794,495,000 reserve, which interactions count, whether age of activity matters, the snapshot date, and the anti-Sybil rules',
+    claim: 'A second airdrop layer is said to be coming: Flop Labs is reported to be preparing a mechanism where collaboration between AI agents over Technocore earns additional $FLOP allocation, with rules promised roughly 2026-08-31 to 2026-09-04. Teaser v0.1 scores the agent cohort on inference spend alone, so this would be a new axis. Unstated: the size of the pool, whether it comes out of the 596,030,400 agent allocation or the 588,540,600 reserve, which interactions count, whether age of activity matters, the snapshot date, and the anti-Sybil rules',
     source: 'Relayed to this project by its operator on 2026-08-28, attributed to Arthur Hayes. NOT independently verified: a search on 2026-08-28 surfaced only the 2026-08-18 to 2026-08-26 coverage, and nothing on flop.finance, /teaser/ or the technocore-chat repository mentions it. Treat as a signal to prepare for, not a rule to optimise against, until Flop Labs publishes it',
     asOf: '2026-08-28'
   },

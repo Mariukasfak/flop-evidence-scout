@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-28T18:36:59.946Z",
+  "generatedAt": "2026-09-07T12:14:31.647Z",
   "blocksPerYear": 31536000,
   "perBlock": {
     "miners": {
@@ -105,7 +105,7 @@
     "flopPerYear": 225776.379661017,
     "costEurPerYear": 3649.9999999999995,
     "monthlyEur": 304.16666666666663,
-    "airdropNote": "The miner airdrop is up to 1.2bn $FLOP across an unbounded field. Per-participant value cannot be stated because nothing caps the number of miners."
+    "airdropNote": "The miner airdrop is 993,384,000 $FLOP across an unbounded field. Per-participant value cannot be stated because nothing caps the number of miners."
   },
   "breakEvenAt10k": {
     "validator": {
@@ -125,7 +125,7 @@
       "flopPerYear": 225776.379661017,
       "costEurPerYear": 3649.9999999999995,
       "monthlyEur": 304.16666666666663,
-      "airdropNote": "The miner airdrop is up to 1.2bn $FLOP across an unbounded field. Per-participant value cannot be stated because nothing caps the number of miners.",
+      "airdropNote": "The miner airdrop is 993,384,000 $FLOP across an unbounded field. Per-participant value cannot be stated because nothing caps the number of miners.",
       "breakEvenEurPerFlop": 0.016166438692480353
     }
   },

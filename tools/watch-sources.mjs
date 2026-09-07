@@ -60,6 +60,18 @@ const SOURCES = [
   // gained a link to it. Watching the apex was never going to be enough, so the
   // teaser is watched directly AND link discovery below reports any new path.
   { id: 'flop-teaser', url: 'https://flop.finance/teaser/', kind: 'html' },
+  /**
+   * Added 2026-09-07, the day this watcher missed the Yellow Paper the same way
+   * it missed the teaser. v0.5.0 was published on 2026-09-05 at /intro/yellowpaper/
+   * and this list heard about it from a stranger's summary two days later.
+   *
+   * The lesson from the teaser was to watch the document directly, and it was
+   * learned too narrowly: only /teaser/ was added, and the apex page does not link
+   * the yellow paper at all — /intro/ does. So both go in. The paper is stamped
+   * "Implementation spec — iterating", which is a promise that it will change.
+   */
+  { id: 'flop-intro', url: 'https://flop.finance/intro/', kind: 'html' },
+  { id: 'flop-yellowpaper', url: 'https://flop.finance/intro/yellowpaper/', kind: 'html' },
     /**
    * Thirty, because five was a window and not a record.
    *

@@ -59,13 +59,60 @@ export const COHORTS = Object.freeze({
   stakingRewards: { flop: 600_000_000, statedShare: 0.034, blockFunded: true }
 });
 
-/** Section 03, the genesis airdrop breakdown. These four are exact in the source. */
-export const GENESIS_AIRDROP = Object.freeze({
+/**
+ * The Yellow Paper, which the teaser named as definitive and which arrived on
+ * 2026-09-05. Read 2026-09-07. Its parameter table is machine-checked, so these
+ * are quoted parameter names rather than prose.
+ */
+export const YELLOWPAPER = Object.freeze({
+  title: 'FLOP Network Yellow Paper',
+  version: '0.5.0 (draft)',
+  status: 'Implementation spec — iterating',
+  url: 'https://flop.finance/intro/yellowpaper/',
+  updated: '2026-09-05',
+  retrieved: '2026-09-07',
+  /** §9. Halving schedule, subsidy and floor all confirm the teaser's numbers. */
+  firstHalvingBlock: 63_072_001,
+  floorReward: 3,
+  floorFromBlock: 315_360_001,
+  subsidyDurationBlocks: 315_360_000,
+  subsidyTotal: 1_955_232_000,
+  /** SPEC-022: the airdrop vests linearly over ninety days, it is not a lump sum. */
+  airdropVestingBlocks: 7_776_000,
+  /** R9.2. Cumulative emission to the end of era 5, ~year 12. Not a cap. */
+  cumulativeEmissionEra5: 11_920_608_000,
+  /** §9. Emission split, NOT the genesis allocation — outlets conflated the two. */
+  rewardSplit: Object.freeze({ miners: 0.75, validators: 0.10, agents: 0.10, stakers: 0.05 })
+});
+
+/**
+ * Section 03 of the teaser, kept because this project corrects rather than deletes.
+ * Superseded on 2026-09-05: three of its four figures changed and the total fell
+ * by more than a billion. Nothing should read it except a note about the change.
+ */
+export const GENESIS_AIRDROP_TEASER = Object.freeze({
   miners: 1_200_000_000,
   agents: 1_200_000_000,
   validators: 305_505_000,
   reserve: 794_495_000,
   total: 3_500_000_000
+});
+
+/**
+ * The genesis airdrop breakdown, from the Yellow Paper parameter table. Exact.
+ *
+ * genesis_miner_airdrop 40%, genesis_agent_airdrop 24%, genesis_validator_airdrop
+ * 12.3%, genesis_reserve 23.7%. The validator figure is the only one that survived
+ * the teaser unchanged, which is why validator models are unaffected by the change.
+ * The agent figure is the paper's own least settled: it is adopted "sheet-canonical
+ * ... over the 50/24-25/30 conflict".
+ */
+export const GENESIS_AIRDROP = Object.freeze({
+  miners: 993_384_000,
+  agents: 596_030_400,
+  validators: 305_505_000,
+  reserve: 588_540_600,
+  total: 2_483_460_000
 });
 
 /** Section 02, "Recommended hardware". Marked provisional in the source itself. */
