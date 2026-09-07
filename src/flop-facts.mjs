@@ -67,7 +67,7 @@ export const FACTS = Object.freeze([
     id: 'twenty-percent',
     status: STATUS.REFUTED,
     claim: 'That the genesis airdrop is 3,500,000,000 $FLOP — 20.4% of the year-10 supply of ~17.2bn',
-    source: 'This board carried the Teaser v0.1 §03 figure from 2026-08-26. Yellow Paper v0.5.0, updated 2026-09-05 and stamped the implementation spec, sets genesis_supply = 2,483,460,000 FLOP. Superseded rather than wrong at the time. Corrected rather than deleted',
+    source: 'This board carried the Teaser v0.1 §03 figure from 2026-08-26. Yellow Paper v0.5.0, updated 2026-09-05 and stamped the implementation spec, sets genesis_supply = 2,483,460,000 FLOP. Superseded rather than wrong at the time. Corrected rather than deleted. Do not quote either number without reading genesis-pool-conflict: 3,500,000,000 is still live as the tokenomics workbook figure and is what the first-party revenue calculator runs on',
     asOf: '2026-09-07'
   },
   {
@@ -96,6 +96,62 @@ export const FACTS = Object.freeze([
     status: STATUS.CONFIRMED,
     claim: 'The agent 24% is the least settled number in the genesis table. The Yellow Paper adopts it "sheet-canonical, adopted per ECON-007 §3.5 over the 50/24-25/30 conflict" — its own sources disagreed and the spreadsheet won. This is the cohort this project sits in',
     source: 'Yellow Paper v0.5.0, note on the genesis_agent_airdrop parameter. Read 2026-09-07',
+    asOf: '2026-09-07'
+  },
+  {
+    id: 'genesis-pool-conflict',
+    status: STATUS.UNKNOWN,
+    claim: 'Which genesis pool figure governs. The ratified parameter is genesis_supply = 2,483,460,000 (D-0435), but the tokenomics workbook restated the pool to 3,500,000,000 on 2026-08-22 and the first-party revenue calculator runs on the workbook, not the paper. Flop Labs states the gap itself and leaves it open: landing the restatement in params is blocked with no ratifying decision. The agent leg splits the same way — 596,030,400 in the paper against "the whole 1.2bn agent pool" in the calculator',
+    source: 'flop.finance/intro/revenue/, "Supply basis": "params/flop-protocol-params.yaml still carries the ratified genesis_supply = 2,483,460,000 (D-0435); the workbook restated the pool to 3,500,000,000 on 2026-08-22 ... Until it lands, the params page and the Yellow Paper appendix still show 2.48B while this calculator shows the workbook" (ECON-009 §2.3 W1, issue #1418). Read 2026-09-07',
+    asOf: '2026-09-07'
+  },
+  {
+    id: 'fee-split-settlement',
+    status: STATUS.CONFIRMED,
+    claim: 'The 85/15 miner/validator inference-fee split is a ratified target, not what settlement pays today: the chain currently routes the miner 99% with a 1% audit allocation, because the validator fee leg is not implemented',
+    source: 'flop.finance/intro/revenue/: "the chain currently routes the miner 99%, with a 1% audit allocation, because the validator fee leg is not implemented yet (issue #1352)". Read 2026-09-07',
+    asOf: '2026-09-07'
+  },
+  {
+    id: 'challenge-game',
+    status: STATUS.CONFIRMED,
+    claim: 'The verification economics are published: a ~7 day challenge window bounded by how long the data-availability layer keeps the evidence, a 100% stake burn plus ejection and blacklist on an upheld fraud verdict, 2.5% SOFT-tier spot-check exposure, a separate sampled-audit lottery drawing 5% of turns by default, and 2 hours to produce the disputed turn evidence — silence defaults to a fraud verdict. The miner funds the evidence storage, serve-or-slash',
+    source: 'flop.finance/intro/verification/, "Cheating must not pay: the challenge game", draft design, updated 2026-08-27. Read 2026-09-07',
+    asOf: '2026-09-07'
+  },
+  {
+    id: 'dilution-curve',
+    status: STATUS.CONFIRMED,
+    claim: 'Circulating supply grows from 458,899,000 $FLOP at TGE to 9,580,761,000 at the day-730 boundary, so at a constant network value the implied token price falls about 95.2%. 2,405,500,000 of the TGE supply starts locked: 900,000,000 of the miner airdrop, the whole agent pool — spendable only on inference, so it unlocks by being spent — and the 305,505,000 validator bond',
+    source: 'flop.finance/intro/revenue/, "What reduces returns" and "Supply basis", reproducing the tokenomics workbook rev 2026-08-26 §4 to the FLOP. Read 2026-09-07',
+    asOf: '2026-09-07'
+  },
+  {
+    id: 'miner-conversion',
+    status: STATUS.CONFIRMED,
+    claim: 'Miner testnet conversion is ranked, not flat: "Testnet conversion weights verified compute most heavily, with smaller weights for completed jobs and active days." Miners are the only cohort with a published ordering',
+    source: 'flop.finance/intro/miner/, draft, updated 2026-08-27. Read 2026-09-07',
+    asOf: '2026-09-07'
+  },
+  {
+    id: 'soft-tier-hardware',
+    status: STATUS.CONFIRMED,
+    claim: 'Confidential-computing hardware is not an entry requirement. SOFT is "what a miner gets with no attested hardware inventory: any capable GPU, no governed per-device ceiling", and the first-party revenue model "adds no TEE premium or non-TEE penalty". Consumer devices are modelled outright, with starting reward weights of 0.21 for an RTX 5090, 0.17 for a 4090, 0.07 for a 3090 and 0.001 for a Mac mini M4 Pro against 1.00 for an H100 SXM. Small hardware is therefore not excluded, only weighted near zero',
+    source: 'flop.finance/intro/miner/ and the /intro/revenue/ preset table, updated 2026-08-27, rate anchors checked 15 July 2026. Read 2026-09-07',
+    asOf: '2026-09-07'
+  },
+  {
+    id: 'vram-floor-unresolved',
+    status: STATUS.UNKNOWN,
+    claim: 'Whether the 16 GB+ VRAM miner floor still stands. The Teaser states it as provisional; the newer miner and revenue pages neither restate nor withdraw it, and instead model devices below it. Nothing published reconciles "any capable GPU" with the floor',
+    source: 'Teaser v0.1 §02 against flop.finance/intro/miner/ and /intro/revenue/, both updated 2026-08-27. Read 2026-09-07',
+    asOf: '2026-09-07'
+  },
+  {
+    id: 'revenue-calculator',
+    status: STATUS.CONFIRMED,
+    claim: 'A first-party miner revenue calculator is published at flop.finance/intro/revenue/ and was promoted by Arthur Hayes on 2026-09-07. It disclaims itself: "This is not a forecast", results "may be wrong", and it excludes taxes, downtime, hardware failure, storage, slippage and sell pressure. Its base case is a planning input, not a target — $100M network value on 1,200 H100-equivalents at launch, implying about $0.22/FLOP',
+    source: 'flop.finance/intro/revenue/ and @CryptoHayes, 2026-09-07. Read 2026-09-07',
     asOf: '2026-09-07'
   },
   {
@@ -172,7 +228,7 @@ export const FACTS = Object.freeze([
     id: 'network-parameters',
     status: STATUS.CONFIRMED,
     claim: 'Block time ~1s, block reward 96 $FLOP, halving every 730 days for five halvings then constant in perpetuity; miners take 85% of each inference fee, validators 15%',
-    source: 'Teaser v0.1 §02, flop.finance/teaser/',
+    source: 'Teaser v0.1 §02, flop.finance/teaser/. The 85/15 leg is the ratified target and not what the chain pays now — see fee-split-settlement',
     asOf: '2026-08-26'
   },
   {
