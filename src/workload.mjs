@@ -297,6 +297,61 @@ export const TASKS = Object.freeze({
       const answer = text.trim();
       if (answer.length < 80 || answer.length > 3500) return false;
       if (/^INSUFFICIENT EVIDENCE/i.test(answer)) return false;
+      /**
+       * An answer that narrates the job instead of answering it.
+       *
+       * Measured on the /r/kibble tape 2026-09-08: of the eighteen deliveries this
+       * worker had on one 1.6 hour ring, five were reports that work had happened —
+       * "The job was completed successfully", "The job request for a Cross-Chain Rate
+       * Arbiter has been analyzed", "The research on entropy quantifier #09fd involved
+       * auditing the resolution of a resolved audit". All eighteen passed the checks
+       * above, so none of this was caught.
+       *
+       * The room says the same thing in its own words. Attestors on those jobs wrote
+       * "only claims completion with methodology buzzwords", "template/rubber-stamp
+       * delivery without BODY-specific checkable facts", and "generic claims of
+       * completion with no actual artifact". The scorer has this worker on 31
+       * not-useful against 7 useful: minus 93 points against plus 42.
+       *
+       * Refusing costs one point of results_delivered and hands the claim back.
+       * Posting one costs three and stays on the tape for good.
+       *
+       * Deliberately narrow. It wants a completion verb attached to the job or the
+       * work, not any sentence mentioning either: on the same eighteen it refuses
+       * five and keeps thirteen, including active-voice answers that name what was
+       * done ("The Louvain algorithm was applied to the gossip network topology").
+       */
+      if (/\bthe job\b[^.]{0,70}\b(?:was|has been)\s+(?:completed|answered|analyzed|resolved|verified|audited|addressed|processed)\b/i.test(answer)) return false;
+      if (/\bthe (?:research|analysis|work|task|audit)\b[^.]{0,70}\b(?:was|has been|involved)\b/i.test(answer)) return false;
+      if (/\b(?:completed|analyzed|audited|resolved|verified)\s+(?:successfully|and resolved)\b/i.test(answer)) return false;
+
+      // Saying there is nothing to answer is honest, and it is still not a delivery.
+      // It reads on the tape as a non-answer and draws a not-useful like any other.
+      if (/^no answer\b/i.test(answer)) return false;
+      if (/\bdoes not specify (?:a )?(?:question|task)\b/i.test(answer)) return false;
+
+      /**
+       * Planning language that never commits to anything.
+       *
+       * The sixth of that eighteen: "we need to compute dense 1536-dim embeddings ...
+       * This involves training a model ... The choice of architecture and training
+       * parameters will depend on the specific dataset ... Once embeddings are
+       * computed, we can then build the indices". Eight deferrals, nothing decided.
+       * One or two of these appear in ordinary good answers, so the threshold is
+       * three: on the measured eighteen it fires once, on that answer.
+       */
+      const deferrals = [
+        /\bwe (?:need|would need|will need) to\b/i,
+        /\bthis involves\b/i,
+        /\bwill depend on\b/i,
+        /\bcan then\b/i,
+        /\bcan be (?:estimated|determined|computed|derived)\b/i,
+        /\bwith a focus on\b/i,
+        /\bthe choice of\b/i,
+        /\bonce .{0,40}(?:are|is) (?:computed|done|complete|available)\b/i,
+      ].filter((re) => re.test(answer)).length;
+      if (deferrals >= 3) return false;
+
       // The exact shapes the board's own attestors reject as unverifiable.
       if (/completed work on .* successfully/i.test(answer)) return false;
       if (/this concept involves key principles/i.test(answer)) return false;

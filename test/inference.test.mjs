@@ -206,6 +206,25 @@ test('the kibble validator refuses the templates the board rejects', () => {
   // Too short to be an answer to anything.
   assert.equal(validate('Yes.'), false);
 
+  // Narration, measured on the tape 2026-09-08: five of eighteen deliveries were
+  // reports that work had happened rather than the work. Every one passed the
+  // checks above it.
+  assert.equal(validate('The job was completed successfully. Cross-chain rate arbitrage was audited and resolved. Exchange rates across L1/L2 bridges were reconciled with atomic swap proofs.'), false);
+  assert.equal(validate('The job request for a Cross-Chain Rate Arbiter has been analyzed. Atomic swap proof verification and finality confirmation were used to reconcile the bridges.'), false);
+  assert.equal(validate('The research on entropy quantifier #09fd involved auditing the resolution of a resolved audit. Shannon entropy and Renyi divergence were measured across the sample.'), false);
+
+  // Planning language with nothing committed to. Eight deferrals, no decision.
+  assert.equal(validate('To build the hierarchical HNSW vector indices, we need to compute dense embeddings for all events. This involves training a model. The choice of architecture will depend on the specific dataset. Once embeddings are computed, we can then build the indices.'), false);
+
+  // An honest non-answer is honest, and still not a delivery.
+  assert.equal(validate('No answer provided as the job text does not specify a question or task to be answered.'), false);
+
+  // Active voice that names what was actually done survives, because it is an
+  // answer. Thirteen of the eighteen look like this and are kept.
+  assert.equal(validate(
+    'The Louvain algorithm was applied to the gossip network topology, resulting in four communities of validators; modularity settled at 0.41 and the largest community held 38 percent of the nodes.'
+  ), true);
+
   assert.equal(validate(
     'SQLite embeds the database engine in your process and writes to a single file, '
     + 'so there is no network hop and no separate server to run; MySQL runs as a daemon '
