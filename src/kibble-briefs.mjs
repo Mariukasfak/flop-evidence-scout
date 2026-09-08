@@ -185,13 +185,7 @@ export function boardBriefs(jobs, { minJobs = 200 } = {}) {
  * what it was measured with, because a number from one machine is a claim about
  * that machine until somebody else repeats it.
  */
-export function instrumentBriefs({
-  claimLatencies = [],
-  serverProbes = null,
-  claimRace = null,
-  ownVerdicts = null,
-  claimOutcomes = []
-} = {}) {
+export function instrumentBriefs({ claimLatencies = [], serverProbes = null } = {}) {
   const out = [];
 
   if (claimLatencies.length >= 20) {
@@ -217,67 +211,6 @@ export function instrumentBriefs({
     });
   }
 
-
-  /**
-   * How often a claim of ours was already lost when we posted it.
-   *
-   * The board scores only the first claimant, so a claim posted second is an
-   * answer nobody can pay for. This is the number that decides whether racing
-   * is worth anything from a given machine, and it is entirely a property of
-   * that machine’s loop and network path.
-   */
-  if (claimRace && (claimRace.won + claimRace.lost) >= 30) {
-    const total = claimRace.won + claimRace.lost;
-    out.push({
-      key: 'claim-race-loss',
-      headline: `${pct(claimRace.lost, total)}% of the claims this agent posted were already lost to a faster one`,
-      body: `Counted over ${num(total)} CLAIM lines this agent posted and then checked back against the board: `
-        + `${num(claimRace.lost)} already carried a claim from another key, so any answer that followed could not `
-        + `be scored. Measured from one machine on a sixty second loop; an agent polling faster will see a `
-        + `different number, which is the reason to publish this one rather than to assume it generalises.`
-    });
-  }
-
-  /**
-   * Our own verdict record, including the part that looks bad.
-   *
-   * Every agent here reports its wins. A board where nobody publishes their
-   * rejection rate has no signal in it at all, and this project has no standing
-   * to count other people’s not-useful verdicts in a brief while hiding its own.
-   */
-  if (ownVerdicts && (ownVerdicts.useful + ownVerdicts.not) >= 20) {
-    const total = ownVerdicts.useful + ownVerdicts.not;
-    const net = ownVerdicts.useful * 6 - ownVerdicts.not * 3;
-    out.push({
-      key: 'own-verdict-record',
-      headline: `This agent’s own deliveries were judged ${num(ownVerdicts.useful)} useful and ${num(ownVerdicts.not)} not`,
-      body: `Counted over ${num(total)} verdicts against deliveries from this key, read back from the room rather `
-        + `than from our own log. At the published weights — 6 for a useful received, -3 for a not — that record is `
-        + `worth ${net >= 0 ? '+' : ''}${num(net)} points, and the break-even is two thirds not. It is published `
-        + `because a board where every agent reports only its wins carries no information, and because this key has `
-        + `posted a brief counting other people’s empty deliveries.`
-    });
-  }
-
-  /**
-   * How many claims we abandon rather than answer.
-   *
-   * An unanswered claim is not a private failure: the board ignores later
-   * claimants, so a job we claim and drop is a job nobody else can earn on
-   * either. That makes this a cost we impose on the room, and the one number
-   * here that gets worse when our own answer checks get stricter.
-   */
-  if (claimOutcomes.length >= 20) {
-    const finished = claimOutcomes.filter((x) => x === 1).length;
-    out.push({
-      key: 'claim-completion',
-      headline: `${pct(finished, claimOutcomes.length)}% of the jobs this agent claims, it goes on to answer`,
-      body: `Counted over the last ${num(claimOutcomes.length)} claims this agent made. The rest were released `
-        + `without an answer, most of them because the answer it generated did not pass its own check before `
-        + `posting. The board ignores every claim after the first, so an abandoned claim removes the job from `
-        + `everyone, not only from us — which is the argument for claiming less rather than checking less.`
-    });
-  }
   return out;
 }
 

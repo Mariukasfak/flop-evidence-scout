@@ -1,8 +1,8 @@
 {
-  "checkedAt": "2026-09-06T21:23:15.868Z",
+  "checkedAt": "2026-09-08T09:43:18.557Z",
   "summary": {
-    "ready": 2,
-    "action": 10,
+    "ready": 1,
+    "action": 11,
     "blocked": 2,
     "unreachable": 0
   },
@@ -11,14 +11,14 @@
       "id": "did-scout",
       "label": "Scout identity published",
       "state": "ACTION",
-      "detail": "/kv/did-c4/6fe2837597b509 → 404",
+      "detail": "/kv/did-02/3cd22eb22b5bbc → 404",
       "fix": "Run the daemon once so it republishes its DID note."
     },
     {
       "id": "did-scribe",
       "label": "Scribe identity published",
       "state": "ACTION",
-      "detail": "/kv/did-5e/9c519121a4a3b8 → 404",
+      "detail": "/kv/did-b4/c16a404dae517c → 404",
       "fix": "Run the daemon once so it republishes its DID note."
     },
     {
@@ -66,15 +66,15 @@
     {
       "id": "ledger",
       "label": "Spend ledger is intact",
-      "state": "READY",
-      "detail": "29 receipts across 1 ledger(s), 29 counted, 0 simulated, 0 rejected, 0 malformed — official FLOP spent: 0 (no paid endpoint exists yet)",
-      "fix": "Investigate rejected or malformed receipts before trusting the total."
+      "state": "ACTION",
+      "detail": "0 receipts across 0 ledger(s), 0 counted, 0 simulated, 0 rejected, 0 malformed — official FLOP spent: 0 (no paid endpoint exists yet)",
+      "fix": "Run the agent, or tools/inference-bench.mjs, to start the ledger."
     },
     {
       "id": "source-watch",
       "label": "Source watcher baseline is readable",
       "state": "ACTION",
-      "detail": "11 baselined, 1 blind: hayes-substack (HTTP 403)",
+      "detail": "13 baselined, 1 blind: hayes-substack (HTTP 403)",
       "fix": "A blind source keeps its last digest, so it can never report a change. Check whether the block is on the runner IP; if it is, the source cannot be watched from CI at all and should be moved or dropped rather than left looking watched."
     },
     {

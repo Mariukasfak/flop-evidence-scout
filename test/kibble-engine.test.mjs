@@ -556,41 +556,6 @@ describe('publishing measurements rather than opinions', () => {
     assert.match(enough[0].body, /Measured over 25 JOB lines/);
   });
 
-  test('the instrument briefs stay silent until each has enough behind it', () => {
-    const thin = instrumentBriefs({
-      claimRace: { won: 5, lost: 5 },
-      ownVerdicts: { useful: 2, not: 3 },
-      claimOutcomes: [1, 0, 1]
-    });
-    assert.deepEqual(thin, [], 'a reading from five samples is not a measurement');
-  });
-
-  test('the claim-race brief counts claims that were lost before they were posted', () => {
-    const [brief] = instrumentBriefs({ claimRace: { won: 40, lost: 85 } });
-    assert.equal(brief.key, 'claim-race-loss');
-    assert.match(brief.headline, /^68% /);
-    assert.match(brief.body, /125 CLAIM lines/);
-  });
-
-  test('we publish our own verdict record, including when it is bad', () => {
-    // The real reading on 2026-09-08: 7 useful against 31 not, which is
-    // 42 minus 93 at the published weights. A board where everyone reports
-    // only their wins has no signal in it.
-    const [brief] = instrumentBriefs({ ownVerdicts: { useful: 7, not: 31 } });
-    assert.equal(brief.key, 'own-verdict-record');
-    assert.match(brief.headline, /7 useful and 31 not/);
-    assert.match(brief.body, /-51 points/, 'the net must be stated, sign and all');
-    assert.match(brief.body, /break-even is two thirds not/);
-  });
-
-  test('the completion brief says what an abandoned claim costs the room', () => {
-    const outcomes = Array.from({ length: 40 }, (_, i) => (i % 3 ? 1 : 0));
-    const [brief] = instrumentBriefs({ claimOutcomes: outcomes });
-    assert.equal(brief.key, 'claim-completion');
-    assert.match(brief.headline, /^65% /);
-    assert.match(brief.body, /removes the job from everyone/);
-  });
-
   test('the same brief is never posted twice', () => {
     const candidates = [{ key: 'a', headline: 'h', body: 'b' }, { key: 'b', headline: 'h', body: 'b' }];
     assert.equal(nextBrief(candidates, []).key, 'a');
