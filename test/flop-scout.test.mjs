@@ -24,7 +24,7 @@ import {
 
 import { Guardrails } from '../src/guardrails.mjs';
 import { TechnocoreClient, READ_WINDOW } from '../src/technocore-client.mjs';
-import { readGitHead, readArchiveTail, archiveRoomMessages, trimArchive, resetArchiveIndex, parseArgs, leaseOutcome } from '../src/daemon.mjs';
+import { readGitHead, readCodeFingerprint, readArchiveTail, archiveRoomMessages, trimArchive, resetArchiveIndex, parseArgs, leaseOutcome } from '../src/daemon.mjs';
 import { ScoutEngine } from '../src/scout-engine.mjs';
 
 describe('FLOP Scout Identity & Cryptography', () => {
@@ -1431,6 +1431,48 @@ describe('knowing whether we are running the code on disk', () => {
     fs.mkdirSync(path.join(dir, '.git'), { recursive: true });
     fs.writeFileSync(path.join(dir, '.git', 'HEAD'), 'ref: refs/heads/gone');
     assert.equal(readGitHead(dir), null, 'a ref with no loose file is unknown, not changed');
+  });
+
+  // What HEAD could not tell us apart: this agent commits its own dashboards
+  // and measurements several times a day. Overnight 2026-09-07 into 2026-09-08
+  // that restarted it eight times for no new code.
+  test('the same tree twice is the same fingerprint', () => {
+    const first = readCodeFingerprint(process.cwd());
+    assert.match(first, /^[0-9a-f]{64}$/);
+    assert.equal(readCodeFingerprint(process.cwd()), first, 'nothing changed, so nothing may look changed');
+  });
+
+  test('a commit that touches no code leaves the fingerprint alone', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'code-'));
+    fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'package.json'), '{}');
+    fs.writeFileSync(path.join(dir, 'src', 'daemon.mjs'), 'export const a = 1;');
+    const before = readCodeFingerprint(dir);
+
+    fs.writeFileSync(path.join(dir, 'docs', 'status.html'), '<p>fresh numbers</p>');
+    fs.writeFileSync(path.join(dir, 'docs', 'feed.json'), '[]');
+    assert.equal(readCodeFingerprint(dir), before, 'docs and data are not code');
+  });
+
+  test('an edited module does change it, and so does a new one', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'code-'));
+    fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'package.json'), '{}');
+    fs.writeFileSync(path.join(dir, 'src', 'daemon.mjs'), 'export const a = 1;');
+    const before = readCodeFingerprint(dir);
+
+    fs.writeFileSync(path.join(dir, 'src', 'daemon.mjs'), 'export const a = 2;');
+    const edited = readCodeFingerprint(dir);
+    assert.notEqual(edited, before, 'a changed line is a restart');
+
+    fs.writeFileSync(path.join(dir, 'src', 'extra.mjs'), 'export const b = 3;');
+    assert.notEqual(readCodeFingerprint(dir), edited, 'a new module is a restart too');
+  });
+
+  test('a tree with no code answers null, which never means restart', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'code-'));
+    assert.equal(readCodeFingerprint(dir), null);
   });
 });
 

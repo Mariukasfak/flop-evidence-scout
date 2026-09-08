@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import crypto from 'node:crypto';
 
 import { loadOrCreateIdentity } from './identity.mjs';
 import { TechnocoreClient, READ_WINDOW } from './technocore-client.mjs';
@@ -170,6 +171,44 @@ export function readGitHead(repoDir = process.cwd()) {
   } catch {
     return null;
   }
+}
+
+/**
+ * A content hash of the code this process would load if it started again.
+ *
+ * HEAD is the wrong thing to watch. This agent commits its own dashboards and
+ * measurements several times a day, and each of those moved HEAD without
+ * changing a line of code — so the daemon kept standing down for its own
+ * bookkeeping. Hashing the modules answers the question the caller is actually
+ * asking, which is whether a restart would load anything different.
+ *
+ * A file caught mid-write hashes differently and therefore restarts. That is the
+ * safe direction: a pull in flight really is new code arriving.
+ */
+export function readCodeFingerprint(repoDir = process.cwd()) {
+  const hash = crypto.createHash('sha256');
+  let seen = 0;
+  for (const dir of ['src', 'tools']) {
+    let names = [];
+    try {
+      names = fs.readdirSync(path.join(repoDir, dir)).filter((n) => n.endsWith('.mjs')).sort();
+    } catch {
+      continue;                                   // a tree without one of them is still fingerprintable
+    }
+    for (const name of names) {
+      try {
+        hash.update(`${dir}/${name}\u0000`);      // the name matters: adding a module is new code
+        hash.update(fs.readFileSync(path.join(repoDir, dir, name)));
+        seen += 1;
+      } catch { /* vanished mid-read; the next cycle sees the settled tree */ }
+    }
+  }
+  try {
+    hash.update('package.json\u0000');
+    hash.update(fs.readFileSync(path.join(repoDir, 'package.json')));
+    seen += 1;
+  } catch { /* not a checkout we can fingerprint */ }
+  return seen ? hash.digest('hex') : null;
 }
 
 /** The watcher's finding, if there is one waiting. */
@@ -494,14 +533,21 @@ export async function runScoutDaemon(options = {}) {
    *
    * Deliberately not a git pull. Fetching and merging on a machine that another
    * agent is editing is a way to lose someone's uncommitted work; noticing that
-   * HEAD moved is not.
+   * the code changed is not.
+   *
+   * It watches the code, not the commit. Comparing HEAD shas made every commit a
+   * restart, including the ones this agent makes itself. Measured overnight
+   * 2026-09-07 into 2026-09-08: nine stand-downs, eight of them its own
+   * chore(status) and chore(watch) commits, which touch docs/ and data/ and no
+   * code at all. Each one cost the systemd delay plus an Ollama warm-up to load
+   * exactly the modules it was already running.
    */
-  const headNow = () => readGitHead();
-  const startedFrom = headNow();
+  const startedFrom = readGitHead();
+  const startedCode = readCodeFingerprint();
   const codeChanged = () => {
-    if (!startedFrom) return false;
-    const now = headNow();
-    return Boolean(now) && now !== startedFrom;
+    if (!startedCode) return false;
+    const now = readCodeFingerprint();
+    return Boolean(now) && now !== startedCode;
   };
 
   // Configurable for the same reason auditLogPath and faucetAlertPath are: a test
