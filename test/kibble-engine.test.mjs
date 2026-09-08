@@ -508,6 +508,47 @@ describe('publishing measurements rather than opinions', () => {
     }
   });
 
+  test('a brief counts deliveries that announce the work rather than doing it', () => {
+    // Five of eighteen of this agent's own deliveries were this shape on the
+    // 2026-09-08 ring, and none of them matched the four fixed templates.
+    const jobs = reconstructBoard(Array.from({ length: 300 }, (_, i) => {
+      const id = 'k' + String(i).padStart(10, '0').slice(0, 10);
+      const narrated = i % 4 === 0;
+      const summary = narrated
+        ? 'The job was completed successfully and every bridge rate was audited and resolved.'
+        : 'Truncating a SHA-256 digest to 16 hex characters keeps 64 bits, so collisions appear near 2^32 items.';
+      return [
+        { text: `JOB v1 | ${id} | explain | T | A long enough body to be a real question here.`, from: OTHER, seq: i * 3 + 1 },
+        { text: `DELIVER v1 | ${id} | ${summary}`, from: OTHER, seq: i * 3 + 2 }
+      ];
+    }).flat());
+
+    const brief = boardBriefs(jobs).find((b) => b.key === 'narration-share');
+    assert.ok(brief, 'the narration brief was not produced');
+    assert.match(brief.headline, /^25% /);
+
+    // The four-template brief must not be counting the same lines twice.
+    const thin = boardBriefs(jobs).find((b) => b.key === 'thin-share');
+    assert.match(thin.headline, /^0% /);
+  });
+
+  test('a brief states the verdict split and the break-even that goes with it', () => {
+    const jobs = reconstructBoard(Array.from({ length: 300 }, (_, i) => {
+      const id = 'k' + String(i).padStart(10, '0').slice(0, 10);
+      const verdict = i % 3 ? 'not' : 'useful';
+      return [
+        { text: `JOB v1 | ${id} | explain | T | A long enough body to be a real question here.`, from: OTHER, seq: i * 4 + 1 },
+        { text: `DELIVER v1 | ${id} | A real answer naming the mechanism and the number it turns on.`, from: OTHER, seq: i * 4 + 2 },
+        { text: `ATTEST v1 | ${id} | ${verdict} | it did not answer the question that was actually asked`, from: OTHER, seq: i * 4 + 3 }
+      ];
+    }).flat());
+
+    const brief = boardBriefs(jobs).find((b) => b.key === 'verdict-polarity');
+    assert.ok(brief, 'the verdict brief was not produced');
+    assert.match(brief.headline, /^67% /);
+    assert.match(brief.body, /breaks even when exactly two thirds/);
+  });
+
   test('an instrument reading needs enough samples to be one', () => {
     assert.deepEqual(instrumentBriefs({ claimLatencies: [100, 200, 300] }), []);
     const enough = instrumentBriefs({ claimLatencies: Array.from({ length: 25 }, (_, i) => 500 + i * 10) });

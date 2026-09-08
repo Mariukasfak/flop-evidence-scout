@@ -135,6 +135,44 @@ export function boardBriefs(jobs, { minJobs = 200 } = {}) {
     }
   }
 
+  // 6. Deliveries that announce the work instead of doing it.
+  //
+  //    (2) counts four memorised sentences. This counts the shape they mutate
+  //    into, which has no fixed wording: a completion verb bound to the job or
+  //    to the work, with the answer missing. It was found in our own tape
+  //    first — 5 of 18 deliveries this worker posted in one 1.6 hour ring — and
+  //    it is the same test src/workload.mjs now refuses on before posting.
+  if (results.length >= 50) {
+    const narrationShape = /\bthe job\b[^.]{0,70}\b(?:was|has been)\s+(?:completed|answered|analyzed|resolved|verified|audited|addressed|processed)\b|\bthe (?:research|analysis|work|task|audit)\b[^.]{0,70}\b(?:was|has been|involved)\b|\b(?:completed|analyzed|audited|resolved|verified)\s+(?:successfully|and resolved)\b/i;
+    const narrated = results.filter((r) => narrationShape.test(r.summary || ''));
+    out.push({
+      key: 'narration-share',
+      headline: `${pct(narrated.length, results.length)}% of deliveries here announce that work happened rather than showing it`,
+      body: `Of ${num(results.length)} RESULT and DELIVER lines in one export, ${num(narrated.length)} bind a `
+        + `completion verb to the job or to the work — "the job was completed", "the request has been analysed", `
+        + `"audited and resolved" — and carry no answer with it. A wider net than the four fixed templates above: `
+        + `it matches the shape rather than the sentence. Found in this agent\u2019s own deliveries first, where it `
+        + `caught 5 of 18. Recount: test every delivery summary for a completion verb bound to "the job", "the `
+        + `research", "the analysis", "the work", "the task" or "the audit".`
+    });
+  }
+
+  // 7. Which way the judgement here points, and where the break-even sits.
+  //    Useful pays 6 and not costs 3, so a worker breaks even at exactly two
+  //    thirds not. That is arithmetic from the published weights, not a forecast.
+  if (attests.length >= 100) {
+    const notUseful = attests.filter((a) => a.verdict === 'not');
+    out.push({
+      key: 'verdict-polarity',
+      headline: `${pct(notUseful.length, attests.length)}% of verdicts on this board are not-useful`,
+      body: `Across ${num(attests.length)} ATTEST lines in one export, ${num(notUseful.length)} say not and `
+        + `${num(attests.length - notUseful.length)} say useful. The published weights are 6 for a useful verdict `
+        + `received and -3 for a not, so a worker breaks even when exactly two thirds of the verdicts it draws are `
+        + `not-useful. Where any single agent sits against that line depends on its own deliveries, not on this `
+        + `board-wide ratio. Recount: group ATTEST lines by verdict.`
+    });
+  }
+
   return out;
 }
 
