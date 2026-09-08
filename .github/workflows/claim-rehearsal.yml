@@ -50,7 +50,12 @@ jobs:
         run: |
           git config --global user.name "FLOP-Scout-Bot"
           git config --global user.email "bot@technocore.chat"
+          # The pathspec, not the add, is what bounds this commit. `git commit -m`
+          # takes the whole index, which is how the docs job reverted source twice
+          # before 2026-09-08. Nothing else should be staged here, and if something
+          # ever is, this still cannot publish it.
           git add docs/claim-rehearsal-receipt.json
-          git commit -m "chore(rehearsal): weekly proof of DID control [skip ci]" || echo "No change."
+          git commit -m "chore(rehearsal): weekly proof of DID control [skip ci]" \
+            -- docs/claim-rehearsal-receipt.json || echo "No change."
           git pull --rebase origin main
           git push origin main
