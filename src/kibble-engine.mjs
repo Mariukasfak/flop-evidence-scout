@@ -797,7 +797,18 @@ export class KibbleEngine {
 
     const board = jobs || (await this.fetchVerdictBoard({ ttlMs: 20 * 60_000 }));
     const candidates = [
-      ...instrumentBriefs({ claimLatencies: this.localState.claimLatencies || [] }),
+      ...instrumentBriefs({
+        claimLatencies: this.localState.claimLatencies || [],
+        claimRace: {
+          won: this.localState.claimsWon || 0,
+          lost: this.localState.claimsLost || 0
+        },
+        ownVerdicts: {
+          useful: this.localState.verdictsUseful || 0,
+          not: this.localState.verdictsNot || 0
+        },
+        claimOutcomes: this.localState.claimOutcomes || []
+      }),
       ...(board ? boardBriefs(board) : [])
     ];
     const brief = nextBrief(candidates, this.localState.postedBriefKeys || []);
