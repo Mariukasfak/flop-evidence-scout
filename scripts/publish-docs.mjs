@@ -42,7 +42,15 @@ function stageAndCommit() {
   run('git', ['add', 'docs']);
   const status = run('git', ['status', '--porcelain', '--', 'docs']).out;
   if (!status) return false;
-  run('git', ['commit', '-m', MESSAGE]);
+
+  /**
+   * The pathspec is the guarantee, not the `git add` above it.
+   *
+   * `git commit -- docs` commits those paths from the working tree and ignores
+   * whatever else is staged, so this job cannot write a file outside docs/ even
+   * if the index is wrong again for some reason nobody has thought of yet.
+   */
+  run('git', ['commit', '-m', MESSAGE, '--', 'docs']);
   return true;
 }
 
@@ -62,8 +70,26 @@ function main() {
     console.log(`[publish] Push rejected on attempt ${attempt}; rebasing onto the remote and regenerating.`);
     run('git', ['fetch', 'origin', 'main']);
 
-    // Keep the working tree, move HEAD to the remote. No merge, so no conflict.
-    run('git', ['reset', '--soft', 'origin/main']);
+    /**
+     * Move HEAD *and the index* to the remote. No merge, so no conflict.
+     *
+     * This was `reset --soft`, which moves HEAD and leaves the index holding the
+     * tree this checkout started from. Every file that landed on the remote in
+     * the meantime then sat in the index as its own reversal, and the commit
+     * below wrote that whole tree — so a docs job quietly reverted source it had
+     * never touched. `git add docs` did not protect anything: a commit takes the
+     * index, not the pathspec that was last added.
+     *
+     * It has happened twice and both were invisible for days. On 2026-09-03 it
+     * undid a800d31, the fix that serialises signed writes to one room with
+     * monotonic nonces, and deleted its test file; the repository ran without
+     * that fix for five days while the commit sat in the log looking applied. On
+     * 2026-09-08 it undid f0278e5 within a minute of it being pushed.
+     *
+     * A mixed reset makes the index match the remote, so `git add docs` stages
+     * only what this job actually generated.
+     */
+    run('git', ['reset', 'origin/main']);
 
     // Rebuild from the remote's data so the output reflects both sides rather
     // than clobbering whatever landed while we were working.
