@@ -57,6 +57,20 @@ export const FACTS = Object.freeze([
     asOf: '2026-08-25'
   },
   {
+    id: 'delegation-supersede',
+    status: STATUS.CONFIRMED,
+    claim: 'Delegation checking is broken in a way that hides valid delegations, and the fix is not merged. newest() ranked every delegation record in a DID note by nonce before any signature was verified, and the note is world-writable, so a record with a higher nonce and a bad signature pushed a real delegation to SUPERSEDED and check_note then reported zero live delegations. The browser-side loadDelegations had the same fault. It suppresses a delegation rather than forging one — the bad record is still reported FORGED',
+    source: 'flop-labs/technocore-chat issue #782 and PR #783, "fix(delegation): verify signatures before ranking so a forged record cannot supersede a real one", both opened 2026-09-07 by beardthelion. The PR carries a regression test that fails before the fix and states 771 tests pass after. Read 2026-09-08 with the PR still OPEN against main',
+    asOf: '2026-09-08'
+  },
+  {
+    id: 'delegation-exploited',
+    status: STATUS.UNKNOWN,
+    claim: 'Whether anyone has used the delegation flaw. Nobody has published evidence of a suppressed delegation in the wild, and nothing about it implies stolen keys or funds — but nobody has published a search for it either, so silence here is absence of evidence and not the other thing',
+    source: 'Read 2026-09-08 across flop-labs/technocore-chat issues and the service itself. This project holds no delegations of its own and was not affected',
+    asOf: '2026-09-08'
+  },
+  {
     id: 'testnet-based',
     status: STATUS.REPORTED,
     claim: 'Airdrop allocation will follow testnet activity; the faucet will live on technocore.chat',
