@@ -631,6 +631,72 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
     assert.equal(rails.canSendMessage(second).allowed, true);
   });
 
+  test('a spent answer comes back after its repeat window, and not before', () => {
+    // The repeat above is correct inside the window and wrong outside it. With
+    // no window at all the scout draws from 21 facts, spends its reachable
+    // replies within a few hours and then refuses everyone: 464 refusals to 22
+    // answers over the nine hours to 2026-09-09T06:55Z, 336 distinct agents
+    // turned away, one answer refused 126 times.
+    const windowMs = 6 * 60 * 60 * 1000;
+    const rails = new Guardrails({ maxPerHour: 1000, minCooldownMs: 0, repeatWindowMs: windowMs });
+    const body = formatKnowledgeResponse('What does a did:key identify on Technocore?');
+
+    assert.equal(rails.canSendMessage(body, { dedupeKey: body }).allowed, true);
+    rails.recordSent(body, { dedupeKey: body });
+
+    // Still spent one millisecond short of the window.
+    rails.recentHashes.set(rails.hashContent(body), Date.now() - (windowMs - 1));
+    assert.equal(
+      rails.canSendMessage(body, { dedupeKey: body }).allowed,
+      false,
+      'inside the window it is still a duplicate'
+    );
+
+    // And available again once past it. This is the positive case the old
+    // check could never reach, whatever the clock said.
+    rails.recentHashes.set(rails.hashContent(body), Date.now() - (windowMs + 1));
+    assert.equal(
+      rails.canSendMessage(body, { dedupeKey: body }).allowed,
+      true,
+      'past the window the same grounded answer may go to a new asker'
+    );
+
+    // The default is unchanged for every lane that did not ask for a window:
+    // kibble deliveries and verdicts still may not repeat, ever.
+    const forever = new Guardrails({ maxPerHour: 1000, minCooldownMs: 0 });
+    forever.recordSent(body, { dedupeKey: body });
+    forever.recentHashes.set(forever.hashContent(body), Date.now() - 30 * 24 * 60 * 60 * 1000);
+    assert.equal(
+      forever.canSendMessage(body, { dedupeKey: body }).allowed,
+      false,
+      'without repeatWindowMs a sent message stays spent'
+    );
+  });
+
+  test('an answer re-sent after its window is evicted last, not first', () => {
+    // Map keeps a re-set key in its original slot, so without the delete in
+    // recordSent a freshly re-sent answer would look like the oldest entry and
+    // be the first thing the 100-hash cap threw away.
+    const rails = new Guardrails({ maxPerHour: 1000, minCooldownMs: 0, repeatWindowMs: 1000 });
+    rails.recordSent('first answer', { dedupeKey: 'first answer' });
+    rails.recordSent('second answer', { dedupeKey: 'second answer' });
+    rails.recentHashes.set(rails.hashContent('first answer'), Date.now() - 5000);
+    rails.recordSent('first answer', { dedupeKey: 'first answer' });
+
+    const order = [...rails.recentHashes.keys()];
+    assert.equal(order[order.length - 1], rails.hashContent('first answer'), 'the re-sent answer is newest');
+  });
+
+  test('recordSent prunes answers that have aged out of the window', () => {
+    const rails = new Guardrails({ maxPerHour: 1000, minCooldownMs: 0, repeatWindowMs: 1000 });
+    rails.recordSent('stale', { dedupeKey: 'stale' });
+    rails.recentHashes.set(rails.hashContent('stale'), Date.now() - 60_000);
+    rails.recordSent('fresh', { dedupeKey: 'fresh' });
+
+    assert.equal(rails.recentHashes.has(rails.hashContent('stale')), false, 'aged-out entry is dropped');
+    assert.equal(rails.recentHashes.has(rails.hashContent('fresh')), true);
+  });
+
   test('scout ignores noise-only rooms without posting anything', async () => {
     const identity = generateIdentity();
     const client = new TechnocoreClient({ baseUrl: serverUrl });

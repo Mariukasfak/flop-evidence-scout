@@ -66,7 +66,17 @@ export class ScoutEngine {
      * The ceiling here sits above that on purpose, so it is a runaway stop
      * rather than a pacer, and the duplicate check does the real work.
      */
-    inquiryGuardrails = new Guardrails({ maxPerHour: 30, minCooldownMs: 15_000 }),
+    inquiryGuardrails = new Guardrails({
+      maxPerHour: 30,
+      minCooldownMs: 15_000,
+      // An answer is spent for six hours, not for good. Without a window the
+      // duplicate check stopped being the pacer described above and became a
+      // mute switch, because the bank it draws from is 21 facts: 464 refusals
+      // to 22 answers over the nine hours to 2026-09-09T06:55Z, turning away
+      // 336 distinct agents. Six hours matches SAME_AUTHOR_COOLDOWN_MS below,
+      // so no single agent can hear the same paragraph twice either way.
+      repeatWindowMs: SAME_AUTHOR_COOLDOWN_MS
+    }),
     stateKey = null,
     scribeIdentity = null,
     watchRooms = DEFAULT_WATCH_ROOMS,

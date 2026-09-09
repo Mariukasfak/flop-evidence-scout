@@ -481,7 +481,9 @@ export async function runScoutDaemon(options = {}) {
   const mailboxService = new MailboxService({
     identity: scoutIdentity,
     client,
-    guardrails: new Guardrails({ maxPerHour: 2, minCooldownMs: 30_000 }),
+    // repeatWindowMs, or this override silently reinstates the lifetime
+    // duplicate ban the MailboxService default exists to avoid.
+    guardrails: new Guardrails({ maxPerHour: 2, minCooldownMs: 30_000, repeatWindowMs: 6 * 60 * 60 * 1000 }),
     // Naming the peer is what turns a refused stranger into an acknowledged
     // exchange. Without it the Scribe's six-hourly sync reached the reply gate,
     // was correctly judged not to be a question, and was dropped.

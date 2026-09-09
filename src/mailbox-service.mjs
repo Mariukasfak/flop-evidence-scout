@@ -38,7 +38,11 @@ export class MailboxService {
   constructor({
     identity,
     client,
-    guardrails = new Guardrails({ maxPerHour: 4, minCooldownMs: 15_000 }),
+    // repeatWindowMs for the same reason as the scout's inquiry lane: replies
+    // here come from the same 21-fact bank via formatKnowledgeResponse, so a
+    // lifetime duplicate ban silences the mailbox against every sender after
+    // the first who asks about a given topic.
+    guardrails = new Guardrails({ maxPerHour: 4, minCooldownMs: 15_000, repeatWindowMs: 6 * 60 * 60 * 1000 }),
     stateKey = null,
     publicFallbackRoom = 'technocore',
     mailboxPrefix = 'mb-p-scout',

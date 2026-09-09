@@ -1,16 +1,40 @@
 import crypto from 'node:crypto';
 
 export class Guardrails {
+  /**
+   * `repeatWindowMs` is how long an answer stays spent. `Infinity` — the
+   * default, and what every lane had — means once sent, never again.
+   *
+   * That is a mute switch, not a pacer, anywhere the thing being sent comes
+   * from a finite bank. The scout answers out of 21 verified facts, two at a
+   * time, so its reachable set of distinct replies is a few dozen strings; once
+   * each had gone out once, the check refused everything. Measured over the
+   * audit log for the nine hours to 2026-09-09T06:55Z: **464 refusals against
+   * 22 answers, and 336 distinct agents turned away** — every one of them
+   * asking something we hold a grounded answer for, refused because a
+   * different agent had been given that paragraph earlier. One answer
+   * (`did_identity`) was refused 126 times.
+   *
+   * A finite window restores the intent stated in ScoutEngine's constructor:
+   * the duplicate check is meant to pace distinct answers, with the hourly
+   * ceiling above it as a runaway stop. It is not the thing that stops us
+   * repeating ourselves to one agent — `SAME_AUTHOR_COOLDOWN_MS` (6 h) and the
+   * answered-skeleton set already do that, which is why the window can be
+   * finite without any agent hearing the same paragraph twice.
+   */
   constructor({
     maxPerHour = 4,
     minCooldownMs = 60_000,
-    maxMessageLength = 3000
+    maxMessageLength = 3000,
+    repeatWindowMs = Infinity
   } = {}) {
     this.maxPerHour = maxPerHour;
     this.minCooldownMs = minCooldownMs;
     this.maxMessageLength = maxMessageLength;
+    this.repeatWindowMs = repeatWindowMs;
     this.sentTimestamps = [];
-    this.recentHashes = new Set();
+    /** hash -> ms timestamp it was last sent at. */
+    this.recentHashes = new Map();
   }
 
   hashContent(text) {
@@ -33,13 +57,15 @@ export class Guardrails {
       return { allowed: false, reason: validation.reason };
     }
 
+    const now = Date.now();
+
     const contentHash = this.hashContent(dedupeKey ?? content);
-    if (this.recentHashes.has(contentHash)) {
+    const lastSentAt = this.recentHashes.get(contentHash);
+    if (lastSentAt !== undefined && now - lastSentAt < this.repeatWindowMs) {
       return { allowed: false, reason: 'Deduplikacija: identiškas pranešimas jau buvo išsiųstas' };
     }
 
-    const now = Date.now();
-    
+
     // Prune timestamps older than 1 hour
     this.sentTimestamps = this.sentTimestamps.filter((ts) => now - ts < 3600_000);
     
@@ -61,11 +87,24 @@ export class Guardrails {
     const now = Date.now();
     this.sentTimestamps.push(now);
     const contentHash = this.hashContent(dedupeKey ?? content);
-    this.recentHashes.add(contentHash);
-    
+    // Delete before set: a Map keeps a re-set key in its original position, and
+    // the eviction below drops whatever is first. Without this, re-sending an
+    // old answer would leave it looking like the least recently used one.
+    this.recentHashes.delete(contentHash);
+    this.recentHashes.set(contentHash, now);
+
+    if (Number.isFinite(this.repeatWindowMs)) {
+      for (const [hash, at] of this.recentHashes) {
+        // Insertion order is oldest-first, so the first entry still inside the
+        // window means every entry after it is too.
+        if (now - at < this.repeatWindowMs) break;
+        this.recentHashes.delete(hash);
+      }
+    }
+
     // Keep max 100 hashes
     if (this.recentHashes.size > 100) {
-      const [first] = this.recentHashes;
+      const [first] = this.recentHashes.keys();
       this.recentHashes.delete(first);
     }
   }
