@@ -1227,8 +1227,13 @@ describe('Missed messages are noticed', () => {
     return scout;
   };
 
-  test('a ring that dropped unread history is reported, with the count', async () => {
-    // We last read seq 100; the room now starts at 151. Fifty are gone.
+  test('a gap between our cursor and the page we got is reported, with the count', async () => {
+    // We last read seq 100; this response starts at 151. Fifty went unread —
+    // which is not the same as fifty destroyed. first_seq is the first record
+    // of this bounded response, not the room's retained floor, so this count
+    // cannot tell expiry from a window we simply did not ask for. Measured
+    // 2026-09-09 on /r/lobby: of a 5,012-record gap, all 5,012 were still in
+    // the export a minute later.
     const client = roomClient({
       first_seq: 151, last_seq: 152,
       messages: [{ seq: 151, ts: 'x', from: 'did:key:z6MkA', text: 'hello' },
@@ -1237,7 +1242,8 @@ describe('Missed messages are noticed', () => {
     const { gap, maxSeq } = await scoutWith(client, 100).collectNewMessages('lobby');
 
     assert.ok(gap, 'the gap must not be silent');
-    assert.equal(gap.missed, 50);
+    assert.equal(gap.unread, 50);
+    assert.equal(gap.missed, undefined, 'it no longer claims the records were destroyed');
     assert.equal(gap.from, 101);
     assert.equal(gap.to, 150);
     assert.equal(maxSeq, 152, 'the cursor still advances past the gap');

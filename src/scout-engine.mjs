@@ -281,8 +281,32 @@ export class ScoutEngine {
       gap = { room, reason: 'room_recreated', wasGeneration: knownGeneration, nowGeneration: generation };
       console.warn(`[Scout] /r/${room}: new generation ${knownGeneration} -> ${generation} — this is a different conversation, not lost messages.`);
     } else if (cursor > 0 && Number.isFinite(data?.firstSeq) && data.firstSeq > cursor + 1) {
-      gap = { room, from: cursor + 1, to: data.firstSeq - 1, missed: data.firstSeq - cursor - 1 };
-      console.warn(`[Scout] /r/${room}: missed ${gap.missed} message(s) — the room dropped them before we read them.`);
+      /**
+       * "The room dropped them" was a claim this endpoint cannot support, and
+       * measurement says it was usually wrong.
+       *
+       * `firstSeq` is the first record of *this bounded response*, not the
+       * room's retained floor — issue #775 upstream is about exactly that
+       * being undiscoverable. We ask for the newest 50 each cycle, so in a room
+       * doing over a thousand a minute the gap below is mostly records we never
+       * requested, not records that expired.
+       *
+       * Measured 2026-09-09T08:12Z on /r/lobby. A read of `?since=37438316`
+       * came back with `firstSeq: 37443329`, skipping 5,012 records — and the
+       * export taken a minute later held seq 37,424,001..37,443,704, so every
+       * one of those 5,012 still existed. The ring held 19,704 records spanning
+       * 14.25 minutes at ~1,383 messages a minute.
+       *
+       * So the honest word is "unread". Some of it may genuinely have expired
+       * — 14 minutes is not long — but this number cannot tell which, and
+       * saying "dropped" turned a gap we could close by reading harder into a
+       * loss we had written off.
+       */
+      gap = { room, from: cursor + 1, to: data.firstSeq - 1, unread: data.firstSeq - cursor - 1 };
+      console.warn(
+        `[Scout] /r/${room}: ${gap.unread} message(s) between our cursor and this page went unread `
+        + `— we asked for the newest window and the room had moved on. Some may still be retained.`
+      );
     }
 
     const maxSeq = messages.reduce((acc, m) => Math.max(acc, Number(m.seq || m.id || 0)), cursor);
