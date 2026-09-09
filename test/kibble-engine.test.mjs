@@ -1437,3 +1437,138 @@ describe('A question is asked once, even after the memory of asking is lost', ()
     assert.match(client.posts[0].text, /^JOB v1 \| k/);
   });
 });
+
+/**
+ * A /kv/ note holds 8192 characters. MAX_REMEMBERED bounds each id list on its
+ * own and nothing bounded their sum, so the note went over four times in the
+ * three days to 2026-09-09 (8,245, 8,258, 8,532, 8,808) and the server refused
+ * every one of those writes. A refused write means this lane stops persisting.
+ */
+describe('KibbleEngine state note fits the server limit', () => {
+  function engineWithState(state) {
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(),
+      validatorIdentity: generateIdentity(),
+      client: makeClient()
+    });
+    Object.assign(engine.localState, state);
+    return engine;
+  }
+
+  const ids = (p) => Array.from({ length: 200 }, (_, i) => `k${p}${String(i).padStart(9, '0')}`);
+
+  /**
+   * The live note on 2026-09-09, with both id lists grown to MAX_REMEMBERED
+   * and two claims held.
+   *
+   * Measured that day: 6,475 characters total, of which `deliveredJobIds` was
+   * 200 entries / 2,801 characters and `refusedJobIds` 112 / 1,569 — 14
+   * characters an id — leaving 2,105 in the small fields. Both lists at the cap
+   * is 5,600, so the capped part of the note tops out around 7,705.
+   *
+   * That does not reach 8,808, and `heldJobs` is the difference. Each entry
+   * carries the job's whole title and body rather than its id, and `MAX_HELD`
+   * bounds the count at two, not the size. So the note is ~7.7 KB of bounded
+   * fields plus however long the two jobs we are currently holding happen to
+   * be — which is why the overruns came in bursts rather than steadily, and why
+   * the note measured only 6,475 at a moment when `heldJobs` was empty.
+   */
+  function liveShapedState() {
+    return {
+      deliveredJobIds: ids('a'),
+      refusedJobIds: ids('b'),
+      heldJobs: [
+        {
+          jobId: 'kc000000001',
+          category: 'measurement',
+          title: 'Measure the retained window of a busy room',
+          body: 'Export /r/kibble and report how many records it holds and the wall-clock span '
+            + 'between the oldest and newest, so a consumer can tell how long it has before loss. '
+            + 'Give the UTC time of the read and the method, so anyone can re-run it.',
+          claimedAt: Date.now()
+        },
+        {
+          jobId: 'kc000000002',
+          category: 'measurement',
+          title: 'Compare the scorer cursor against the room head',
+          body: 'Read /api/board engine_tape_id and /r/kibble?limit=1, report the gap, and say '
+            + 'whether the cursor is inside the retained ring or behind it. Include both raw '
+            + 'numbers and the time of the read.',
+          claimedAt: Date.now()
+        }
+      ],
+      recentReasons: Array.from({ length: 12 }, (_, i) => `reason ${i} `.padEnd(70, 'x')),
+      postedQuestionKeys: Array.from({ length: 10 }, (_, i) => `question-key-number-${i}`),
+      postedBriefKeys: Array.from({ length: 7 }, (_, i) => `brief-${i}`),
+      claimOutcomes: [1, 0, 1, 1, 0, 1, 1, 1],
+      lastResultAt: new Date().toISOString(),
+      lastAttestAt: new Date().toISOString(),
+      lastResultJobId: 'ka000000199',
+      lastAttestJobId: 'kb000000199'
+    };
+  }
+
+  test('a note already under budget is left exactly as it was', () => {
+    const engine = engineWithState({ deliveredJobIds: ['k1', 'k2', 'k3'], refusedJobIds: ['k4'] });
+    const before = JSON.stringify(engine.localState);
+    assert.equal(engine.fitStateToNote(), 0, 'nothing to drop');
+    assert.equal(JSON.stringify(engine.localState), before);
+  });
+
+  test('an oversized note is trimmed until it fits', () => {
+    const engine = engineWithState(liveShapedState());
+    // 7,909 characters as written: over the 7,600 budget, under the server's
+    // 8,192. The two held jobs here are shorter than the ones that produced the
+    // real 8,808 — the point of the fixture is that the bounded fields plus two
+    // held jobs already exceed what may be written, not that it matches that
+    // day's bodies exactly. What must hold either way is the note that comes
+    // out, which the saveRemoteState test below pins against the real limit.
+    const before = JSON.stringify(engine.localState).length;
+    assert.ok(before > 7600, `the fixture really is over budget (${before} chars)`);
+
+    const dropped = engine.fitStateToNote();
+    assert.ok(dropped > 0, 'it dropped something');
+    assert.ok(
+      JSON.stringify(engine.localState).length <= 7600,
+      'the note fits after trimming'
+    );
+  });
+
+  test('trimming drops the oldest ids and keeps the newest', () => {
+    const engine = engineWithState(liveShapedState());
+    engine.fitStateToNote();
+
+    for (const key of ['deliveredJobIds', 'refusedJobIds']) {
+      const kept = engine.localState[key];
+      assert.ok(kept.length > 0, `${key} keeps some entries`);
+      // The most recent id of each list is the one that must survive: it is the
+      // job we are most likely to meet again on the board.
+      assert.equal(kept[kept.length - 1], ids(key === 'deliveredJobIds' ? 'a' : 'b')[199]);
+    }
+  });
+
+  test('work we still owe is never trimmed away', () => {
+    const held = [{ jobId: 'kheld0000001', claimedAt: Date.now() }];
+    const engine = engineWithState({ ...liveShapedState(), heldJobs: held });
+    engine.fitStateToNote();
+    assert.deepEqual(engine.localState.heldJobs, held, 'a claim we owe an answer on survives');
+  });
+
+  test('a note that cannot be shrunk any further is still written, not dropped', () => {
+    // Nothing trimmable, and over budget: the loop must terminate and let the
+    // server give its own answer rather than spin.
+    const engine = engineWithState({ deliveredJobIds: [], refusedJobIds: [], cursor: 'x'.repeat(9000) });
+    assert.equal(engine.fitStateToNote(), 0);
+    assert.ok(JSON.stringify(engine.localState).length > 7600);
+  });
+
+  test('saveRemoteState writes a note within the server limit', async () => {
+    const engine = engineWithState(liveShapedState());
+    const written = [];
+    engine.client.setKv = async (ns, key, value) => { written.push(JSON.stringify(value)); return true; };
+
+    assert.equal(await engine.saveRemoteState(), true);
+    assert.equal(written.length, 1);
+    assert.ok(written[0].length <= 8192, `wrote ${written[0].length} chars, limit is 8192`);
+  });
+});

@@ -64,6 +64,37 @@ import { boardBriefs, instrumentBriefs, nextBrief, briefLine } from './kibble-br
 const MAX_REMEMBERED = 200;
 
 /**
+ * A /kv/ note may hold 8192 characters, and this state has to fit in one.
+ *
+ * `MAX_REMEMBERED` bounds each id list on its own, and nothing bounded their
+ * sum. Measured on the live note 2026-09-09: `deliveredJobIds` sat at its cap
+ * of 200 for 2,801 characters and `refusedJobIds` was 112 entries and 1,569,
+ * still filling — 14 characters an id, so both at the cap is ~5,600 of the
+ * budget before any other field. It went over four times in the three days to
+ * 2026-09-09 (8,245, 8,258, 8,532 and 8,808 characters), and the server refused
+ * each one: `text too long: N characters, and the limit is 8192`. A refused
+ * write means the lane's state stops persisting, which is the same failure that
+ * once silently froze the scout's.
+ *
+ * So the budget is enforced where the constraint actually is — on the whole
+ * serialised note, at save time — rather than by a per-list count that cannot
+ * see the other lists. The margin below 8192 covers the fields that grow
+ * between one save and the next.
+ */
+const NOTE_BUDGET = 7600;
+
+/**
+ * The only lists it is safe to shorten, longest first.
+ *
+ * Both are "don't do this job again" memories where the oldest entry is the
+ * least useful — that job left the board long ago. Everything else in the note
+ * is either a counter, a cursor, or a record of which hand-written question or
+ * brief has already been posted, and dropping one of those would republish it.
+ * `heldJobs` is work we owe and is never trimmed.
+ */
+const TRIMMABLE_KEYS = ['deliveredJobIds', 'refusedJobIds'];
+
+/**
  * Claims we hold but have not yet answered.
  *
  * Small on purpose. A claim we do not deliver on is the debris this file was
@@ -393,8 +424,41 @@ export class KibbleEngine {
     return this.localState;
   }
 
+  /**
+   * Shrink the note until it fits, oldest ids first.
+   *
+   * Returns how many entries were dropped, so the caller can say so once
+   * instead of trimming silently — a state note quietly losing its tail is the
+   * kind of thing that looks like nothing at all until a job is re-answered.
+   */
+  fitStateToNote(budget = NOTE_BUDGET) {
+    let dropped = 0;
+    // Each id is ~14 characters, so a batch converges in a handful of passes
+    // without re-serialising the whole note for every single entry.
+    for (let pass = 0; pass < 200; pass += 1) {
+      if (JSON.stringify(this.localState).length <= budget) break;
+      const longest = TRIMMABLE_KEYS
+        .filter((key) => Array.isArray(this.localState[key]) && this.localState[key].length > 0)
+        .sort((a, b) => this.localState[b].length - this.localState[a].length)[0];
+      // Nothing left that may be shortened. Write it anyway and let the server
+      // answer: a refusal we can see beats a silent truncation we cannot.
+      if (!longest) break;
+      const batch = Math.max(1, Math.ceil(this.localState[longest].length * 0.1));
+      this.localState[longest] = this.localState[longest].slice(batch);
+      dropped += batch;
+    }
+    return dropped;
+  }
+
   async saveRemoteState() {
     try {
+      const dropped = this.fitStateToNote();
+      if (dropped > 0) {
+        sayOnce(
+          'kibble:state-trim',
+          `[Kibble] State note was over ${NOTE_BUDGET} chars — dropped the ${dropped} oldest job ids to fit.`
+        );
+      }
       await this.client.setKv('kibble', this.stateKey, this.localState);
       this.lastStateError = null;
       return true;
