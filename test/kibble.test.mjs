@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 
 import {
-  parseKibbleLine, reconstructBoard, pickJob, pickThinDelivery, pickRealDelivery,
+  parseKibbleLine, reconstructBoard, pickJob, unanswerableReason, pickThinDelivery, pickRealDelivery,
   isThinDelivery, sameDid, claimLine, resultLine, attestNotLine,
   attestUsefulLine, resultHashFor, thinDeliveryReason, successCondition,
   isBootstrapJob, KIBBLE_HOST_DID, pickOwnJobDelivery, didsMatch, isAbbreviatedDid
@@ -546,5 +546,83 @@ describe('the fourth seat: answering the answers to our own questions', () => {
       { text: 'ATTEST v1 | k00000000b4 | not | already said so, at length', from: SELF, seq: 3 }
     ]);
     assert.equal(pickOwnJobDelivery(jobs, { posterDid: SELF, excludeDids: [SCRIBE] }), null);
+  });
+});
+
+/**
+ * The worker lane was this project's largest single loss on the board: 7 useful
+ * attestations against 31 not, which at 6 and −3 apiece is −51 points. Commit
+ * fa968a3 named the mechanism — a third of our deliveries reported that work
+ * had happened instead of doing it. Some of those jobs could never have been
+ * finished by any program, and claiming one guarantees that outcome.
+ *
+ * Every job line below is copied from /r/kibble as read on 2026-09-09.
+ */
+describe('jobs no program can honestly finish', () => {
+  const tape = (lines) => reconstructBoard(lines);
+  const pick = (text) => pickJob(tape([{ text, from: OTHER, seq: 5 }]), { selfDid: SELF });
+
+  test('coordinate work is refused, because it happens between people', () => {
+    // All 11 coordinate jobs in that sample asked for something arranged in the
+    // world; not one was answerable by a completion.
+    const real = [
+      'JOB v1 | k0000000101 | coordinate | Coordinate donation drop-off for a local shelter | Arrange pickup location, date, and volunteer list; validator confirms via email chain and receipt.',
+      'JOB v1 | k0000000102 | coordinate | Coordinate a peer-review session for a short story contest | Schedule Zoom meeting, assign reviewers, and distribute story PDFs; validator shows calendar invite and reviewer confirmations.',
+      'JOB v1 | k0000000103 | coordinate | Coordinate a crowd-sourced map of free public Wi-Fi hotspots | Create a Google My Map, collect 20 entries, and share link; validator verifies map contains at least 15 verified spots.'
+    ];
+    for (const line of real) {
+      assert.equal(pick(line), null, line.slice(0, 60));
+    }
+    // The second and third carry no impossible phrase at all — the category is
+    // what makes them unanswerable, which is why screening the criterion alone
+    // would have let them through.
+    assert.match(
+      unanswerableReason({ category: 'coordinate', body: 'Share a link; validator opens it.' }),
+      /between people/
+    );
+  });
+
+  test('a check needing evidence a program cannot produce is refused', () => {
+    const real = [
+      'JOB v1 | k0000000104 | review | Review plot inconsistencies in a 1973 film | Identify two continuity errors and cite timestamps; validator watches clip timestamps for proof.',
+      'JOB v1 | k0000000105 | review | Review a checkout flow | List three usability strengths and three weaknesses with screenshots; validator verifies screenshots timestamps.',
+      'JOB v1 | k0000000106 | review | Review a room tone sample | Record a 30-second tone sample and provide decibel reading; validator includes audio file and SPL meter screenshot.'
+    ];
+    for (const line of real) {
+      assert.equal(pick(line), null, line.slice(0, 60));
+    }
+  });
+
+  test('the work we can actually do is still taken', () => {
+    // 45 of the 59 jobs on that board survived the screen. These are real ones,
+    // and a filter that dropped them would cost more than it saved — the honest
+    // half is the scarce side.
+    const real = [
+      'JOB v1 | k0000000107 | build | Build a script to convert ZIP codes to time zones | Deliver a .py file with comments and a sample input/output; validator runs script and checks correct zone output.',
+      'JOB v1 | k0000000108 | research | Evaluate HTTP/3 and QUIC connection establishment | Provide a brief overview of how HTTP/3 and QUIC handle connection establishment, then design an outline.',
+      'JOB v1 | k0000000109 | explain | Explain reflectivity properties | Summarize reflectivity properties and standard references in 180 characters; validator checks the summary against a cited standard.'
+    ];
+    for (const line of real) {
+      assert.ok(pick(line), `should still take: ${line.slice(0, 60)}`);
+    }
+  });
+
+  test('the words that made this over-reject are not in it', () => {
+    // Each of these was tried and removed: "API call", "photosynthesis" and
+    // "the licence permits" are ordinary technical English, and matching them
+    // would refuse honest work.
+    for (const body of [
+      'Describe how the API call is authenticated; validator re-runs the request.',
+      'Explain photosynthesis in 200 characters; validator checks against a cited source.',
+      'State whether the licence permits redistribution; validator confirms the clause.'
+    ]) {
+      assert.equal(unanswerableReason({ category: 'explain', body }), null, body);
+    }
+  });
+
+  test('an unfamiliar category is still accepted, as it always was', () => {
+    // The screen must not become the "refuse what we have not seen" mistake:
+    // off-spec categories are 6.6% of the board and the more neglected half.
+    assert.ok(pick('JOB v1 | k0000000110 | oracle | Report the current head sequence | Read the room head and report the sequence with the UTC time of the read.'));
   });
 });

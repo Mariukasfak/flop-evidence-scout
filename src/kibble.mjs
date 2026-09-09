@@ -76,6 +76,70 @@ export const CATEGORIES = ['explain', 'research', 'review', 'build', 'coordinate
 const CATEGORY_SHAPE = /^[a-z][a-z0-9_-]{0,23}$/;
 
 /**
+ * Checks that no software agent can pass, whatever it writes.
+ *
+ * These match against the job's last field — the acceptance criterion, which
+ * says how the validator intends to check. Screening there rather than on the
+ * category is the point: a `research` job asking how HTTP/3 establishes a
+ * connection is perfectly answerable, while a `review` job whose validator
+ * "watches clip timestamps" is not, and the category alone cannot tell them
+ * apart.
+ *
+ * Deliberately narrow. `call` is not here because "API call" is everywhere,
+ * `photo` because of "photosynthesis", `permit` because a licence permits
+ * things. A false positive costs us honest work, which is the scarce side.
+ */
+const IMPOSSIBLE_ACCEPTANCE = new RegExp([
+  'email (chain|thread|confirmation)',
+  'receipt',
+  'phone (call|number)|by phone|call the [a-z]',
+  'in person|in-person|on-?site|physically',
+  'ship(ping|ped)? to|mail(ed)? to|pick-?up (location|point)',
+  'volunteer|sign-?ups|permits? (from|are secured)',
+  'watch(es)? (the )?(clip|video|footage)|video recording|record a video',
+  'screenshot|photograph',
+  '(post|posted|posting) (it |the schedule )?(on|to) (facebook|instagram|twitter|x|linkedin)',
+  'oscilloscope|drone|sensor reading|physical (device|hardware)',
+  'notariz|in-store|storefront|attend(s|ing)? '
+].join('|'), 'i');
+
+/**
+ * Why we cannot honestly finish this job, or null if we can try.
+ *
+ * Our worker lane was our single largest loss on this board — 7 useful
+ * attestations against 31 not, which at 6 and −3 apiece is −51 points — and
+ * `fa968a3` names the mechanism: a third of our deliveries reported that work
+ * had happened instead of doing it. That is what answering an unanswerable job
+ * looks like from the outside, and the validators were right to mark it down.
+ *
+ * Measured on `/r/kibble`, 2026-09-09, 200 messages holding 59 JOB lines. This
+ * refuses 14 of the 59:
+ *
+ * - **All 11 `coordinate` jobs**, and the category is the reason rather than a
+ *   statistic. Every one asked for something arranged between real people in
+ *   the world: a donation drop-off, permits for a riverbank clean-up, a Zoom
+ *   session with real reviewers, shipping laptops and obtaining a receipt,
+ *   reserving a community hall, a live Q&A with a local beekeeper. A
+ *   completion cannot do any of it, so anything we post is narration.
+ * - **3 more on the criterion alone**, all `review`: clip timestamps,
+ *   screenshots with timestamps, an audio file with an SPL meter reading.
+ *
+ * This is not the "refuse unfamiliar categories" mistake the comment above
+ * warns against — that refused work we simply had not seen before. `coordinate`
+ * is a category we know, and know we cannot do.
+ */
+export function unanswerableReason(job) {
+  if (!job) return null;
+  if (job.category === 'coordinate') {
+    return 'coordinate work is arranged between people; a completion cannot do it';
+  }
+  if (job.body && IMPOSSIBLE_ACCEPTANCE.test(job.body)) {
+    return 'the stated check needs evidence a program cannot produce';
+  }
+  return null;
+}
+
+/**
  * Deliveries that say a job is done without doing it.
  *
  * Drawn from the two families that dominate the tape, not invented: the
@@ -364,6 +428,10 @@ export function pickJob(jobs, {
     if (job.results.length > 0) continue;
     if (job.claims.length > 0) continue;
     if (!job.body || job.body.length < minBodyChars) continue;
+    // Before the claim, not after. Refusing at answer time still spends the
+    // claim, and a claim we drop is one a worker who could have done it never
+    // saw.
+    if (unanswerableReason(job)) continue;
     candidates.push(job);
   }
 
