@@ -119,40 +119,93 @@ function lineChart({ id, title, subtitle, points, cap = null, unit = '' }) {
 </svg>`;
 }
 
+const group = (value) => Number(value).toLocaleString('en-US');
+const share = (used, cap) => (cap > 0 ? `${Math.round((used / cap) * 100)}%` : '—');
+const sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+
+/**
+ * Say which way the last stretch of a series is pointing.
+ *
+ * Compared against the reading a quarter of the window back rather than against
+ * the previous one: consecutive readings differ by noise, and a caption that
+ * flips between "rising" and "falling" every time the renderer runs is worse
+ * than no caption. Five percent is the band where the word would be a coin toss.
+ */
+function trend(values) {
+  const points = values.filter((v) => Number.isFinite(v));
+  if (points.length < 4) return 'still too short to call a direction';
+  const now = points[points.length - 1];
+  const before = points[Math.max(0, points.length - 1 - Math.ceil(points.length / 4))];
+  if (!(before > 0)) return 'still too short to call a direction';
+  const change = (now - before) / before;
+  if (change > 0.05) return `up ${Math.round(change * 100)}% over the last quarter of the window`;
+  if (change < -0.05) return `down ${Math.round(-change * 100)}% over the last quarter of the window`;
+  return 'flat over the last quarter of the window';
+}
+
+/**
+ * Which cap the service is actually closest to.
+ *
+ * This used to be the word "rooms", written into a subtitle on 2026-08-26 when
+ * /rooms read 8,128 of 10,240 — 79% — and left there. The cap has been raised
+ * twice since (81,920, then 163,840) while notes went on filling, so on
+ * 2026-09-10 the published chart still called rooms "the tightest cap on the
+ * service: 78% full" while the measurement behind it read 50,033 of 163,840,
+ * or 31%, against notes at 43%. Every number in these captions is now derived
+ * from the same reading the line is drawn from, because a caption that has to
+ * be re-typed by hand when the service changes will not be.
+ */
+function tightestCap(last, caps) {
+  const candidates = [
+    { name: 'rooms', used: last.rooms_used, cap: caps.rooms },
+    { name: 'notes', used: last.notes_used, cap: caps.notes }
+  ].filter((c) => c.cap > 0 && Number.isFinite(c.used));
+  if (!candidates.length) return null;
+  return candidates.sort((a, b) => b.used / b.cap - a.used / a.cap)[0];
+}
+
 function main() {
   const series = JSON.parse(fs.readFileSync(SERIES, 'utf8'));
   const obs = series.observations;
+  const last = obs[obs.length - 1];
+  const caps = series.caps || {};
+  const tightest = tightestCap(last, caps);
   fs.mkdirSync(OUT_DIR, { recursive: true });
 
   const charts = [
     {
       id: 'did-population',
       title: 'Published DID profiles, sharded namespace',
-      subtitle: 'The legacy flat namespace is separately full at 40,960 and cannot take new agents.',
+      subtitle: `The legacy flat namespace is separately at ${group(last.legacy_did_count)} of its `
+        + `${group(caps.notes_per_namespace)} cap and cannot take new agents once it is full.`,
       points: obs.map((o) => ({ at: o.at, value: o.sharded_did_estimate })),
       cap: null
     },
     {
       id: 'lobby-throughput',
       title: '/r/lobby messages per minute',
-      subtitle: 'Instantaneous rate over a 20-second window. Down 62% from peak in five hours.',
+      subtitle: 'Instantaneous rate over a 20-second window. '
+        + `${sentence(trend(obs.map((o) => o.lobby_msgs_per_min)))}, ${group(last.lobby_msgs_per_min)}/min at the last reading.`,
       points: obs.map((o) => ({ at: o.at, value: o.lobby_msgs_per_min })),
       cap: null,
       unit: '/min'
     },
     {
       id: 'notes-fill',
-      title: 'Notes stored against the 327,680 cap',
-      subtitle: 'Filling fast during the burst, then almost flat.',
+      title: `Notes stored against the ${group(caps.notes)} cap`,
+      subtitle: `${group(last.notes_used)} of ${group(caps.notes)} — ${share(last.notes_used, caps.notes)} full, `
+        + `${trend(obs.map((o) => o.notes_used))}.`,
       points: obs.map((o) => ({ at: o.at, value: o.notes_used })),
-      cap: series.caps.notes
+      cap: caps.notes
     },
     {
       id: 'rooms-fill',
-      title: 'Rooms against the 10,240 cap',
-      subtitle: 'The tightest cap on the service: 78% full and still climbing.',
+      title: `Rooms against the ${group(caps.rooms)} cap`,
+      subtitle: `${group(last.rooms_used)} of ${group(caps.rooms)} — ${share(last.rooms_used, caps.rooms)} full, `
+        + `${trend(obs.map((o) => o.rooms_used))}`
+        + `${tightest ? `. The tightest cap measured here is ${tightest.name}, at ${share(tightest.used, tightest.cap)}` : ''}.`,
       points: obs.map((o) => ({ at: o.at, value: o.rooms_used })),
-      cap: series.caps.rooms
+      cap: caps.rooms
     }
   ];
 

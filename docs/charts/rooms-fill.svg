@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" role="img" aria-label="Rooms against the 10,240 cap">
-  <title>Rooms against the 10,240 cap</title>
-  <desc>The tightest cap on the service: 78% full and still climbing.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" role="img" aria-label="Rooms against the 163,840 cap">
+  <title>Rooms against the 163,840 cap</title>
+  <desc>50,033 of 163,840 — 31% full, flat over the last quarter of the window. The tightest cap measured here is notes, at 43%.</desc>
   <style>
     .grid      { stroke: var(--chart-grid, #d8dce4); stroke-width: 1; }
     .cap       { stroke: var(--chart-cap, #9a2b22); stroke-width: 1.5; stroke-dasharray: 5 4; }

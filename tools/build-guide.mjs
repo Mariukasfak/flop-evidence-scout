@@ -35,6 +35,25 @@ const pct = (a, b) => `${((a / b) * 100).toFixed(1)}%`;
 
 const totalDids = last.sharded_did_estimate + last.legacy_did_count;
 
+/**
+ * Which cap the service is actually closest to, at the last reading.
+ *
+ * The three cap captions on this page were the one place the rule below was not
+ * applied: they named rooms as "the tightest constraint" and printed the caps as
+ * 10,240 and 327,680, both written when that was true and neither re-checked.
+ * The service raised the room cap twice (81,920, then 163,840) and the notes cap
+ * with it, so by 2026-09-10 the page asserted rooms at 78% of 10,240 above a
+ * chart drawn from 50,033 of 163,840 — 31% — while notes sat at 43%. Derived
+ * here for the same reason as the traffic verdict: a sentence no measurement can
+ * contradict is not a measurement.
+ */
+const tightest = [
+  { name: 'rooms', used: last.rooms_used, cap: series.caps?.rooms },
+  { name: 'notes', used: last.notes_used, cap: series.caps?.notes }
+]
+  .filter((c) => c.cap > 0 && Number.isFinite(c.used))
+  .sort((a, b) => b.used / b.cap - a.used / a.cap)[0] || null;
+
 // Derived, never asserted. An earlier version of this page hardcoded a headline
 // about traffic collapsing, written from the four readings that existed at the
 // time. Eleven readings later it was a dip, not a collapse, and the page was
@@ -373,12 +392,12 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
     <div class="metric">
       <span class="metric-label">Rooms used</span>
       <span class="metric-value">${pct(last.rooms_used, series.caps.rooms)}</span>
-      <span class="metric-foot">${n(last.rooms_used)} of ${n(series.caps.rooms)} — tightest cap</span>
+      <span class="metric-foot">${n(last.rooms_used)} of ${n(series.caps.rooms)}${tightest?.name === 'rooms' ? ' — tightest cap' : ''}</span>
     </div>
     <div class="metric">
       <span class="metric-label">Notes used</span>
       <span class="metric-value">${pct(last.notes_used, series.caps.notes)}</span>
-      <span class="metric-foot">${n(last.notes_used)} of ${n(series.caps.notes)}</span>
+      <span class="metric-foot">${n(last.notes_used)} of ${n(series.caps.notes)}${tightest?.name === 'notes' ? ' — tightest cap' : ''}</span>
     </div>
   </div>
   <p class="stamp">Re-measure any of it: <code>node tools/measure-network.mjs</code></p>
@@ -433,9 +452,9 @@ ${figure(chart('lobby-throughput'), `Traffic in /r/lobby between ${n(lobbyMin)} 
 <section>
   <h2>Capacity, and a lesson about measuring it</h2>
 
-  ${figure(chart('rooms-fill'), `Rooms are the tightest constraint on the service: ${pct(last.rooms_used, series.caps.rooms)} of the ${n(series.caps.rooms)} cap.`, 'Line chart of rooms used approaching the 10,240 cap')}
+  ${figure(chart('rooms-fill'), `Rooms stand at ${pct(last.rooms_used, series.caps.rooms)} of the ${n(series.caps.rooms)} cap${tightest ? `; the tightest cap measured here is ${tightest.name}, at ${pct(tightest.used, tightest.cap)}` : ''}.`, `Line chart of rooms used against a ${n(series.caps.rooms)} cap`)}
 
-  ${figure(chart('notes-fill'), 'Notes filled quickly during the burst and then nearly stopped. The dashed line is the 327,680 cap.', 'Line chart of notes stored against a 327,680 cap')}
+  ${figure(chart('notes-fill'), `Notes stand at ${pct(last.notes_used, series.caps.notes)} of the ${n(series.caps.notes)} cap. The dashed line is that cap.`, `Line chart of notes stored against a ${n(series.caps.notes)} cap`)}
 
   <div class="callout prose">
     <h3>A five-minute window is not a trend</h3>

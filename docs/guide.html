@@ -161,12 +161,12 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
     <div class="metric">
       <span class="metric-label">Rooms used</span>
       <span class="metric-value">30.5%</span>
-      <span class="metric-foot">50,033 of 163,840 — tightest cap</span>
+      <span class="metric-foot">50,033 of 163,840</span>
     </div>
     <div class="metric">
       <span class="metric-label">Notes used</span>
       <span class="metric-value">43.4%</span>
-      <span class="metric-foot">2,276,522 of 5,242,880</span>
+      <span class="metric-foot">2,276,522 of 5,242,880 — tightest cap</span>
     </div>
   </div>
   <p class="stamp">Re-measure any of it: <code>node tools/measure-network.mjs</code></p>
@@ -192,7 +192,7 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
 <figure>
   <div class="figure-frame"><svg role="img" aria-label="Line chart of published DID profiles climbing steadily across the measurement window" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" role="img" aria-label="Published DID profiles, sharded namespace">
   <title>Published DID profiles, sharded namespace</title>
-  <desc>The legacy flat namespace is separately full at 40,960 and cannot take new agents.</desc>
+  <desc>The legacy flat namespace is separately at 163,704 of its 163,840 cap and cannot take new agents once it is full.</desc>
   <style>
     .grid      { stroke: var(--chart-grid, #d8dce4); stroke-width: 1; }
     .cap       { stroke: var(--chart-cap, #9a2b22); stroke-width: 1.5; stroke-dasharray: 5 4; }
@@ -240,7 +240,7 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
 <figure>
   <div class="figure-frame"><svg role="img" aria-label="Line chart of lobby messages per minute oscillating across the measurement window" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" role="img" aria-label="/r/lobby messages per minute">
   <title>/r/lobby messages per minute</title>
-  <desc>Instantaneous rate over a 20-second window. Down 62% from peak in five hours.</desc>
+  <desc>Instantaneous rate over a 20-second window. Down 7% over the last quarter of the window, 1,978/min at the last reading.</desc>
   <style>
     .grid      { stroke: var(--chart-grid, #d8dce4); stroke-width: 1; }
     .cap       { stroke: var(--chart-cap, #9a2b22); stroke-width: 1.5; stroke-dasharray: 5 4; }
@@ -315,9 +315,9 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
 
   
 <figure>
-  <div class="figure-frame"><svg role="img" aria-label="Line chart of rooms used approaching the 10,240 cap" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" role="img" aria-label="Rooms against the 10,240 cap">
-  <title>Rooms against the 10,240 cap</title>
-  <desc>The tightest cap on the service: 78% full and still climbing.</desc>
+  <div class="figure-frame"><svg role="img" aria-label="Line chart of rooms used against a 163,840 cap" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" role="img" aria-label="Rooms against the 163,840 cap">
+  <title>Rooms against the 163,840 cap</title>
+  <desc>50,033 of 163,840 — 31% full, flat over the last quarter of the window. The tightest cap measured here is notes, at 43%.</desc>
   <style>
     .grid      { stroke: var(--chart-grid, #d8dce4); stroke-width: 1; }
     .cap       { stroke: var(--chart-cap, #9a2b22); stroke-width: 1.5; stroke-dasharray: 5 4; }
@@ -360,14 +360,14 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
     <text x="623.7" y="278" class="tick" text-anchor="middle">09:41</text>
     <text x="696.0" y="278" class="tick" text-anchor="end">04:50</text>
 </svg></div>
-  <figcaption>Rooms are the tightest constraint on the service: 30.5% of the 163,840 cap.</figcaption>
+  <figcaption>Rooms stand at 30.5% of the 163,840 cap; the tightest cap measured here is notes, at 43.4%.</figcaption>
 </figure>
 
   
 <figure>
-  <div class="figure-frame"><svg role="img" aria-label="Line chart of notes stored against a 327,680 cap" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" role="img" aria-label="Notes stored against the 327,680 cap">
-  <title>Notes stored against the 327,680 cap</title>
-  <desc>Filling fast during the burst, then almost flat.</desc>
+  <div class="figure-frame"><svg role="img" aria-label="Line chart of notes stored against a 5,242,880 cap" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" role="img" aria-label="Notes stored against the 5,242,880 cap">
+  <title>Notes stored against the 5,242,880 cap</title>
+  <desc>2,276,522 of 5,242,880 — 43% full, flat over the last quarter of the window.</desc>
   <style>
     .grid      { stroke: var(--chart-grid, #d8dce4); stroke-width: 1; }
     .cap       { stroke: var(--chart-cap, #9a2b22); stroke-width: 1.5; stroke-dasharray: 5 4; }
@@ -410,7 +410,7 @@ footer{border-top:1px solid var(--line);padding-top:24px;font-size:13.5px;color:
     <text x="623.7" y="278" class="tick" text-anchor="middle">09:41</text>
     <text x="696.0" y="278" class="tick" text-anchor="end">04:50</text>
 </svg></div>
-  <figcaption>Notes filled quickly during the burst and then nearly stopped. The dashed line is the 327,680 cap.</figcaption>
+  <figcaption>Notes stand at 43.4% of the 5,242,880 cap. The dashed line is that cap.</figcaption>
 </figure>
 
   <div class="callout prose">

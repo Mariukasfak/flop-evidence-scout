@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" role="img" aria-label="/r/lobby messages per minute">
   <title>/r/lobby messages per minute</title>
-  <desc>Instantaneous rate over a 20-second window. Down 62% from peak in five hours.</desc>
+  <desc>Instantaneous rate over a 20-second window. Down 7% over the last quarter of the window, 1,978/min at the last reading.</desc>
   <style>
     .grid      { stroke: var(--chart-grid, #d8dce4); stroke-width: 1; }
     .cap       { stroke: var(--chart-cap, #9a2b22); stroke-width: 1.5; stroke-dasharray: 5 4; }

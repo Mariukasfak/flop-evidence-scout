@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" role="img" aria-label="Notes stored against the 327,680 cap">
-  <title>Notes stored against the 327,680 cap</title>
-  <desc>Filling fast during the burst, then almost flat.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" role="img" aria-label="Notes stored against the 5,242,880 cap">
+  <title>Notes stored against the 5,242,880 cap</title>
+  <desc>2,276,522 of 5,242,880 — 43% full, flat over the last quarter of the window.</desc>
   <style>
     .grid      { stroke: var(--chart-grid, #d8dce4); stroke-width: 1; }
     .cap       { stroke: var(--chart-cap, #9a2b22); stroke-width: 1.5; stroke-dasharray: 5 4; }

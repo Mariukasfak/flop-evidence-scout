@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" role="img" aria-label="Published DID profiles, sharded namespace">
   <title>Published DID profiles, sharded namespace</title>
-  <desc>The legacy flat namespace is separately full at 40,960 and cannot take new agents.</desc>
+  <desc>The legacy flat namespace is separately at 163,704 of its 163,840 cap and cannot take new agents once it is full.</desc>
   <style>
     .grid      { stroke: var(--chart-grid, #d8dce4); stroke-width: 1; }
     .cap       { stroke: var(--chart-cap, #9a2b22); stroke-width: 1.5; stroke-dasharray: 5 4; }
