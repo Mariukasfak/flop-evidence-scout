@@ -2,6 +2,20 @@ import { messageSkeleton } from './learning-engine.mjs';
 
 export const VERIFIED_FACTS = Object.freeze([
   {
+    topic: 'referral_program',
+    keywords: ['referral', 'kol', 'leaderboard', 'lottery', 'loterija', 'rekomendavimo'],
+    summary_en: 'Reported 2026-09-09: Hayes described an open KOL leaderboard, individual referral links and a periodic FLOP lottery for wallets created through those links. This report was supplied by the operator and corroborated by indexed copies; the original X post could not be read directly on 2026-09-10. The official Yellow Paper already names KOL/referral/growth incentives in the ecosystem reserve, but does not specify a budget for this lottery. Launch, formula, frequency and connection to genesis scoring remain unverified. No guaranteed airdrop follows from a referral.',
+    summary_lt: 'Pranešta 2026-09-09: Hayes apibūdino visiems atvirą KOL lentelę, asmenines referral nuorodas ir periodinę FLOP loteriją per jas sukurtoms piniginėms. Informaciją pateikė operatorius, ją atitinka indeksuotos kopijos; originalaus X įrašo 2026-09-10 tiesiogiai perskaityti nepavyko. Oficialiame Yellow Paper ekosistemos rezervas jau skirtas ir KOL, referral bei augimo paskatoms, tačiau šios loterijos biudžetas nenurodytas. Paleidimas, formulė, dažnumas ir ryšys su genesis vertinimu dar nepatvirtinti. Referral negarantuoja airdrop.',
+    source: 'Operator report 2026-09-10 citing https://x.com/CryptoHayes and https://x.com/flop_labs; https://flop.finance/intro/yellowpaper/ Appendix A'
+  },
+  {
+    topic: 'agent_commerce_disputes',
+    keywords: ['genlayer', 'adjudication', 'dispute', 'disputes', 'ginčas', 'ginčai', 'arbitražas'],
+    summary_en: 'The Unchained interview page published 2026-09-07 describes Hayes wanting FLOP connected to GenLayer once both networks are live. This is a stated direction, not a confirmed integration or partnership. Keep agent-commerce disputes separate from the planned FLOP inference challenge game, which checks miner evidence and can slash a fraudulent miner. A TCLK paper claim is a rehearsal and does not certify commercial delivery quality.',
+    summary_lt: '2026-09-07 Unchained interviu puslapyje aprašytas Hayes noras ateityje sujungti FLOP su GenLayer, kai abu tinklai veiks. Tai išsakyta kryptis, o ne patvirtinta integracija ar partnerystė. Agentų komerciniai ginčai skiriasi nuo planuojamos FLOP inference ginčijimo sistemos, kuri tikrina minerio įrodymus ir gali nubausti sukčiaujantį minerį. TCLK paper sandorio užbaigimas yra repeticija ir savaime nepatvirtina komercinio darbo kokybės.',
+    source: 'https://unchainedcrypto.com/how-genlayer-is-building-a-court-system-for-disputes-between-ai-agents/; https://flop.finance/intro/verification/, checked 2026-09-10'
+  },
+  {
     topic: 'did_identity',
     keywords: ['did', 'did:key', 'z6mk', 'identity', 'ed25519', 'signature', 'tapatybe', 'tapatybę', 'raktas', 'parasas', 'parašas'],
     /**
@@ -45,16 +59,16 @@ export const VERIFIED_FACTS = Object.freeze([
   {
     topic: 'mcp_integration',
     keywords: ['mcp', 'tools', 'claude', 'hermes', 'uvx', 'adapter', 'irankiai', 'model context protocol'],
-    summary_en: 'Install official MCP tools via: `claude mcp add technocore -- uvx technocore-mcp` (provides 9 tools for room reading, signed writes, and /kv/ storage).',
-    summary_lt: 'MCP įrankius Claude agentams galite įdiegti per: `claude mcp add technocore -- uvx technocore-mcp` (9 įrankiai kambariams, pasirašymui ir /kv/ atminties saugyklai).',
+    summary_en: 'The official technocore-mcp adapter exposes room reading, signed writes and note operations. Use its current installation instructions and tool manifest; the tool count can change with releases.',
+    summary_lt: 'Oficialus technocore-mcp adapteris suteikia kambarių skaitymo, pasirašyto rašymo ir pastabų operacijas. Diegimui naudokite dabartines jo instrukcijas ir įrankių sąrašą: įrankių skaičius keičiasi su versijomis.',
     source: 'Technocore MCP specification'
   },
   {
     topic: 'kv_persistence',
     keywords: ['kv', 'notes', 'state', 'persistence', 'memory', 'shard', 'storage', 'atmintis', 'busena', 'saugykla'],
-    summary_en: 'Technocore /kv/ namespace stores durable state. Use sharded paths `/kv/did-<shard>/<key>` (first 2 hex chars of SHA-256(did) as shard) for persistent residency proof.',
-    summary_lt: 'Ilgalaikei būsenai saugoti naudokite sharded kelią `/kv/did-<shard>/<key>` (pirmieji 2 SHA-256(did) hex simboliai kaip shard) – tai įrodo nuolatinį buvimą tinkle.',
-    source: 'Technocore storage architecture'
+    summary_en: 'Technocore /kv/ is an ephemeral, publicly readable note store; most namespaces are world-writable and inactive data can expire after seven days. Keep authoritative state and backups locally, and verify signed envelopes before trusting remote notes. Sharding a DID note distributes storage load; it does not prove residency or FLOP eligibility.',
+    summary_lt: '„Technocore“ /kv/ yra laikina, viešai skaitoma pastabų saugykla. Daugumą vardų sričių gali perrašyti bet kas, o neaktyvūs duomenys gali būti pašalinti po septynių dienų. Pagrindinę būseną ir kopijas saugokite lokaliai, nuotolinių įrašų parašus tikrinkite. DID pastabų skaidymas paskirsto apkrovą, bet neįrodo tinklo rezidavimo ar teisės į FLOP atlygį.',
+    source: 'https://technocore.chat/llms.txt and https://technocore.chat/auth.md, checked 2026-09-10'
   },
   {
     topic: 'rest_endpoints',
@@ -66,16 +80,16 @@ export const VERIFIED_FACTS = Object.freeze([
   {
     topic: 'security_airdrop',
     keywords: ['token', 'claim', 'presale', 'wallet', 'airdrop', 'snapshot', 'security', 'scam', 'saugumas', 'apgavikai'],
-    summary_en: 'Beware of claim links: no official claim portal exists, and no wallet format, address scheme or transaction signing has been published at all — so nobody can hold $FLOP yet. Keep your private key local. /r/faucet on this service is NOT a faucet: it is a room a stranger created where bots post requests at each other.',
-    summary_lt: 'Saugumo įspėjimas: oficialaus claim puslapio nėra, ir neskelbtas joks piniginės formatas ar adresų schema – tad $FLOP kol kas niekas laikyti negali. Saugokite privatų raktą lokaliai. /r/faucet šiame servise NĖRA faucet: tai svetimo sukurtas kambarys, kuriame botai rašo prašymus vienas kitam.',
-    source: 'flop.finance security advisory'
+    summary_en: 'As checked on 2026-09-10, Technocore documents no claim or token endpoint. The FLOP Yellow Paper does specify SS58 account addresses and transaction signatures; a specification is not a released wallet or claim service. Verify any rollout against official FLOP sources and keep private keys local. A room named faucet is a user-created room, not evidence of an official token distributor.',
+    summary_lt: '2026-09-10 patikroje „Technocore“ nedokumentuoja claim ar tokenų gavimo adreso. FLOP Yellow Paper jau aprašo SS58 sąskaitų adresus ir sandorių parašus, tačiau specifikacija nėra išleista piniginė ar veikiantis claim servisas. Paleidimo informaciją tikrinkite oficialiuose FLOP šaltiniuose, privatų raktą laikykite lokaliai. „faucet“ pavadintas kambarys savaime nėra oficialus tokenų dalytuvas.',
+    source: 'https://technocore.chat/auth.md; https://flop.finance/intro/yellowpaper/ section 6.5, checked 2026-09-10'
   },
   {
     topic: 'coop_mesh',
     keywords: ['coop', 'mesh', 'sync', 'mailbox', 'scribe', 'agent', 'team', 'pair', 'bendradarbiavimas', 'du', 'pasto'],
-    summary_en: 'Dual Agent Mesh utilizes private signed mailboxes (`mb-p-...`) for bidirectional inter-agent synchronization, establishing verified multi-agent collaboration.',
-    summary_lt: 'Dviejų agentų tinklas bendrauja per pasirašytas privačias pašto dėžutes (`mb-p-...`), demonstruodamas tikrą dvipusį agentų bendradarbiavimą.',
-    source: 'FLOP Evidence Scout Mesh Architecture'
+    summary_en: 'Scout and Scribe exchange signed messages through mb-p- mailboxes. Mailbox contents remain publicly readable. These two DIDs belong to the same operator, so their exchange is internal coordination, not proof of independent demand or officially rewarded FLOP collaboration.',
+    summary_lt: 'Scout ir Scribe keičiasi pasirašytomis žinutėmis per mb-p- pašto dėžutes, kurių turinys lieka viešai skaitomas. Abu DID priklauso tam pačiam operatoriui. Jų apsikeitimas rodo vidinį koordinavimą, bet ne nepriklausomą paklausą ar oficialiai atlyginamą FLOP bendradarbiavimą.',
+    source: 'TriAgent agent ownership; https://technocore.chat/auth.md, checked 2026-09-10'
   },
   {
     topic: 'gas_and_fees',
@@ -101,9 +115,9 @@ export const VERIFIED_FACTS = Object.freeze([
   {
     topic: 'pre_genesis_gap',
     keywords: ['genesis', 'mainnet', 'custody', 'hold', 'bridge', 'chain', 'grandine'],
-    summary_en: 'An open question nobody has answered: the airdrop is slated for Q4 2026 but the Flop Network genesis block is Q1 2027, so there is a quarter in which a distributed token has no native chain to live on. Yellow Paper v0.5.0 (2026-09-05) now names the technology — a Substrate/FRAME chain, BABE for block production, AlephBFT for finality, SS58 addresses, OpenGov governance — but no chain is running, no client is published, and the paper is a draft. Practical consequence is unchanged: it is not currently possible to create a correct FLOP wallet, and anything offering to hold, bridge or claim FLOP before genesis should be treated as a scam.',
-    summary_lt: 'Atviras klausimas, į kurį niekas neatsakė: airdrop planuojamas 2026 Q4, o Flop Network genesis blokas – 2027 Q1, tad lieka ketvirtis, kai paskirstytas tokenas neturi savo grandinės. Yellow Paper v0.5.0 (2026-09-05) jau įvardija technologiją – Substrate/FRAME grandinė, BABE blokų kūrimui, AlephBFT finality, SS58 adresai, OpenGov valdymas – bet grandinė neveikia, kliento nėra, o dokumentas yra juodraštis. Praktinė išvada nesikeičia: teisingos FLOP piniginės sukurti šiuo metu neįmanoma, o bet kas, siūlantis laikyti, perkelti ar atsiimti FLOP iki genesis, laikytinas sukčiumi.',
-    source: 'crypto.news analysis, 2026-08-25 for the gap, which is noted and not resolved; Yellow Paper v0.5.0 for the chain technology, read 2026-09-07'
+    summary_en: 'The public roadmap targets testnet in Q4 2026 and mainnet in Q1 2027. Yellow Paper v0.5.0 describes Substrate/FRAME, BABE, AlephBFT and SS58 addresses, but E.38 leaves the testnet-to-mainnet conversion and claim path open. Testnet credits and future mainnet FLOP must be distinguished. A proposed wallet or referral program needs its own official launch instructions; a specification alone does not establish availability.',
+    summary_lt: 'Viešame plane testnet numatytas 2026 Q4, mainnet - 2027 Q1. Yellow Paper v0.5.0 aprašo Substrate/FRAME, BABE, AlephBFT ir SS58 adresus, tačiau E.38 palieka atvirą testnet konvertavimą į mainnet ir claim eigą. Testnet kreditai ir būsimi mainnet FLOP turi būti atskirti. Siūlomai piniginei ar referral programai reikia atskirų oficialių paleidimo instrukcijų; specifikacija savaime neįrodo, kad produktas prieinamas.',
+    source: 'https://flop.finance/intro/yellowpaper/ section 6.5 and E.38; https://flop.finance/teaser/, checked 2026-09-10'
   },
   {
     topic: 'airdrop_tasks',
@@ -150,9 +164,9 @@ export const VERIFIED_FACTS = Object.freeze([
   {
     topic: 'sybil_resistance',
     keywords: ['sybil', 'reputation', 'score', 'verte', 'taskai', 'istorija', 'continuity'],
-    summary_en: 'Anti-Sybil scoring rewards long-term did:key continuity, durable /kv/ memory, and genuine useful answers over short-lived throwaway bots.',
-    summary_lt: 'Apsauga nuo Sybil atakų vertina ilgalaikį did:key tapatybės tęstinumą, /kv/ atmintį ir realią pagalbą kitiems tinkle, atmesdama vienkartinius botus.',
-    source: 'FLOP Anti-Sybil Consensus Model'
+    summary_en: 'No verified FLOP agent-airdrop anti-Sybil scoring formula is available in the sources checked on 2026-09-10. A stable DID and useful, auditable work are sensible operating practices, but their reward weight is unknown. Local inference receipts, Kibble scores and same-operator exchanges do not establish official allocation.',
+    summary_lt: '2026-09-10 patikrintuose šaltiniuose nėra patvirtintos FLOP agentų airdrop anti-Sybil vertinimo formulės. Pastovus DID ir naudingas, patikrinamas darbas padeda tvarkingai veikti, tačiau jų svoris atlygiui nežinomas. Vietiniai modelio kvitai, Kibble balai ir vieno operatoriaus agentų apsikeitimai neįrodo oficialaus paskyrimo.',
+    source: 'https://flop.finance/intro/yellowpaper/ E.38; https://technocore.chat/auth.md, checked 2026-09-10'
   },
   {
     topic: 'troubleshooting',
@@ -228,7 +242,8 @@ export function findRelevantKnowledge(query, { fallback = true } = {}) {
   );
 
   if (matches.length) return matches;
-  return fallback ? [VERIFIED_FACTS[0], VERIFIED_FACTS[1], VERIFIED_FACTS[5]] : [];
+  return fallback ? ['did_identity', 'testnet_faucet', 'kv_persistence']
+    .map(topic => VERIFIED_FACTS.find(f => f.topic === topic)) : [];
 }
 
 /**

@@ -23,6 +23,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 
 const STATE_PATH = path.resolve('docs/watch/state.json');
 const CHANGE_PATH = path.resolve('data/source-change.json');
@@ -72,6 +73,13 @@ const SOURCES = [
    */
   { id: 'flop-intro', url: 'https://flop.finance/intro/', kind: 'html' },
   { id: 'flop-yellowpaper', url: 'https://flop.finance/intro/yellowpaper/', kind: 'html' },
+  { id: 'flop-agent', url: 'https://flop.finance/intro/agent/', kind: 'html' },
+  { id: 'flop-miner', url: 'https://flop.finance/intro/miner/', kind: 'html' },
+  { id: 'flop-validator', url: 'https://flop.finance/intro/validator/', kind: 'html' },
+  { id: 'flop-verification', url: 'https://flop.finance/intro/verification/', kind: 'html' },
+  { id: 'flop-revenue', url: 'https://flop.finance/intro/revenue/', kind: 'html' },
+  { id: 'technocore-auth', url: 'https://technocore.chat/auth.md', kind: 'text' },
+  { id: 'tclk-readme', url: 'https://raw.githubusercontent.com/flop-labs/tclk/main/README.md', kind: 'text' },
     /**
    * Thirty, because five was a window and not a record.
    *
@@ -117,7 +125,8 @@ const SIGNAL_WORDS = [
   // the document that turns every provisional figure into a final one, so its
   // first mention anywhere is the loudest signal this watcher can carry.
   'yellow', 'slashing', 'slashed', 'validator', 'miner', 'emission', 'unlock',
-  'vesting', 'snapshot', 'toploc', 'attestation', 'mempool'
+  'vesting', 'snapshot', 'toploc', 'attestation', 'mempool',
+  'referral', 'kol', 'leaderboard', 'lottery', 'genlayer', 'adjudication'
 ];
 
 function signalHits(body) {
@@ -139,7 +148,7 @@ async function fetchText(url) {
   if (url.startsWith('https://api.github.com') && process.env.GH_TOKEN) {
     headers.authorization = `Bearer ${process.env.GH_TOKEN}`;
   }
-  const res = await fetch(url, { headers });
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.text();
 }
@@ -242,8 +251,8 @@ function discoverLinks(html, origin = 'https://flop.finance') {
   return [...paths].sort();
 }
 
-async function checkRooms() {
-  const body = await fetchText('https://technocore.chat/rooms');
+async function checkRooms(request = fetchText) {
+  const body = await request('https://technocore.chat/rooms');
   const names = body.split('\n')
     .filter((l) => l.startsWith('/r/'))
     .map((l) => l.slice(3).split(/\s+/)[0])
@@ -251,14 +260,22 @@ async function checkRooms() {
   return [...new Set(names)].sort();
 }
 
-async function main() {
+export async function runWatch({
+  statePath = STATE_PATH, changePath = CHANGE_PATH, historyPath = null,
+  sourceList = SOURCES, request = fetchText,
+  commitBaseline = process.argv.includes('--commit-baseline') || process.env.CI === 'true'
+} = {}) {
   const now = new Date().toISOString();
 
   let previous = {};
   let stateWasCorrupt = false;
-  if (fs.existsSync(STATE_PATH)) {
+  if (fs.existsSync(statePath)) {
     try {
-      previous = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
+      previous = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+      if (!isObject(previous) || !isObject(previous.sources)) {
+        throw new Error('Expected a state object with a sources object');
+      }
     } catch (err) {
       // This used to be `catch { previous = {}; }`, and that silence cost us the
       // single most important document Flop Labs has published. A merge landed
@@ -281,9 +298,9 @@ async function main() {
   const changes = [];
   const signalAlerts = [];
 
-  for (const source of SOURCES) {
+  for (const source of sourceList) {
     try {
-      const body = await fetchText(source.url);
+      const body = await request(source.url);
       const normalised = normalise(source.kind, body);
       const digest = sha(normalised);
       const summary = summarise(source.id, source.kind, body);
@@ -295,9 +312,14 @@ async function main() {
       const links = source.kind === 'html' ? discoverLinks(body) : undefined;
       const commits = source.id === 'upstream-commits' ? commitList(body) : undefined;
 
-      sources[source.id] = { url: source.url, digest, summary, signals, paths, links, commits, checkedAt: now };
+      sources[source.id] = { url: source.url, digest, summary, signals, paths, links, commits, checkedAt: now, lastSuccessAt: now };
 
       const before = prevSources[source.id];
+      if (!before && Object.keys(prevSources).length) {
+        changes.push({ id: source.id, url: source.url, newSource: true,
+          was: 'not watched before', now: summary,
+          firstSeen: { ...(links ? { links } : {}), ...(paths ? { paths } : {}) } });
+      }
 
       /**
        * A source coming back from an outage is not a content change.
@@ -423,6 +445,7 @@ async function main() {
       const prev = prevSources[source.id] || {};
       const failures = (prev.error ? (prev.consecutiveFailures || 1) : 0) + 1;
       sources[source.id] = {
+        ...prev,
         url: source.url,
         error: err.message,
         digest: prev.digest || null,
@@ -436,15 +459,30 @@ async function main() {
   }
 
   let interestingRooms = prevRooms;
+  let roomsError = null;
   const newRooms = [];
   try {
-    interestingRooms = await checkRooms();
+    interestingRooms = await checkRooms(request);
     for (const room of interestingRooms) {
       if (!prevRooms.includes(room)) newRooms.push(room);
     }
   } catch (err) {
+    roomsError = err.message;
     console.warn(`[watch] rooms: ${err.message}`);
   }
+
+  const sourceErrors = Object.fromEntries(Object.entries(sources)
+    .filter(([, s]) => s.error).map(([id, s]) => [id, s.error]));
+  const report = { detectedAt: now, changes, newRooms, signalAlerts,
+    healthySources: Object.keys(sources).length - Object.keys(sourceErrors).length,
+    totalSources: Object.keys(sources).length, sourceErrors, roomsError };
+  // An independent VPS watch keeps receipts before advancing its baseline.
+  // A later quiet run can clear the current delta without erasing the finding.
+  if (historyPath && commitBaseline) {
+    fs.mkdirSync(path.dirname(historyPath), { recursive: true });
+    fs.appendFileSync(historyPath, JSON.stringify(report) + '\n', 'utf8');
+  }
+  console.log(`[watch] sources healthy: ${report.healthySources}/${report.totalSources}`);
 
   /**
    * Advancing the baseline is how an alert gets consumed.
@@ -463,14 +501,13 @@ async function main() {
    * by default and prints what it found; CI passes --commit-baseline because CI
    * is the one place that also delivers the alert.
    */
-  const commitBaseline = process.argv.includes('--commit-baseline') || process.env.CI === 'true';
-
   if (commitBaseline) {
-    fs.mkdirSync(path.dirname(STATE_PATH), { recursive: true });
-    fs.writeFileSync(STATE_PATH, JSON.stringify({
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    fs.writeFileSync(statePath, JSON.stringify({
       checkedAt: now,
       sources,
-      interestingRooms
+      interestingRooms,
+      roomsError
     }, null, 2), 'utf8');
   } else if (changes.length || newRooms.length || signalAlerts.length) {
     console.log('[watch] Baseline NOT advanced — this was a local read-only check.');
@@ -482,25 +519,25 @@ async function main() {
     // Exit non-zero so the scheduled workflow goes red instead of green. The
     // baseline above has already been rewritten, so the next run compares
     // normally — but this run must not be mistaken for a quiet one.
-    console.error('[watch] Baseline rebuilt from a corrupt state file. Failing loudly by design.');
+    console.error(`[watch] Corrupt state file${commitBaseline ? '; baseline rebuilt' : '; baseline left unchanged'}. Failing loudly by design.`);
     process.exitCode = 1;
     return;
   }
 
   const isFirstRun = Object.keys(prevSources).length === 0;
   if (isFirstRun) {
-    console.log(`[watch] Baseline recorded for ${Object.keys(sources).length} sources. No comparison on a first run.`);
+    console.log(`[watch] ${commitBaseline ? 'Baseline recorded' : 'Baseline NOT recorded (read-only check)'} for ${Object.keys(sources).length} sources. No comparison on a first run.`);
     return;
   }
 
   if (changes.length === 0 && newRooms.length === 0 && signalAlerts.length === 0) {
-    console.log('[watch] No change in any watched source.');
-    if (fs.existsSync(CHANGE_PATH)) fs.rmSync(CHANGE_PATH);
+    console.log(`[watch] No content change among ${report.healthySources} reachable sources.`);
+    if (commitBaseline && fs.existsSync(changePath)) fs.rmSync(changePath);
     return;
   }
 
-  fs.mkdirSync(path.dirname(CHANGE_PATH), { recursive: true });
-  fs.writeFileSync(CHANGE_PATH, JSON.stringify({ detectedAt: now, changes, newRooms, signalAlerts }, null, 2), 'utf8');
+  fs.mkdirSync(path.dirname(changePath), { recursive: true });
+  fs.writeFileSync(changePath, JSON.stringify(report, null, 2), 'utf8');
 
   console.log(`[watch] ${changes.length} source change(s), ${newRooms.length} new room(s), ${signalAlerts.length} signal-word alert(s).`);
   for (const c of changes) {
@@ -539,9 +576,9 @@ async function main() {
  *
  *   node tools/watch-sources.mjs --inventory
  */
-function printInventory() {
-  const previous = fs.existsSync(STATE_PATH)
-    ? JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'))
+function printInventory(statePath = STATE_PATH) {
+  const previous = fs.existsSync(statePath)
+    ? JSON.parse(fs.readFileSync(statePath, 'utf8'))
     : {};
   const sources = previous.sources || {};
   console.log(`[watch] inventory as of ${previous.checkedAt || 'never'}\n`);
@@ -560,10 +597,13 @@ function printInventory() {
   if (rooms.length) console.log(`rooms of interest: ${rooms.join(' ')}`);
 }
 
-if (process.argv.includes('--inventory')) {
-  printInventory();
-} else {
-  main().catch((err) => {
+if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
+  const arg = name => process.argv.find(a => a.startsWith(`--${name}=`))?.slice(name.length + 3);
+  const statePath = arg('state') ? path.resolve(arg('state')) : STATE_PATH;
+  const changePath = arg('out') ? path.resolve(arg('out')) : CHANGE_PATH;
+  const historyPath = arg('history') ? path.resolve(arg('history')) : null;
+  if (process.argv.includes('--inventory')) printInventory(statePath);
+  else runWatch({ statePath, changePath, historyPath }).catch((err) => {
     console.error('[watch] failed:', err.message);
     process.exit(1);
   });

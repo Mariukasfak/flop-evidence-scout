@@ -46,12 +46,13 @@ export const DEFAULT_CONCURRENCY = 2;
  * in each chunk, and inference latency varies by more than an order of magnitude
  * between a short classification and a long summary.
  */
-async function pool(jobs, limit, worker) {
+async function pool(jobs, limit, worker, shouldStop = () => false) {
   const results = new Array(jobs.length);
   let next = 0;
 
   const runners = Array.from({ length: Math.max(1, Math.min(limit, jobs.length)) }, async () => {
     while (true) {
+      if (shouldStop()) return;
       const index = next++;
       if (index >= jobs.length) return;
       results[index] = await worker(jobs[index], index);
@@ -179,6 +180,7 @@ export async function runWorkload({
   };
 
   let deadlineHit = false;
+  let backendFailure = false;
   /**
    * The jobs that actually reached a backend, as opposed to the ones we intended
    * to run. The difference is the whole point: a caller marks work done from
@@ -246,14 +248,16 @@ export async function runWorkload({
       if (!session.validate(completion)) outcome.invalidOutput++;
     } else {
       outcome.failed++;
+      backendFailure = true;
       // A failed session produced no work. Whether the network still charges for
       // one is unpublished, so it is not counted as spend here and the
       // assumption is recorded rather than buried.
     }
     return receipt;
-  });
+  }, () => backendFailure);
 
-  if (deadlineHit) outcome.stoppedBecause = 'deadline';
+  if (backendFailure) outcome.stoppedBecause = 'backend failure';
+  else if (deadlineHit) outcome.stoppedBecause = 'deadline';
   outcome.elapsedMs = now() - startedAt;
 
   /**

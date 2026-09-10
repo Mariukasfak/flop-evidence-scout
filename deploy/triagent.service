@@ -19,28 +19,13 @@ EnvironmentFile=-__APP_DIR__/.env.local
 # the right identity and no memory of five completed contracts.
 #
 # --work-deadline-ms is this machine's own number, not a default worth copying.
-# It was 8000 from 2026-09-04, to keep two shared vCPUs free for the kibble
-# lanes — which then carried 455 of our 461 points. That premise died on
-# 2026-09-05. The board's scorer is ~545,000 messages behind an /r/kibble whose
-# ring retains 14,924 (1.59h at the board's current rate), so the messages
-# between its cursor and the oldest retained line are deleted before it reads
-# them. Twelve signed ATTESTs and 28 RESULTs of ours sat on that export while
-# every scored term on both DIDs moved zero across 4.5 hours. The lane we were
-# reserving CPU for cannot score, so it is not worth reserving CPU for.
-#
-# What the reservation cost is measurable, and it is the number this project
-# actually lives on. Genuine inference receipts per day: 23,179 (09-01), 18,140
-# (09-02), 20,445 (09-03) — then 4,293 on 09-04 and ~2,760/day since, a 7x
-# collapse across the same day this cap and the 2-vCPU box arrived. The
-# workload runner asks for 20 sessions a cycle and gets 1.86: 1,033 of 11,123
-# planned over 12 hours, 9.3%. The teaser scores an agent's allocation largely
-# on testnet FLOP spent on inference, so throughput is the whole preparation.
-#
-# 25000 because a classify-size request costs 2.1s unloaded and 6.8s under
-# load, so this budget buys 4-6 sessions rather than 2. It lengthens the cycle
-# (71.5s median today against a 60s interval) and that is accepted: nothing
-# time-critical rides the cycle. Faucet detection is a separate 15-minute
-# GitHub Actions run, not this loop.
+# Keep the existing 25000 budget until latency, RAM/swap and useful completions
+# justify changing it. Local inference receipts do not prove official FLOP spend.
+# The earlier claim that Kibble cannot score is no longer supported: on
+# 2026-09-10 the live board showed Scout 95 and Scribe 489, up 62 and 28 from
+# a nearly six-day-old snapshot. An unchanged engine_seq is not proof that all
+# scoring has stopped. Retention gaps need retained-history evidence.
+# Official-source monitoring also runs independently in triagent-watch.timer.
 ExecStart=/usr/bin/node src/daemon.mjs --url=https://technocore.chat --interval-ms=60000 --work-deadline-ms=25000 --data-dir=data/local --docs-dir=data/local/docs
 
 # The daemon already restarts itself after a code change; this covers the rest

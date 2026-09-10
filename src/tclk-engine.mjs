@@ -72,6 +72,14 @@ export const MIN_CLAIM_WINDOW_MS = 10 * 60_000;
  */
 export const NO_LOCK_MS = 5 * 60_000;
 
+/** Keep a payer out for one day after a precise no-lock abandonment. */
+export const NO_LOCK_COOLDOWN_MS = 24 * 60 * 60_000;
+
+function isNoLockReason(reason) {
+  return reason === 'payer never locked before claimByMs'
+    || reason === `payer did not lock within ${Math.round(NO_LOCK_MS / 60_000)} min`;
+}
+
 const READ_LIMIT = 200;
 
 /**
@@ -204,17 +212,29 @@ export class TclkEngine {
 
   load() {
     if (this.state) return this.state;
-    const empty = { deal: null, completed: [], abandoned: [] };
+    const empty = {
+      deal: null, completed: [], abandoned: [], noLockCooldowns: {}, noLockCooldownsMigrated: false
+    };
+    let hadFile = false;
+    let parsed = null;
     try {
-      const parsed = JSON.parse(fs.readFileSync(this.statePath, 'utf8'));
-      this.state = { ...empty, ...parsed };
+      parsed = JSON.parse(fs.readFileSync(this.statePath, 'utf8'));
+      hadFile = true;
     } catch (err) {
       if (err.code !== 'ENOENT') {
         // A corrupt file is a fault, not a first run, and starting over on
         // top of a deal in flight would strand a counterparty. Say so.
         sayOnce('tclk:state', `[tclk] state file unreadable (${err.message}); starting empty`);
       }
-      this.state = empty;
+    }
+    this.state = { ...empty, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
+    if (!this.state.noLockCooldowns || typeof this.state.noLockCooldowns !== 'object'
+      || Array.isArray(this.state.noLockCooldowns)) this.state.noLockCooldowns = {};
+    if (this.state.noLockCooldownsMigrated !== true) {
+      this.#migrateLegacyNoLockCooldowns();
+      this.state.noLockCooldownsMigrated = true;
+      // Persist the migration marker and any recovered cooldowns once.
+      if (hadFile) this.save();
     }
     return this.state;
   }
@@ -258,6 +278,7 @@ export class TclkEngine {
     const frames = this.#framesIn(messages);
     const accepted = new Set(frames.filter(({ frame }) => frame.type === 'accept').map(({ frame }) => frame.ref));
     const now = this.now();
+    const noLockCooldowns = this.#cooldownPayers(now);
 
     /**
      * Whether the reputation file is worth filtering on.
@@ -278,7 +299,7 @@ export class TclkEngine {
         && o.lock === 'hash'                     // never the unaudited point path
         && o.rails.includes('paper')             // the only rail that exists
         && !this.ours.has(o.from)                // not ours, not our sibling key's
-        && !this.#burned().has(o.from)           // already had their chance and did not take it
+        && !noLockCooldowns.has(o.from)          // a precise no-lock cooldown, independent of history
         && !isBurned(this.payerRep, o.from)      // and the room says the same about them
         && (!repUsable || isTrusted(this.payerRep, o.from))   // and has finished one before
         && offerLooksAlive(o)                    // a shape that has never once settled
@@ -595,19 +616,39 @@ export class TclkEngine {
   /* ---------------------------------------------------------- helpers --- */
 
   /**
-   * Payers who took an accept from us and then never locked.
-   *
-   * Their offers keep appearing, and each one we take costs a slot no live
-   * offer can use. The room supplies enough of them — 88 offers in one
-   * 200-message window on 2026-09-03 — that skipping a proven non-locker costs
-   * nothing and buys back the wait. Only the never-locked reason counts: a deal
-   * that ended for any other cause says nothing about the payer.
+   * Migrate recent legacy no-lock records before the bounded history can lose
+   * them. The marker makes this a one-time migration; the cooldown map then
+   * owns the block independently of `abandoned` and the reputation scanner.
    */
-  #burned() {
-    return new Set((this.state.abandoned || [])
-      .filter((r) => typeof r.reason === 'string' && r.reason.includes('lock'))
-      .map((r) => r.payer)
-      .filter(Boolean));
+  #migrateLegacyNoLockCooldowns() {
+    const now = this.now();
+    for (const record of Array.isArray(this.state.abandoned) ? this.state.abandoned : []) {
+      if (!isNoLockReason(record?.reason) || !record?.payer) continue;
+      const closedAt = Number(record.closedAt);
+      if (!Number.isFinite(closedAt) || closedAt > now || now - closedAt >= NO_LOCK_COOLDOWN_MS) continue;
+      const expiresAtMs = closedAt + NO_LOCK_COOLDOWN_MS;
+      const current = Number(this.state.noLockCooldowns[record.payer]);
+      if (!Number.isFinite(current) || current < expiresAtMs) {
+        this.state.noLockCooldowns[record.payer] = expiresAtMs;
+      }
+    }
+  }
+
+  /** Return active cooldowns and persist removal of expired entries. */
+  #cooldownPayers(now) {
+    const blocked = new Set();
+    let changed = false;
+    for (const [payer, value] of Object.entries(this.state.noLockCooldowns || {})) {
+      const expiresAtMs = Number(value);
+      if (!Number.isFinite(expiresAtMs) || expiresAtMs <= now) {
+        delete this.state.noLockCooldowns[payer];
+        changed = true;
+      } else {
+        blocked.add(payer);
+      }
+    }
+    if (changed) this.save();
+    return blocked;
   }
 
   /** What the paper rail actually records for this contract, or null. */
@@ -741,12 +782,17 @@ export class TclkEngine {
   }
 
   #close(deal, bucket, reason) {
+    const closedAt = this.now();
     const record = {
       contract: deal.contract, room: deal.room, payer: deal.offer.from,
       job: deal.offer.job ? `${deal.offer.job.proto}:${deal.offer.job.id}` : null,
-      acceptedAt: deal.acceptedAt, closedAt: this.now(), reason
+      acceptedAt: deal.acceptedAt, closedAt, reason
     };
     this.state[bucket] = [...(this.state[bucket] || []), record].slice(-50);
+    if (bucket === 'abandoned' && isNoLockReason(reason) && record.payer) {
+      this.state.noLockCooldowns[record.payer] = closedAt + NO_LOCK_COOLDOWN_MS;
+      this.state.noLockCooldownsMigrated = true;
+    }
     this.state.deal = null;
     this.save();
     this.#learn(deal.offer.from, bucket === 'completed', deal.contract);

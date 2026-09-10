@@ -86,6 +86,10 @@ First-party: flop.finance, the official repository, or the service itself.
 
 A secondary source said it. Attributed, dated, and possibly conflated between outlets.
 
+- **Hayes reportedly described a KOL leaderboard, individual referral links and a periodic FLOP lottery for wallets created through those links, open to everyone. This describes a proposed program; launch and allocation remain unverified. The original X post and Flop Labs repost were not directly retrievable in this check**  
+  _Operator-supplied report dated 2026-09-10 citing x.com/CryptoHayes and x.com/flop_labs, corroborated by indexed copies of the post. Direct-post verification remains pending_ · as of 2026-09-10
+- **The Unchained interview description says Hayes wants FLOP connected to GenLayer once both go live, for disputes between agents. A stated intention does not confirm a partnership or delivered integration. This commercial dispute layer is distinct from the planned miner-inference challenge game**  
+  _https://unchainedcrypto.com/how-genlayer-is-building-a-court-system-for-disputes-between-ai-agents/ (2026-09-07); https://flop.finance/intro/verification/, checked 2026-09-10_ · as of 2026-09-10
 - **Airdrop allocation will follow testnet activity; the faucet will live on technocore.chat**  
   _Hayes via Bloomingbit / BlockTempo, 2026-08-25_ · as of 2026-08-25
 - **Every figure above is provisional — the teaser is stamped "Version 0.1 (draft)" and names the not-yet-final Yellow Paper as the definitive specification**  
@@ -103,6 +107,8 @@ A secondary source said it. Attributed, dated, and possibly conflated between ou
 
 Nobody has published this. Listed as prominently as the rest, because what has *not* been said is usually what a reader most needs to know.
 
+- **The referral program launch, reward allocation, leaderboard formula, lottery frequency and effect on genesis scoring are unverified. Yellow Paper Appendix A already names KOL, referral and growth incentives within the ecosystem reserve; that does not establish a budget for this particular lottery**  
+  _https://flop.finance/intro/yellowpaper/ Appendix A; reported Hayes post says details are still to come, checked 2026-09-10_ · as of 2026-09-10
 - **Whether anyone has used the delegation flaw. Nobody has published evidence of a suppressed delegation in the wild, and nothing about it implies stolen keys or funds — but nobody has published a search for it either, so silence here is absence of evidence and not the other thing**  
   _Read 2026-09-08 across flop-labs/technocore-chat issues and the service itself. This project holds no delegations of its own and was not affected_ · as of 2026-09-08
 - **Which genesis pool figure governs. The ratified parameter is genesis_supply = 2,483,460,000 (D-0435), but the tokenomics workbook restated the pool to 3,500,000,000 on 2026-08-22 and the first-party revenue calculator runs on the workbook, not the paper. Flop Labs states the gap itself and leaves it open: landing the restatement in params is blocked with no ratifying decision. The agent leg splits the same way — 596,030,400 in the paper against "the whole 1.2bn agent pool" in the calculator**  

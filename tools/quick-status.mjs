@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { readGitHead } from '../src/daemon.mjs';
+import { readCodeFingerprint } from '../src/daemon.mjs';
 
 const DATA = 'data/local';
 const AUDIT = path.join(DATA, 'scout-audit.jsonl');
@@ -187,10 +187,14 @@ function main() {
   // A running daemon holds the modules it started with, so a fix can be
   // committed and inert at the same time — which is exactly what happened for
   // most of a day, repeatedly, while the status screen said everything was
-  // fine. The daemon now stands down by itself when HEAD moves, but a process
-  // started before that landed cannot know to, so the gap has to be visible.
-  const onDisk = readGitHead(process.cwd());
-  const running = lastStart?.commit ?? null;
+  // fine. The daemon now stands down by itself when its code fingerprint moves,
+  // but a process started before that landed cannot know to, so the gap has to
+  // be visible.
+  const onDisk = readCodeFingerprint(process.cwd());
+  // Fingerprints answer whether a restart would load different code. Older
+  // startup records only have a commit SHA, which cannot answer that question:
+  // a docs-only commit can move HEAD while leaving the loaded modules intact.
+  const running = lastStart?.codeFingerprint ?? null;
   if (onDisk && running && onDisk !== running) {
     console.log(`  ${YEL}Naujas kodas laukia${OFF}  ${DIM}(veikia ${running.slice(0, 7)}, diske ${onDisk.slice(0, 7)})${OFF}`);
     console.log(`  ${DIM}Agentas persileis pats. Jei ne — meniu.bat punktas [14].${OFF}`);

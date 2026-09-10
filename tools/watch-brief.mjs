@@ -134,8 +134,20 @@ function repliesFromClaude(inbox, limit = 6) {
   }
 }
 
-function baseline() {
-  const watch = readJson(path.resolve('docs/watch/state.json')) || {};
+function validBaseline(file) {
+  const watch = readJson(file);
+  if (!watch || typeof watch !== 'object' || Array.isArray(watch)
+    || !watch.sources || typeof watch.sources !== 'object' || Array.isArray(watch.sources)) return null;
+  const checkedAtMs = Date.parse(watch.checkedAt || '');
+  return Number.isFinite(checkedAtMs) ? { watch, checkedAtMs } : null;
+}
+
+export function baseline({ dataDir = DATA, fallbackPath = path.resolve('docs/watch/state.json') } = {}) {
+  const candidates = [
+    validBaseline(path.join(dataDir, 'source-watch', 'state.json')),
+    validBaseline(fallbackPath)
+  ].filter(Boolean);
+  const watch = candidates.sort((a, b) => b.checkedAtMs - a.checkedAtMs)[0]?.watch || {};
   const version = watch.sources?.['agent-json']?.summary || 'nežinoma';
   return [
     `Technocore: ${version} (mūsų sekiklis tikrino ${watch.checkedAt || '—'})`,

@@ -134,7 +134,7 @@ say "6/7  Services"
 # schedule — so a unit fixed in the repository deploys itself, exactly like the
 # code does.
 sudo bash "$APP_DIR/deploy/reinstall-units.sh" "$RUN_USER" "$APP_DIR"
-sudo systemctl enable --now triagent.service triagent-scan.timer triagent-update.timer triagent-ollama-recycle.timer
+sudo systemctl enable --now triagent.service triagent-scan.timer triagent-update.timer triagent-ollama-recycle.timer triagent-watch.timer
 
 say "7/7  Check"
 sleep 5

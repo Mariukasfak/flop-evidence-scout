@@ -555,7 +555,9 @@ export function planWorkload({ sourceChange = null, measurements = [], pendingQu
   };
 
   if (sourceChange?.changes?.length) {
-    for (const change of sourceChange.changes.slice(0, 3)) {
+    let sourcesPlanned = 0;
+    for (const change of sourceChange.changes) {
+      const jobsBefore = plan.length;
       const input = { sourceId: change.id, was: change.was, now: change.now, addedLines: change.addedLines, addedPaths: change.addedPaths, addedLinks: change.addedLinks };
       if (isNew('summarise-source-change', input)) plan.push({ taskId: 'summarise-source-change', input });
 
@@ -576,11 +578,13 @@ export function planWorkload({ sourceChange = null, measurements = [], pendingQu
       if (change.addedLines?.length) {
         const claimInput = {
           text: change.addedLines.slice(0, 40).join('\n'),
-          source: `technocore.chat ${change.id}`,
+          source: change.url || `technocore.chat ${change.id}`,
           date: sourceChange.detectedAt || new Date().toISOString().slice(0, 10)
         };
         if (isNew('extract-claims', claimInput)) plan.push({ taskId: 'extract-claims', input: claimInput });
       }
+      // Apply the cap after deduplication; old deltas must not hide new sources.
+      if (plan.length > jobsBefore && ++sourcesPlanned >= 3) break;
     }
   }
 

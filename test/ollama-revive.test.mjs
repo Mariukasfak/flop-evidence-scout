@@ -24,11 +24,12 @@ describe('Reviving a dead local Ollama', () => {
     // Startup on this machine hung requests for ~50 s before answering in 4 ms.
     // A second spawn inside that window fights the first for the port.
     const t0 = 1_000_000;
-    assert.equal(shouldReviveOllama({ lastAttemptAt: 0, now: t0 }).revive, true);
-    const early = shouldReviveOllama({ lastAttemptAt: t0, now: t0 + OLLAMA_REVIVE_COOLDOWN_MS - 1 });
+    const host = 'http://127.0.0.1:11434';
+    assert.equal(shouldReviveOllama({ host, lastAttemptAt: 0, now: t0 }).revive, true);
+    const early = shouldReviveOllama({ host, lastAttemptAt: t0, now: t0 + OLLAMA_REVIVE_COOLDOWN_MS - 1 });
     assert.equal(early.revive, false);
     assert.equal(early.reason, 'cooldown');
-    assert.equal(shouldReviveOllama({ lastAttemptAt: t0, now: t0 + OLLAMA_REVIVE_COOLDOWN_MS }).revive, true);
+    assert.equal(shouldReviveOllama({ host, lastAttemptAt: t0, now: t0 + OLLAMA_REVIVE_COOLDOWN_MS }).revive, true);
   });
 
   test('the binary is OLLAMA_BIN, then the Windows install, then PATH', () => {

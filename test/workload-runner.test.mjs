@@ -142,10 +142,41 @@ test('a backend failure is counted and costs no spend', async () => {
     ledgerPath: tempLedger()
   });
 
-  assert.equal(outcome.failed, 4);
+  // Two sessions may already be in flight, but the remaining jobs stay
+  // retryable once the backend is known to be down.
+  assert.equal(outcome.failed, 2);
   assert.equal(outcome.completed, 0);
+  assert.equal(outcome.ran.length, 2);
+  assert.equal(outcome.stoppedBecause, 'backend failure');
   // Nothing was produced, so nothing is claimed as spend.
   assert.equal(outcome.spend, 0);
+});
+
+test('an infrastructure failure stops scheduling the remaining plan', async () => {
+  let attempts = 0;
+  const broken = {
+    id: 'ollama',
+    simulated: false,
+    maxConcurrency: 1,
+    available: async () => true,
+    generate: async () => {
+      attempts++;
+      throw new TypeError('fetch failed');
+    }
+  };
+
+  const outcome = await runWorkload({
+    plan: classifyJobs(4),
+    backend: broken,
+    identity,
+    concurrency: 1,
+    ledgerPath: tempLedger()
+  });
+
+  assert.equal(attempts, 1, 'a known-broken backend must not drain the whole plan');
+  assert.equal(outcome.failed, 1);
+  assert.equal(outcome.ran.length, 1, 'only work that reached the backend is marked as ran');
+  assert.equal(outcome.stoppedBecause, 'backend failure');
 });
 
 test('output that fails its own validator is recorded, not counted as clean', async () => {

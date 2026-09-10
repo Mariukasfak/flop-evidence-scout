@@ -43,6 +43,27 @@ export const STATUS = Object.freeze({
  */
 export const FACTS = Object.freeze([
   {
+    id: 'referral-leaderboard-reported',
+    status: STATUS.REPORTED,
+    claim: 'Hayes reportedly described a KOL leaderboard, individual referral links and a periodic FLOP lottery for wallets created through those links, open to everyone. This describes a proposed program; launch and allocation remain unverified. The original X post and Flop Labs repost were not directly retrievable in this check',
+    source: 'Operator-supplied report dated 2026-09-10 citing x.com/CryptoHayes and x.com/flop_labs, corroborated by indexed copies of the post. Direct-post verification remains pending',
+    asOf: '2026-09-10'
+  },
+  {
+    id: 'referral-program-rules',
+    status: STATUS.UNKNOWN,
+    claim: 'The referral program launch, reward allocation, leaderboard formula, lottery frequency and effect on genesis scoring are unverified. Yellow Paper Appendix A already names KOL, referral and growth incentives within the ecosystem reserve; that does not establish a budget for this particular lottery',
+    source: 'https://flop.finance/intro/yellowpaper/ Appendix A; reported Hayes post says details are still to come, checked 2026-09-10',
+    asOf: '2026-09-10'
+  },
+  {
+    id: 'genlayer-commerce-direction',
+    status: STATUS.REPORTED,
+    claim: 'The Unchained interview description says Hayes wants FLOP connected to GenLayer once both go live, for disputes between agents. A stated intention does not confirm a partnership or delivered integration. This commercial dispute layer is distinct from the planned miner-inference challenge game',
+    source: 'https://unchainedcrypto.com/how-genlayer-is-building-a-court-system-for-disputes-between-ai-agents/ (2026-09-07); https://flop.finance/intro/verification/, checked 2026-09-10',
+    asOf: '2026-09-10'
+  },
+  {
     id: 'no-token',
     status: STATUS.CONFIRMED,
     claim: 'No FLOP token, presale or claim page exists yet',

@@ -1,0 +1,18 @@
+[Unit]
+Description=TriAgent official source watch and local operational snapshots
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__APP_DIR__
+TimeoutStartSec=15min
+# Local state is independent of the CI baseline. Findings are retained in an
+# append-only journal before advancing it; this never sends external messages.
+ExecStart=/usr/bin/node tools/watch-sources.mjs --state=data/local/source-watch/state.json --out=data/local/source-watch/change.json --history=data/local/source-watch/history.jsonl --commit-baseline
+ExecStartPost=/usr/bin/node tools/kibble-score-log.mjs --quiet
+ExecStartPost=/usr/bin/node tools/watch-brief.mjs
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=triagent-watch

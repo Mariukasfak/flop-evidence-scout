@@ -17,7 +17,7 @@ set -euo pipefail
 RUN_USER="${1:?usage: reinstall-units.sh <user> <app-dir>}"
 APP_DIR="${2:?usage: reinstall-units.sh <user> <app-dir>}"
 
-UNITS="triagent.service triagent-scan.service triagent-scan.timer triagent-update.service triagent-update.timer triagent-ollama-recycle.service triagent-ollama-recycle.timer"
+UNITS="triagent.service triagent-scan.service triagent-scan.timer triagent-update.service triagent-update.timer triagent-ollama-recycle.service triagent-ollama-recycle.timer triagent-watch.service triagent-watch.timer"
 
 changed=0
 agent_changed=0
@@ -42,6 +42,7 @@ fi
 
 systemctl daemon-reload
 echo "units reloaded"
+systemctl enable --now triagent-watch.timer
 
 # Restart the agent only when its own unit moved, and note that this is
 # recorded as a flag during the loop rather than asked of systemd afterwards:

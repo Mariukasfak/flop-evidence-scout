@@ -53,10 +53,10 @@ function makeBackend(text) {
   return { id: 'test-backend', simulated: false, async generate() { return { text, modelId: 'test' }; } };
 }
 
-function payerOffer(payer, { job = { proto: 'a2a', id: 'task-fixture' }, claimByMs = T0 + HOUR, refundAfterMs = T0 + 2 * HOUR, rails = ['flop-htlc', 'paper'], lock = 'hash', role = 'payer' } = {}) {
+function payerOffer(payer, { job = { proto: 'a2a', id: 'task-fixture' }, claimByMs = T0 + HOUR, expiresMs = T0 + HOUR, refundAfterMs = T0 + 2 * HOUR, rails = ['flop-htlc', 'paper'], lock = 'hash', nonce = 'aa11bb22cc33dd44', role = 'payer' } = {}) {
   const fields = {
-    amount: '250', asset: 'FLOP', claimByMs, expiresMs: T0 + HOUR, from: payer.did,
-    ...(job ? { job } : {}), lock, nonce: 'aa11bb22cc33dd44', rails, refundAfterMs, role, type: 'offer'
+    amount: '250', asset: 'FLOP', claimByMs, expiresMs, from: payer.did,
+    ...(job ? { job } : {}), lock, nonce, rails, refundAfterMs, role, type: 'offer'
   };
   return { ...fields, id: offerId(fields) };
 }
@@ -766,6 +766,88 @@ describe('tclk payee lane: a payer who does not lock loses the slot', () => {
 
     assert.equal(next.action, 'offer_accepted');
     assert.equal(next.payer, fresh.did, 'one bad payer does not close the lane');
+  });
+});
+
+describe('tclk payee lane: no-lock cooldown survives bounded history', () => {
+  const DAY = 24 * HOUR;
+
+  test('a payer remains blocked after its abandonment falls out of the last 50 records', async () => {
+    const venue = makeVenue(); const me = generateIdentity(); const target = generateIdentity();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tclk-cooldown-'));
+    const statePath = path.join(dir, 'tclk-state.json');
+    let clock = T0;
+    const engine = new TclkEngine({ identity: me, client: venue, statePath, now: () => clock });
+
+    for (let i = 0; i < 51; i++) {
+      const payer = i === 0 ? target : generateIdentity();
+      venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer, {
+        nonce: `nonce-${i.toString(16).padStart(16, '0')}`,
+        claimByMs: clock + HOUR, expiresMs: clock + HOUR, refundAfterMs: clock + 2 * HOUR
+      })));
+      assert.equal((await engine.runTurn()).action, 'offer_accepted');
+      clock += 6 * 60_000;
+      assert.equal((await engine.runTurn()).action, 'deal_cancelled');
+    }
+
+    assert.equal(engine.load().abandoned.length, 50, 'history remains bounded');
+    assert.equal(engine.load().noLockCooldowns[target.did] > clock, true, 'cooldown is independent of history');
+
+    const restarted = new TclkEngine({ identity: me, client: venue, statePath, now: () => clock });
+    venue.say(OFFER_ROOM, target.did, encodeFrame(payerOffer(target, {
+      nonce: 'target-retry-0001', claimByMs: clock + HOUR, expiresMs: clock + HOUR, refundAfterMs: clock + 2 * HOUR
+    })));
+    assert.equal((await restarted.runTurn()).action, 'no_acceptable_offer');
+  });
+
+  test('an expired cooldown permits retry while the old abandoned record remains', async () => {
+    const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
+    const statePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tclk-cooldown-')), 'tclk-state.json');
+    fs.writeFileSync(statePath, JSON.stringify({
+      deal: null, completed: [],
+      abandoned: [{ contract: '0xold', room: 'old-room', payer: payer.did, acceptedAt: T0 - HOUR, closedAt: T0, reason: 'payer did not lock within 5 min' }],
+      noLockCooldowns: { [payer.did]: T0 + DAY }, noLockCooldownsMigrated: true
+    }));
+    const engine = new TclkEngine({ identity: me, client: venue, statePath, now: () => T0 + DAY + 1 });
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer, {
+      nonce: 'expired-retry-0001', claimByMs: T0 + DAY + HOUR, expiresMs: T0 + DAY + HOUR, refundAfterMs: T0 + DAY + 2 * HOUR
+    })));
+
+    assert.equal((await engine.runTurn()).action, 'offer_accepted');
+    assert.equal(engine.load().abandoned.length, 1, 'old history is retained');
+    assert.equal(engine.load().noLockCooldowns[payer.did], undefined, 'expired cooldown is pruned');
+    const restarted = new TclkEngine({ identity: me, client: venue, statePath, now: () => T0 + DAY + 1 });
+    assert.equal(restarted.load().noLockCooldowns[payer.did], undefined, 'expiry remains pruned after restart');
+  });
+
+  test('an abandoned deal with another reason does not block its payer', async () => {
+    const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
+    const statePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tclk-cooldown-')), 'tclk-state.json');
+    fs.writeFileSync(statePath, JSON.stringify({
+      deal: null, completed: [],
+      abandoned: [{ contract: '0xother', room: 'other-room', payer: payer.did, acceptedAt: T0 - HOUR, closedAt: T0, reason: 'lock verification failed' }]
+    }));
+    const engine = new TclkEngine({ identity: me, client: venue, statePath, now: () => T0 });
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer, { nonce: 'other-reason-0001' })));
+
+    assert.equal((await engine.runTurn()).action, 'offer_accepted');
+  });
+
+  test('a recent legacy no-lock abandonment is migrated once into the durable cooldown', async () => {
+    const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
+    const statePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tclk-cooldown-')), 'tclk-state.json');
+    fs.writeFileSync(statePath, JSON.stringify({
+      deal: null, completed: [],
+      abandoned: [{ contract: '0xlegacy', room: 'legacy-room', payer: payer.did, acceptedAt: T0 - HOUR, closedAt: T0, reason: 'payer never locked before claimByMs' }]
+    }));
+    const first = new TclkEngine({ identity: me, client: venue, statePath, now: () => T0 });
+    assert.equal(first.load().noLockCooldowns[payer.did], T0 + DAY);
+    assert.equal(first.load().noLockCooldownsMigrated, true);
+
+    const restarted = new TclkEngine({ identity: me, client: venue, statePath, now: () => T0 });
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer, { nonce: 'legacy-retry-0001' })));
+    assert.equal((await restarted.runTurn()).action, 'no_acceptable_offer');
+    assert.equal(restarted.load().noLockCooldowns[payer.did], T0 + DAY);
   });
 });
 

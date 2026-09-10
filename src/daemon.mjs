@@ -212,12 +212,64 @@ export function readCodeFingerprint(repoDir = process.cwd()) {
 }
 
 /** The watcher's finding, if there is one waiting. */
-function readSourceChange(dataDir) {
+export function readSourceChange(dataDir) {
+  let surface = null;
   try {
-    return JSON.parse(fs.readFileSync(path.join(dataDir, 'source-change.json'), 'utf8'));
-  } catch {
-    return null;
+    surface = JSON.parse(fs.readFileSync(path.join(dataDir, 'source-change.json'), 'utf8'));
+  } catch { /* the surface watcher may have no finding */ }
+
+  // The hourly VPS watcher keeps its own baseline and delta. Only consume a
+  // recent report: a stale alert must not turn into a fresh inference task after
+  // a long outage or a machine restart, and a future timestamp is invalid data.
+  let watched = null;
+  try {
+    const candidate = JSON.parse(fs.readFileSync(path.join(dataDir, 'source-watch', 'change.json'), 'utf8'));
+    const detectedAt = Date.parse(candidate.detectedAt);
+    const ageMs = Date.now() - detectedAt;
+    if (Number.isFinite(detectedAt) && ageMs >= 0 && ageMs < 2 * 60 * 60 * 1000) watched = candidate;
+  } catch { /* no VPS finding, or a torn/unreadable report */ }
+
+  const exposeSignals = (report) => {
+    if (!report) return report;
+    const changes = [...(report.changes || [])];
+    const seen = new Set(changes.map((c) => `${c.id}\u0000${c.was}\u0000${c.now}`));
+    for (const alert of report.signalAlerts || []) {
+      const words = Array.isArray(alert.words) ? alert.words.join(', ') : String(alert.words || '');
+      const id = `signal:${alert.id}`;
+      const key = `${id}\u0000\u0000${words}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        changes.push({ id, url: alert.url, was: null, now: `signal words: ${words}` });
+      }
+    }
+    return { ...report, changes };
+  };
+
+  if (!surface) return exposeSignals(watched);
+  if (!watched) return surface;
+
+  const changes = [...(surface.changes || [])];
+  const seen = new Set(changes.map((c) => `${c.id}\u0000${c.was}\u0000${c.now}`));
+  const watchedWithSignals = exposeSignals(watched);
+  for (const change of watchedWithSignals.changes || []) {
+    const key = `${change.id}\u0000${change.was}\u0000${change.now}`;
+    if (!seen.has(key)) { seen.add(key); changes.push(change); }
   }
+
+  const surfaceAt = Date.parse(surface.detectedAt);
+  const watchedAt = Date.parse(watched.detectedAt);
+  const detectedAt = Number.isFinite(watchedAt)
+    && (!Number.isFinite(surfaceAt) || watchedAt > surfaceAt)
+    ? watched.detectedAt
+    : surface.detectedAt;
+
+  return {
+    ...surface,
+    ...(detectedAt ? { detectedAt } : {}),
+    changes,
+    signalAlerts: [...(surface.signalAlerts || []), ...(watched.signalAlerts || [])],
+    newRooms: [...new Set([...(surface.newRooms || []), ...(watched.newRooms || [])])]
+  };
 }
 
 /**
@@ -621,7 +673,14 @@ export async function runScoutDaemon(options = {}) {
   // The commit is recorded so anything reading this log can tell whether the
   // running process is the code on disk. Without it, a pending restart is
   // invisible — which is how half a day of fixes stayed inert.
-  appendAudit(config.auditLogPath, { event: 'startup', did: scoutIdentity.did, scribeDid: scribeIdentity.did, server: config.serverUrl, commit: readGitHead() });
+  appendAudit(config.auditLogPath, {
+    event: 'startup',
+    did: scoutIdentity.did,
+    scribeDid: scribeIdentity.did,
+    server: config.serverUrl,
+    commit: readGitHead(),
+    codeFingerprint: startedCode
+  });
   await writeHeartbeat('started');
 
   /**
