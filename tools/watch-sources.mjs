@@ -162,6 +162,62 @@ const SIGNAL_WORDS = [
   'referral', 'kol', 'leaderboard', 'lottery', 'genlayer', 'adjudication'
 ];
 
+/**
+ * The handful of numbers that decide what this cohort is owed.
+ *
+ * Everything else in this file watches for *change*: a digest moves, a path
+ * appears, a word shows up. That is the right shape for "something happened"
+ * and the wrong shape for "the agent pool doubled", which is what happened on
+ * 2026-09-10 at 02:16Z. The watcher saw it — and reported
+ * `flop-yellowpaper 377,372 chars -> 399,243 chars`. A third of a megabyte
+ * moved, on a 249 kB document, and the line said nothing about which way. We
+ * found out from a news aggregator roughly twelve hours later, and the change
+ * was `genesis_agent_airdrop` going from 596,030,400 to 1,200,000,000.
+ *
+ * So these are extracted by value and diffed as numbers. A digest tells you to
+ * go and read; this tells you what to read for, and it fires on the one edit
+ * that matters inside a document that is edited constantly for other reasons.
+ *
+ * Chosen because each one is load-bearing for a decision this project makes:
+ * the supply and the four genesis legs set what the cohort is owed, the unlock
+ * ratio is the only published rule for turning work into an allocation, and the
+ * service caps are the numbers we have already published wrongly once by
+ * hardcoding them.
+ *
+ * `capture` is a regex whose FIRST group is the number. Missing is not a change:
+ * a source that stops mentioning a parameter reports `absent` and is compared
+ * as such, because a document being reorganised must not read as a restatement.
+ */
+const KEY_NUMBERS = [
+  { id: 'genesis_supply', sourceId: 'flop-yellowpaper', capture: /genesis_supply[^=]{0,80}=\s*([\d,]+)/i },
+  { id: 'genesis_miner_airdrop', sourceId: 'flop-yellowpaper', capture: /genesis_miner_airdrop[^=]{0,80}=\s*([\d,]+)/i },
+  { id: 'genesis_validator_airdrop', sourceId: 'flop-yellowpaper', capture: /genesis_validator_airdrop[^=]{0,80}=\s*([\d,]+)/i },
+  { id: 'genesis_agent_airdrop', sourceId: 'flop-yellowpaper', capture: /genesis_agent_airdrop[^=]{0,80}=\s*([\d,]+)/i },
+  { id: 'genesis_reserve', sourceId: 'flop-yellowpaper', capture: /genesis_reserve[^=]{0,80}=\s*([\d,]+)/i },
+  { id: 'initial_block_reward', sourceId: 'flop-yellowpaper', capture: /initial_block_reward[^=]{0,80}=\s*([\d,]+)/i },
+  // The revenue calculator carries its own supply basis, and on 2026-09-10 it
+  // disagreed with the paper on the same day — 4.4B against 3,500,000,000.
+  // Watched separately on purpose: the disagreement is the signal.
+  { id: 'tge_supply_calculator', sourceId: 'flop-revenue', capture: /Supply starts at\s*([\d.]+)\s*B/i },
+  // The only published rule for turning work into an allocation.
+  { id: 'agent_unlock_ratio', sourceId: 'flop-agent', capture: /Every\s*([\d.]+)\s*FLOP of inference fees unlocks/i },
+  { id: 'max_rooms', sourceId: 'config', capture: /"max_rooms"\s*:\s*(\d+)/ },
+  { id: 'max_notes_total', sourceId: 'config', capture: /"max_notes_total"\s*:\s*(\d+)/ },
+  { id: 'rate_rooms_per_day', sourceId: 'config', capture: /"rate_rooms_per_day"\s*:\s*(\d+)/ }
+];
+
+/** Every key number this source carries, as strings — `absent` when it has none. */
+function keyNumbers(sourceId, body) {
+  const wanted = KEY_NUMBERS.filter((k) => k.sourceId === sourceId);
+  if (!wanted.length) return undefined;
+  const out = {};
+  for (const k of wanted) {
+    const m = body.match(k.capture);
+    out[k.id] = m ? m[1].replace(/,/g, '') : 'absent';
+  }
+  return out;
+}
+
 function signalHits(body) {
   const found = [];
   for (const word of SIGNAL_WORDS) {
@@ -333,6 +389,7 @@ export async function runWatch({
   const sources = {};
   const changes = [];
   const signalAlerts = [];
+  const numberAlerts = [];
 
   for (const source of sourceList) {
     try {
@@ -347,8 +404,9 @@ export async function runWatch({
 
       const links = source.kind === 'html' ? discoverLinks(body) : undefined;
       const commits = source.id.endsWith('-commits') ? commitList(body) : undefined;
+      const numbers = keyNumbers(source.id, body);
 
-      sources[source.id] = { url: source.url, digest, summary, signals, paths, links, commits, checkedAt: now, lastSuccessAt: now };
+      sources[source.id] = { url: source.url, digest, summary, signals, paths, links, commits, numbers, checkedAt: now, lastSuccessAt: now };
 
       const before = prevSources[source.id];
       if (!before && Object.keys(prevSources).length) {
@@ -390,6 +448,22 @@ export async function runWatch({
           const removed = before.paths.filter((p) => !paths.includes(p));
           if (added.length) change.addedPaths = added;
           if (removed.length) change.removedPaths = removed;
+        }
+
+        /**
+         * A parameter moving is a different event from a document moving, and it
+         * is collected twice on purpose: once here, so the source's own line
+         * carries it, and once at the top of the report, so it cannot be the
+         * fourteenth row of a table nobody reads to the end of.
+         */
+        if (numbers && before.numbers) {
+          const moved = Object.entries(numbers)
+            .filter(([k, v]) => before.numbers[k] !== undefined && before.numbers[k] !== v)
+            .map(([k, v]) => ({ key: k, was: before.numbers[k], now: v }));
+          if (moved.length) {
+            change.numberChanges = moved;
+            numberAlerts.push({ id: source.id, url: source.url, moved });
+          }
         }
 
         /**
@@ -509,7 +583,7 @@ export async function runWatch({
 
   const sourceErrors = Object.fromEntries(Object.entries(sources)
     .filter(([, s]) => s.error).map(([id, s]) => [id, s.error]));
-  const report = { detectedAt: now, changes, newRooms, signalAlerts,
+  const report = { detectedAt: now, changes, newRooms, signalAlerts, numberAlerts,
     healthySources: Object.keys(sources).length - Object.keys(sourceErrors).length,
     totalSources: Object.keys(sources).length, sourceErrors, roomsError };
   // An independent VPS watch keeps receipts before advancing its baseline.

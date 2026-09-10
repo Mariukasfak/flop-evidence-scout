@@ -136,15 +136,15 @@ export const FACTS = Object.freeze([
   {
     id: 'genesis-supply',
     status: STATUS.CONFIRMED,
-    claim: 'Genesis supply is 3,500,000,000 $FLOP, distributed through airdrop accounts only — no VC pre-mint and no auction. It was 2,483,460,000 until 2026-09-10. It is not the whole story: cumulative emission through the end of era 5 (~year 12) is a further 11,920,608,000 $FLOP',
-    source: 'Yellow Paper §9 parameter table (genesis_supply), github.com/flop-labs/yellowpaper commit 3eaf2f2, 2026-09-10T02:16Z, read first-party through the GitHub API the same day. The previous value 2,483,460,000 is in commit 4e84089 of 2026-09-04, which this was diffed against rather than remembered',
+    claim: 'Genesis supply is 4,400,000,000 $FLOP, distributed through airdrop accounts only — no VC pre-mint and no auction. It moved twice on 2026-09-10: D-0438 took it 2,483,460,000 to 3,500,000,000, then D-0440 took it to 4,400,000,000. It is not the whole story: cumulative emission through the end of era 5 (~year 12) is a further 11,920,608,000 $FLOP, and the ten-year total is 18,086,624,000',
+    source: 'Yellow Paper §9 parameter table (genesis_supply) at flop.finance/intro/yellowpaper/, read 2026-09-10. The published repository is BEHIND the site: commit 3eaf2f2 of the same day still reads 3,500,000,000, which is the D-0438 state. Quote the site, not the repo, for this parameter until they agree',
     asOf: '2026-09-10'
   },
   {
     id: 'genesis-split',
     status: STATUS.CONFIRMED,
-    claim: 'Genesis split: miners 1,200,000,000 (34.3%), agents 1,200,000,000 (34.3%), validators 305,505,000 (8.7%), ecosystem reserve 794,495,000 (22.7%, and named as ecosystem/incentives rather than an airdrop). Until 2026-09-10 it was 993,384,000 / 596,030,400 / 305,505,000 / 588,540,600. The agent leg doubled; the validator leg did not move',
-    source: 'Yellow Paper §9 parameter table: genesis_miner_airdrop, genesis_validator_airdrop, genesis_agent_airdrop, genesis_reserve. github.com/flop-labs/yellowpaper commit 3eaf2f2, 2026-09-10T02:16Z, read first-party. Percentages computed here against genesis_supply = 3,500,000,000, which the four sum to exactly',
+    claim: 'Genesis split: miners 1,200,000,000, validators 1,200,000,000, agents 1,200,000,000 — 27.27% each — plus an 800,000,000 reserve (18.18%, named ecosystem/incentives rather than an airdrop). The three cohort legs are now equal. Until 2026-09-10 it was 993,384,000 / 305,505,000 / 596,030,400 / 588,540,600, so the agent leg is 2.01x and the validator leg 3.93x what it was that morning',
+    source: 'Yellow Paper §9 parameter table: genesis_miner_airdrop, genesis_validator_airdrop, genesis_agent_airdrop, genesis_reserve, read at flop.finance/intro/yellowpaper/ 2026-09-10. Percentages computed here against genesis_supply = 4,400,000,000, which the four sum to exactly. The repository at commit 3eaf2f2 still carries the superseded D-0438 figures',
     asOf: '2026-09-10'
   },
   {
@@ -156,16 +156,16 @@ export const FACTS = Object.freeze([
   },
   {
     id: 'genesis-pool-conflict',
-    status: STATUS.UNKNOWN,
-    claim: 'Which genesis pool figure governs. Still open, and it has moved rather than closed: on 2026-09-10 the paper went 2,483,460,000 → 3,500,000,000 while the first-party revenue calculator went to 4,400,000,000. Both are Flop Labs pages on the same day. The calculator is the one that now cites a ratifying decision — "Tokenomics workbook rev 2026-09-10, ratified as genesis_supply by D-0440" — and D-0440 appears nowhere in the public yellowpaper repository, in either decision record or the paper itself. The blocker stated on 2026-09-07 was that landing the restatement had no ratifying decision; a decision is now named, and the paper has not caught up to it',
-    source: 'flop.finance/intro/revenue/ "Supply starts at 4.4B at TGE — the whole genesis pool is minted at block 0 ... Tokenomics workbook rev 2026-09-10, ratified as genesis_supply by D-0440", read 2026-09-10, against github.com/flop-labs/yellowpaper commit 3eaf2f2 of the same day whose §9 reads 3,500,000,000. The strings D-0440 and 4,400,000,000 do not occur in yellowpaper.md, decisions/v0.4.md or decisions/v0.5.md. Both sides read first-party the same day',
+    status: STATUS.CONFIRMED,
+    claim: 'Closed on 2026-09-10, by two decisions in one day. D-0438 took the genesis pool 2,483,460,000 → 3,500,000,000; D-0440 then took validators 305,505,000 → 1,200,000,000 and the pool 3,500,000,000 → 4,400,000,000, superseding the D-0438 pool and the D-0435 bond and leaving emission untouched. The site carries the D-0440 state. The public repository is a step behind at D-0438, so a reader who checks only the repo gets a figure Flop Labs has already superseded — which is exactly what happened here for several hours',
+source: 'The D-0438 and D-0440 chain is stated on flop.finance/intro/yellowpaper/ itself; the calculator at flop.finance/intro/revenue/ cites the same D-0440 ("Tokenomics workbook rev 2026-09-10, ratified as genesis_supply by D-0440"). Both read 2026-09-10. Neither string occurs in the repository at commit 3eaf2f2, which is how the lag was found',
     asOf: '2026-09-10'
   },
   {
     id: 'ten-year-supply-reported',
-    status: STATUS.REPORTED,
-    claim: 'Aggregators report a 10-year supply of ~18.1bn $FLOP and an airdrop pool of ~4.4bn. The 4.4bn is first-party — flop.finance\'s revenue calculator states it and names D-0440 as ratifying it — so this is a real restatement and not a misreading. 18.1bn follows from it: genesis 4,400,000,000 plus ten years of block reward and Labs/Foundation subsidy gives 18,086,624,000. What is NOT supported anywhere first-party is the reported split, in particular validators at about 1.2bn; the only published validator figure remains 305,505,000, and it did not move when everything around it did',
-    source: 'PANews and ChainCatcher via BTCC, both 2026-09-10, supplied by the operator; the 4.4bn checked against flop.finance/intro/revenue/ and the arithmetic computed here from Yellow Paper §9 as 4,400,000,000 + 63,072,000 blocks × (96+48+24+12+6) emission + × (16+8+4+2+1) subsidy. The subsidy term reproduces the paper\'s own stated 1,955,232,000, which is the check that the method matches theirs. On the paper\'s 3,500,000,000 the same sum gives 17,186,624,000, so which supply figure you start from decides which headline you get',
+    status: STATUS.CONFIRMED,
+    claim: 'The ten-year supply is 18,086,624,000 $FLOP and the genesis airdrop pool is 4,400,000,000. Aggregators reported ~18.1bn and ~4.4bn with validators at 1.2bn on 2026-09-10 and every part of that checks out against flop.finance, including the validator figure this board briefly said was unsupported. The ten-year total is genesis 4,400,000,000 plus ten years of block reward and Labs/Foundation subsidy',
+    source: 'PANews and ChainCatcher via BTCC, both 2026-09-10, supplied by the operator; every figure then verified against flop.finance/intro/yellowpaper/ and /intro/revenue/ the same day. Arithmetic computed here from the paper section 9 as 4,400,000,000 + 63,072,000 blocks x (96+48+24+12+6) emission + x (16+8+4+2+1) subsidy; the subsidy term reproduces the stated 1,955,232,000, which is the check that the method matches theirs. Recorded because it is the first time this board was behind an aggregator on a first-party number',
     asOf: '2026-09-10'
   },
   {
