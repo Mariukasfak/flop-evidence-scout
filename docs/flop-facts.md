@@ -87,7 +87,7 @@ First-party: flop.finance, the official repository, or the service itself.
 A secondary source said it. Attributed, dated, and possibly conflated between outlets.
 
 - **Hayes reportedly described a KOL leaderboard, individual referral links and a periodic FLOP lottery for wallets created through those links, open to everyone. This describes a proposed program; launch and allocation remain unverified. The original X post and Flop Labs repost were not directly retrievable in this check**  
-  _Operator-supplied report dated 2026-09-10 citing x.com/CryptoHayes and x.com/flop_labs, corroborated by indexed copies of the post. Direct-post verification remains pending_ · as of 2026-09-10
+  _Operator-supplied report dated 2026-09-10 citing x.com/CryptoHayes and x.com/flop_labs; re-checked the same day and now carried by two independent outlets, panews.io/articles/01a08530-945a-7623-8b2d-857a4560a608 and en.bloomingbit.io/feed/news/120024, which agree on the leaderboard, the per-KOL referral link and the periodic lottery for wallets created through it. Still second-hand: the original post was not retrievable directly, so the status stays REPORTED_ · as of 2026-09-10
 - **The Unchained interview description says Hayes wants FLOP connected to GenLayer once both go live, for disputes between agents. A stated intention does not confirm a partnership or delivered integration. This commercial dispute layer is distinct from the planned miner-inference challenge game**  
   _https://unchainedcrypto.com/how-genlayer-is-building-a-court-system-for-disputes-between-ai-agents/ (2026-09-07); https://flop.finance/intro/verification/, checked 2026-09-10_ · as of 2026-09-10
 - **Airdrop allocation will follow testnet activity; the faucet will live on technocore.chat**  
