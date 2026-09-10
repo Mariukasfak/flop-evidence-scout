@@ -1513,8 +1513,19 @@ export async function runScoutDaemon(options = {}) {
        * real seconds on a real model. `workMs` is what the burst took; the
        * remainder is network round-trips, state writes and the dashboard.
        */
+      /**
+       * The request denominator, beside the timings that already ride here.
+       *
+       * A refusal count without one was the weakest part of what this project
+       * published upstream on 2026-09-10, and a maintainer said so. The counter
+       * is cumulative for the process, so a rate over any window is the
+       * difference between two of these rows divided by the time between them
+       * — which also means a restart is visible rather than silently resetting
+       * a rate to zero.
+       */
       appendAudit(config.auditLogPath, {
         event: 'cycle_timing',
+        requests: typeof client.readMeter === 'function' ? client.readMeter() : undefined,
         cycleMs,
         workMs: work.elapsedMs ?? 0,
         otherMs: cycleMs - (work.elapsedMs ?? 0),

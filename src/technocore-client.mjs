@@ -128,9 +128,36 @@ export class TechnocoreClient {
     this.signedWriteChains = new Map();
     this.lastNonce = new Map();
 
+    /**
+     * Count every request, so a refusal count can become a refusal rate.
+     *
+     * This project published "230 503s in a day, then 1, 0, 4, 0, then 12" on
+     * flop-labs/technocore-chat#588 and could not say whether the venue had
+     * regressed, because twelve out of an unknown number is not a rate. The
+     * service roughly doubled its room cap over the same ten days, so the
+     * traffic behind those counts did not hold still either. A maintainer asked
+     * for the denominator; this is it.
+     *
+     * Counted at the single fetch wrapper rather than per caller, which is why
+     * it can be trusted: every read, write and note in this client goes through
+     * here, so there is no second path that quietly does not count.
+     *
+     * What it is NOT: a count of origin refusals. `edge/src/worker.js:301`
+     * returns `copy ?? originResponse`, so when the origin refuses a path the
+     * edge holds a stored copy for, the client is served the copy and never
+     * sees the 503. A rate computed here is therefore a LOWER BOUND on origin
+     * refusals, filtered by whatever the edge could substitute — stated by the
+     * maintainer on 2026-09-10 and recorded here so the number is never quoted
+     * as more than it is.
+     */
+    this.meter = { since: Date.now(), total: 0, byStatus: {}, transportErrors: 0 };
+
     this.fetch = async (url, init) => {
+      this.meter.total += 1;
       try {
         const response = await fetchFn(url, init);
+        const bucket = String(response.status);
+        this.meter.byStatus[bucket] = (this.meter.byStatus[bucket] || 0) + 1;
         // A 5xx is the server refusing, not the transport working. Only an
         // answer we could have used counts as reaching it.
         if (response.ok || response.status < 500) {
@@ -141,10 +168,28 @@ export class TechnocoreClient {
         }
         return response;
       } catch (err) {
+        // A request that never got an answer is still a request that was made.
+        // Leaving it out of the denominator would flatter every rate computed
+        // from this, and the transport failures are exactly the periods when
+        // the venue is worst.
+        this.meter.transportErrors += 1;
         this.consecutiveFailures += 1;
         throw err;
       }
     };
+
+    /**
+     * A snapshot with the window it covers, because a count without one is the
+     * mistake this meter exists to stop being made twice.
+     */
+    this.readMeter = () => ({
+      since: new Date(this.meter.since).toISOString(),
+      windowMs: Date.now() - this.meter.since,
+      total: this.meter.total,
+      transportErrors: this.meter.transportErrors,
+      byStatus: { ...this.meter.byStatus },
+      note: 'Lower bound on origin refusals: the edge may serve a stored copy instead of a 503.'
+    });
     /**
      * Refuse every write, here, rather than in each caller.
      *
@@ -239,9 +284,17 @@ export class TechnocoreClient {
          * evidence and the noise respectively.
          *
          * A 503 here can come from two places and they need opposite responses:
-         * the origin's own pre-dispatch refusal answers a 19-byte
-         * `Service Unavailable`, while the edge answers a 16-byte
-         * `error code: 502`. Both arrive as HTTP 503 with the statusText
+         * the origin's own pre-dispatch refusal answers `Service Unavailable`,
+         * while the edge answers `origin unavailable\n` or `error code: 502`.
+         *
+         * The STRING is the discriminator and the length is not, which is a
+         * correction to the first version of this comment and to the thread it
+         * came from: the maintainer withdrew the length form on 2026-09-10,
+         * because `edge/src/worker.js:301` emits `"origin unavailable\n"` and
+         * that is exactly 19 bytes — the same as `"Service Unavailable"`. So a
+         * `Content-Length: 19` matches both sides and separates neither.
+         *
+         * All three arrive as HTTP 503 with the statusText
          * `Service Unavailable`, so a message built from statusText cannot tell
          * them apart — and this one was, which is why twelve 503s logged on
          * 2026-09-09/10 could be route-attributed but only partly fingerprinted:
