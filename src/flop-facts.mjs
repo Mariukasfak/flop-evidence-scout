@@ -122,8 +122,8 @@ export const FACTS = Object.freeze([
   {
     id: 'twenty-percent',
     status: STATUS.CONFIRMED,
-    claim: 'The genesis airdrop is 3,500,000,000 $FLOP. This board refuted that figure between 2026-09-07 and 2026-09-10 and the refutation is now withdrawn: the paper moved back to it, so the Teaser was right and the correction was the thing that aged',
-    source: 'Round trip, recorded rather than tidied. Teaser v0.1 §03 said 3,500,000,000 on 2026-08-26; Yellow Paper v0.5.0 said genesis_supply = 2,483,460,000 on 2026-09-05, and this board marked the Teaser refuted; the 0.5.0 sync at github.com/flop-labs/yellowpaper commit 3eaf2f2, 2026-09-10T02:16Z, sets genesis_supply = 3,500,000,000 again. Read first-party through the GitHub API 2026-09-10. The gap this closes was the one genesis-pool-conflict was opened for',
+    claim: 'The Yellow Paper\'s genesis airdrop is 3,500,000,000 $FLOP. This board refuted that figure between 2026-09-07 and 2026-09-10 and the refutation is withdrawn: the paper moved back to it, so the Teaser was right and the correction was the thing that aged. Do not read it as settled — the revenue calculator moved past it to 4,400,000,000 the same day, so see genesis-pool-conflict before quoting either',
+    source: 'Round trip, recorded rather than tidied. Teaser v0.1 §03 said 3,500,000,000 on 2026-08-26; Yellow Paper v0.5.0 said genesis_supply = 2,483,460,000 on 2026-09-05, and this board marked the Teaser refuted; the 0.5.0 sync at github.com/flop-labs/yellowpaper commit 3eaf2f2, 2026-09-10T02:16Z, sets genesis_supply = 3,500,000,000 again. Read first-party through the GitHub API 2026-09-10',
     asOf: '2026-09-10'
   },
   {
@@ -156,16 +156,16 @@ export const FACTS = Object.freeze([
   },
   {
     id: 'genesis-pool-conflict',
-    status: STATUS.CONFIRMED,
-    claim: 'The two-figure conflict is closed, and the workbook won. From 2026-08-22 the paper carried the ratified genesis_supply = 2,483,460,000 (D-0435) while the first-party revenue calculator ran on a workbook restatement of 3,500,000,000, with the agent leg split the same way — 596,030,400 against "the whole 1.2bn agent pool". Flop Labs stated the gap itself and called landing it blocked. On 2026-09-10 the paper landed both restatements. This board had the resolution as an open item for three days before it happened',
-    source: 'Gap as stated at flop.finance/intro/revenue/ "Supply basis" (ECON-009 §2.3 W1, issue #1418), read 2026-09-07; closed by github.com/flop-labs/yellowpaper commit 3eaf2f2, 2026-09-10T02:16Z, whose §9 table now reads genesis_supply = 3,500,000,000 and genesis_agent_airdrop = 1,200,000,000. Both versions read first-party and diffed, not inferred',
+    status: STATUS.UNKNOWN,
+    claim: 'Which genesis pool figure governs. Still open, and it has moved rather than closed: on 2026-09-10 the paper went 2,483,460,000 → 3,500,000,000 while the first-party revenue calculator went to 4,400,000,000. Both are Flop Labs pages on the same day. The calculator is the one that now cites a ratifying decision — "Tokenomics workbook rev 2026-09-10, ratified as genesis_supply by D-0440" — and D-0440 appears nowhere in the public yellowpaper repository, in either decision record or the paper itself. The blocker stated on 2026-09-07 was that landing the restatement had no ratifying decision; a decision is now named, and the paper has not caught up to it',
+    source: 'flop.finance/intro/revenue/ "Supply starts at 4.4B at TGE — the whole genesis pool is minted at block 0 ... Tokenomics workbook rev 2026-09-10, ratified as genesis_supply by D-0440", read 2026-09-10, against github.com/flop-labs/yellowpaper commit 3eaf2f2 of the same day whose §9 reads 3,500,000,000. The strings D-0440 and 4,400,000,000 do not occur in yellowpaper.md, decisions/v0.4.md or decisions/v0.5.md. Both sides read first-party the same day',
     asOf: '2026-09-10'
   },
   {
     id: 'ten-year-supply-reported',
     status: STATUS.REPORTED,
-    claim: 'Aggregators report a new 10-year supply of ~18.1bn $FLOP and an airdrop pool of ~4.4bn (24.3%), with validators raised to about 1.2bn. Neither figure appears anywhere in the first-party paper, and both are reproduced exactly by taking the paper and changing one line — the validator leg — from 305,505,000 to 1,200,000,000: that gives a 4,394,495,000 pool and 18,081,119,000 at ten years. The paper\'s own parameters give 3,500,000,000 and 17,186,624,000. So the direction of the report is right and the validator claim is the part no first-party text supports',
-    source: 'PANews and ChainCatcher via BTCC, both 2026-09-10, supplied by the operator. Checked against github.com/flop-labs/yellowpaper commit 3eaf2f2 the same day: the strings 18.1, 4.4bn, 17.2 and 3.5 billion do not occur in the 248,811-byte paper. Ten-year total computed here from §9 as genesis 3,500,000,000 + 63,072,000 blocks × (96+48+24+12+6) emission + × (16+8+4+2+1) Labs/Foundation subsidy; the subsidy term reproduces the paper\'s own stated 1,955,232,000, which is the check that the method matches theirs',
+    claim: 'Aggregators report a 10-year supply of ~18.1bn $FLOP and an airdrop pool of ~4.4bn. The 4.4bn is first-party — flop.finance\'s revenue calculator states it and names D-0440 as ratifying it — so this is a real restatement and not a misreading. 18.1bn follows from it: genesis 4,400,000,000 plus ten years of block reward and Labs/Foundation subsidy gives 18,086,624,000. What is NOT supported anywhere first-party is the reported split, in particular validators at about 1.2bn; the only published validator figure remains 305,505,000, and it did not move when everything around it did',
+    source: 'PANews and ChainCatcher via BTCC, both 2026-09-10, supplied by the operator; the 4.4bn checked against flop.finance/intro/revenue/ and the arithmetic computed here from Yellow Paper §9 as 4,400,000,000 + 63,072,000 blocks × (96+48+24+12+6) emission + × (16+8+4+2+1) subsidy. The subsidy term reproduces the paper\'s own stated 1,955,232,000, which is the check that the method matches theirs. On the paper\'s 3,500,000,000 the same sum gives 17,186,624,000, so which supply figure you start from decides which headline you get',
     asOf: '2026-09-10'
   },
   {
