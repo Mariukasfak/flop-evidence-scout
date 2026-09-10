@@ -234,7 +234,25 @@ export class TechnocoreClient {
       clearTimeout(timer);
 
       if (!response.ok) {
-        throw new Error(`Technocore read error: HTTP ${response.status} ${response.statusText}`);
+        /**
+         * The body, not the status line, because on this venue they are the
+         * evidence and the noise respectively.
+         *
+         * A 503 here can come from two places and they need opposite responses:
+         * the origin's own pre-dispatch refusal answers a 19-byte
+         * `Service Unavailable`, while the edge answers a 16-byte
+         * `error code: 502`. Both arrive as HTTP 503 with the statusText
+         * `Service Unavailable`, so a message built from statusText cannot tell
+         * them apart — and this one was, which is why twelve 503s logged on
+         * 2026-09-09/10 could be route-attributed but only partly fingerprinted:
+         * the note-write path already carried the body and every read did not.
+         *
+         * Fingerprint discriminator established on flop-labs/technocore-chat#588
+         * by three reporters independently. Sliced for the same reason the write
+         * path slices: an error string is a log line, not a payload.
+         */
+        const body = await response.text().catch(() => '');
+        throw new Error(`Technocore read error: HTTP ${response.status} ${body.slice(0, 160) || response.statusText}`);
       }
 
       const contentType = response.headers.get('content-type') || '';
