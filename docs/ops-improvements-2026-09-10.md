@@ -204,3 +204,66 @@ eilutės kaip rugsėjo 5 d. `/r/flop-airdrop` yra 2 721 žinutė, tarp jų treč
 svetimoje svetainėje. Nė vienas kambarys nėra oficialus FLOP šaltinis, ir
 kambario pavadinimas jo tokiu nepadaro. Mūsų agentas kambarių tekstą traktuoja
 kaip duomenis, ne kaip nurodymus; tai patvirtina ir prompto apsaugos.
+
+---
+
+# TCLK: kodėl 80 valandų be nė vieno sandorio
+
+Paskutinis užbaigtas sandoris — 2026-09-07 10:43 UTC, prieš 80,6 val. Per tą
+laiką priimta šimtai pasiūlymų. Rytinis 24 val. cooldown veikia kaip suplanuota
+(156 skirtingi mokėtojai eilėje, atsirado `no_acceptable_offer`), bet problemos
+neišsprendė, nes problema buvo kita.
+
+## Ką atmetė matavimai
+
+Visi patikrinimai atlikti prieš pilną `/r/tclk-offers/export` — 5,4 MB, 10 672
+žinutės, 40,9 min. langas 2026-09-10 18:42–19:23 UTC.
+
+| Hipotezė | Rezultatas |
+|---|---|
+| Lenta mirė | **Ne.** 161 užbaigtas sandoris tame pačiame lange. |
+| Mūsų priėmimai nepasiekia lentos | **Ne.** 6 mūsų kadrai per 41 min., daugiau nei tikėtini 3. |
+| Esame per lėti | **Ne.** 3 kartus iš 6 buvome pirmi; niekad ne paskutiniai; 0,9–7,5 s po pasiūlymo. |
+| Mūsų kadras kitoks | **Ne.** Visi 160 laimėjusių turi tuos pačius 6 laukus: `contract, from, nonce, ref, statement, type`. |
+| Trūksta `paymentKey` | **Ne.** Nė vienas iš 160 laimėjusių jo neturi. |
+
+Pirmasis mėginimas skaičiuoti konkurenciją davė 1,42 pretendento pasiūlymui ir
+buvo klaidingas: imtis buvo 200 žinučių, t. y. **46 sekundės**. Pilname lange
+kiekvieną mūsų priimtą pasiūlymą priėmė dar 6–10 agentų.
+
+## Ką matavimai parodė
+
+Laimėtojo eiga trunka sekundes ir nelaukia niekieno:
+
+```
+18:42:53.990  accept    z6Mksn…
+18:42:54.729  secret    z6Mksn…   (+0,7 s)
+18:42:54.973  claimed   z6Mksn…   (+0,2 s)
+```
+
+Per visus 161 užbaigtus: **160 turi `secret` kadrą**, mediana nuo `accept` iki
+`claimed` — **6,12 s**. Mūsų eiga: `accept` → laukiam 5 min. → `deal_cancelled`.
+`secret` nesiunčiamas niekada.
+
+Priežastis yra sąmoningas mūsų sprendimas, o ne klaida. `#reveal` funkcija
+`src/tclk-engine.mjs` paskelbia paslaptį ir užbaigia sandorį, bet **tik po
+`lock_verified`** — tik pamačius, kad mokėtojas užrakino lėšas. Tai teisinga
+hash-lock disciplina: paslaptis atskleidžiama tik prieš įrodytą apmokėjimą.
+
+Lentoje tokių užrakinimų reta: 126 `lock` prieš 6 779 `accept` per tą patį langą
+— **1,86 %**. Mūsų dalis accept sraute yra 0,089 %, tad tikėtini mūsų
+užrakinimai per 80,6 val. yra ~13. Faktas — 0. Skirtumas tarp 13 ir 0 lieka
+nepaaiškintas ir yra kitas tirtinas klausimas; jis nekeičia išvados žemiau.
+
+## Išvada: netaisyti
+
+Visi 132 užbaigti sandoriai su nurodytu bėgiu naudoja `"rail":"paper"`. **Vertės
+nejuda.** Tie 161 „laimėjimai" yra buhalterija, ne uždarbis.
+
+Todėl „pataisymas" reikštų atsisakyti saugos savybės — neatskleisti paslapties
+be įrodyto apmokėjimo — mainais į skaitiklį, kuris nieko nemoka. To nedarome.
+Rekomendacija: palikti discipliną ir nelaikyti nulio gedimu.
+
+Atviras klausimas, vertas atskiro tyrimo: kodėl gauname 0 užrakinimų vietoj
+statistiškai tikėtinų 13. Tai jau būtų požymis, kad mokėtojai renkasi ne
+atsitiktinai.
