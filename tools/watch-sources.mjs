@@ -100,10 +100,16 @@ const SOURCES = [
    * directly — and that fix was again learned too narrowly, because the paper's
    * source of truth has since moved. `flop-labs/yellowpaper` was created
    * 2026-09-04 as a public repository, and on 2026-09-10 at 02:16Z it took commit
-   * 3eaf2f2, a 29-file sync of the verified 0.5.0 draft that withdraws four
-   * published capacity and latency figures and narrows several security claims.
-   * `flop-yellowpaper` above saw nothing: the rendered page is a mirror, and a
-   * mirror updates when someone chooses to publish, not when the spec changes.
+   * 3eaf2f2, a 29-file sync of the verified 0.5.0 draft that proposes withdrawing
+   * four published capacity and latency figures and narrows several security claims.
+   *
+   * `flop-yellowpaper` above did catch it, and the first version of this comment
+   * wrongly said it had not. What it caught, and when, is the actual argument:
+   * the CI run at 04:52Z still saw the old page, and the 09:45Z run reported
+   * `flop-yellowpaper 377,372 chars -> 399,243 chars`. That is seven and a half
+   * hours after the commit, and it says a third of a megabyte moved without
+   * saying that four performance figures are proposed for removal. A mirror also
+   * updates when someone chooses to publish, not when the spec changes.
    *
    * So the repository goes in beside the page, three ways. Commits catch every
    * edit including ones that never reach the site. `decisions/v0.5.md` is where a
