@@ -91,6 +91,33 @@ const SOURCES = [
   { id: 'upstream-commits', url: 'https://api.github.com/repos/flop-labs/technocore-chat/commits?per_page=30', kind: 'gh' },
   { id: 'upstream-releases', url: 'https://api.github.com/repos/flop-labs/technocore-chat/releases?per_page=1', kind: 'gh' },
   /**
+   * Added 2026-09-10, the third time this list learned about a Flop Labs document
+   * from somebody else's summary rather than from itself.
+   *
+   * The two comments above record the same failure twice: the Teaser arrived at a
+   * path that did not exist, and the Yellow Paper arrived at /intro/yellowpaper/
+   * while only the apex was watched. Both were fixed by watching the rendered page
+   * directly — and that fix was again learned too narrowly, because the paper's
+   * source of truth has since moved. `flop-labs/yellowpaper` was created
+   * 2026-09-04 as a public repository, and on 2026-09-10 at 02:16Z it took commit
+   * 3eaf2f2, a 29-file sync of the verified 0.5.0 draft that withdraws four
+   * published capacity and latency figures and narrows several security claims.
+   * `flop-yellowpaper` above saw nothing: the rendered page is a mirror, and a
+   * mirror updates when someone chooses to publish, not when the spec changes.
+   *
+   * So the repository goes in beside the page, three ways. Commits catch every
+   * edit including ones that never reach the site. `decisions/v0.5.md` is where a
+   * claim is actually withdrawn or qualified — it is the file that would have
+   * announced this one. CHANGELOG.md is the project's own summary of both.
+   *
+   * Deliberately NOT watching yellowpaper.md itself: 249 kB whose every edit
+   * already shows up as a commit, and whose digest would report "changed" for a
+   * typo as loudly as for a withdrawn guarantee.
+   */
+  { id: 'yellowpaper-commits', url: 'https://api.github.com/repos/flop-labs/yellowpaper/commits?per_page=30', kind: 'gh' },
+  { id: 'yellowpaper-decisions', url: 'https://raw.githubusercontent.com/flop-labs/yellowpaper/main/decisions/v0.5.md', kind: 'text' },
+  { id: 'yellowpaper-changelog', url: 'https://raw.githubusercontent.com/flop-labs/yellowpaper/main/CHANGELOG.md', kind: 'text' },
+  /**
    * Hayes writes here, and this list did not have him.
    *
    * Everything above watches Flop Labs the organisation — its site, its teaser,
@@ -216,7 +243,10 @@ function summarise(id, kind, body) {
       return `${paths.length} paths`;
     }
     if (id === 'agent-json') return `version ${JSON.parse(body).version}`;
-    if (id === 'upstream-commits') {
+    // Matched by suffix, not by one literal id: there are two commit feeds now
+    // (technocore-chat and yellowpaper), and the second would have fallen through
+    // to a bare character count — a diff saying "changed" and nothing else.
+    if (id.endsWith('-commits')) {
       const c = JSON.parse(body)[0];
       return c ? `${c.sha.slice(0, 7)} — ${c.commit.message.split('\n')[0].slice(0, 80)}` : 'no commits';
     }
@@ -310,7 +340,7 @@ export async function runWatch({
         : undefined;
 
       const links = source.kind === 'html' ? discoverLinks(body) : undefined;
-      const commits = source.id === 'upstream-commits' ? commitList(body) : undefined;
+      const commits = source.id.endsWith('-commits') ? commitList(body) : undefined;
 
       sources[source.id] = { url: source.url, digest, summary, signals, paths, links, commits, checkedAt: now, lastSuccessAt: now };
 

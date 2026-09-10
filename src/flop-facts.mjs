@@ -43,6 +43,27 @@ export const STATUS = Object.freeze({
  */
 export const FACTS = Object.freeze([
   {
+    id: 'yellowpaper-repo',
+    status: STATUS.CONFIRMED,
+    claim: 'The Yellow Paper has a public source repository, github.com/flop-labs/yellowpaper, created 2026-09-04. flop.finance/intro/yellowpaper/ is a mirror of it. On 2026-09-10 at 02:16Z commit 3eaf2f2 synced a 29-file verified 0.5.0 research draft from the private flop-core tree, adding a claim ledger, v0.5 decision records and standalone reproducers. The commit states it "updates the private draft without creating a release": still 0.5.0, still a draft, no new tokenomics and no release',
+    source: 'https://github.com/flop-labs/yellowpaper commit 3eaf2f25bc46a501df225cae4e4e991975f6b2a9, read through the GitHub API 2026-09-10',
+    asOf: '2026-09-10'
+  },
+  {
+    id: 'capacity-claims-withdrawn',
+    status: STATUS.CONFIRMED,
+    claim: 'Decision D-0502 proposes removing four published performance figures from the v0.5 conformance profile: 96 steady / 128 burst session-control transactions per block, the 48 / 64 cooperative lifecycles per second derived from them, the 125,000-byte propagation scenario, and sub-second finality. Flop Labs states none was established by serialized runtime calls, supported runtime benchmarks or an end-to-end network/workload matrix, and that the runtime-benchmark build is blocked by mixed Polkadot SDK generations and incompatible sp-io 38.0.2 / 48.0.0, so no benchmark output exists at all. Status is proposal pending ratification, so the figures are not yet formally removed. What would remain is the configured 5 MiB block-length limit and the runtime weight envelope, and the record is explicit that neither may be presented as a promise of capacity',
+    source: 'https://github.com/flop-labs/yellowpaper/blob/main/decisions/v0.5.md D-0502, read 2026-09-10',
+    asOf: '2026-09-10'
+  },
+  {
+    id: 'security-claims-narrowed',
+    status: STATUS.CONFIRMED,
+    claim: 'Decision D-0501 narrows several security claims to what the current models support, saying the earlier prose "would retain false implications". It withdraws any assertion that general unequal-stake sampling of distinct identities automatically satisfies a binomial tail bound at an attacker\'s aggregate stake fraction, and leaves the mechanism-specific capture proof an explicit open obligation — so no secure global concentration threshold is published. TEE independence is restated as a target trust-domain requirement, not evidence that a complete SOFT settlement or dispute lane exists. Economic deterrence is conditional on effective collectible monitoring and bounded exposure, and is not a Byzantine soundness theorem. The draft "does not certify production security, benchmarked capacity, or completion of Appendix E". No exploit, incident or loss of funds is claimed anywhere in the record',
+    source: 'https://github.com/flop-labs/yellowpaper/blob/main/decisions/v0.5.md D-0501, read 2026-09-10',
+    asOf: '2026-09-10'
+  },
+  {
     id: 'referral-leaderboard-reported',
     status: STATUS.REPORTED,
     claim: 'Hayes reportedly described a KOL leaderboard, individual referral links and a periodic FLOP lottery for wallets created through those links, open to everyone. This describes a proposed program; launch and allocation remain unverified. The original X post and Flop Labs repost were not directly retrievable in this check',
