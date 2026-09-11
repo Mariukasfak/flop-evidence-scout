@@ -88,6 +88,16 @@ const READ_LIMIT = 200;
  * been built yet, not a room full of strangers, and the difference decides
  * whether an empty file means "accept carefully" or "accept nobody".
  */
+/**
+ * How long a payer's last observed lock still counts as "active".
+ *
+ * Six hours, from the scan interval rather than from taste: the reputation
+ * rebuild runs every six hours, so a shorter window would keep discarding a
+ * signal before the slower store could corroborate it, and a much longer one
+ * would re-admit the dormant majority this exists to skip.
+ */
+const LOCK_RECENCY_MS = 6 * 60 * 60 * 1000;
+
 const MIN_REP_PAYERS = 100;
 
 /**
@@ -213,7 +223,8 @@ export class TclkEngine {
   load() {
     if (this.state) return this.state;
     const empty = {
-      deal: null, completed: [], abandoned: [], noLockCooldowns: {}, noLockCooldownsMigrated: false
+      deal: null, completed: [], abandoned: [], noLockCooldowns: {}, noLockCooldownsMigrated: false,
+      payerLockSeenAt: {}
     };
     let hadFile = false;
     let parsed = null;
@@ -230,6 +241,8 @@ export class TclkEngine {
     this.state = { ...empty, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
     if (!this.state.noLockCooldowns || typeof this.state.noLockCooldowns !== 'object'
       || Array.isArray(this.state.noLockCooldowns)) this.state.noLockCooldowns = {};
+    if (!this.state.payerLockSeenAt || typeof this.state.payerLockSeenAt !== 'object'
+      || Array.isArray(this.state.payerLockSeenAt)) this.state.payerLockSeenAt = {};
     if (this.state.noLockCooldownsMigrated !== true) {
       this.#migrateLegacyNoLockCooldowns();
       this.state.noLockCooldownsMigrated = true;
@@ -279,6 +292,46 @@ export class TclkEngine {
     const accepted = new Set(frames.filter(({ frame }) => frame.type === 'accept').map(({ frame }) => frame.ref));
     const now = this.now();
     const noLockCooldowns = this.#cooldownPayers(now);
+
+    /**
+     * Who is locking NOW, learned from the reads this lane already makes.
+     *
+     * `isTrusted` asks whether a payer ever finished a deal, and the store
+     * cannot ask anything else: `recordOutcome` keeps `tried` and `done` counts
+     * and no dates. Measured 2026-09-11 against a 42-minute export, that turns
+     * out to be the wrong question. Of our 1,154 trusted payers only 122 —
+     * 10.6% — were still posting locks, while 122 of the 143 payers who were
+     * locking were already in the trusted set. So the list is accurate and
+     * almost entirely dormant: accepting from a "trusted" payer lands on one
+     * who has stopped roughly nine times in ten.
+     *
+     * The same window put the settle rate at 82.3% for offers whose payer had
+     * locked in it against 26.3% for those whose payer had not, so recency is
+     * worth more here than history is.
+     *
+     * Learned from the board rather than by asking for more: every cycle
+     * already reads this room, and a `lock` frame names its sender. Kept in
+     * local state so the signal accumulates across cycles instead of being
+     * limited to one 200-message window, and trimmed on read rather than here.
+     */
+    for (const { frame, from } of frames) {
+      const who = frame?.from || from;
+      if (frame?.type === 'lock' && who) this.state.payerLockSeenAt[who] = now;
+    }
+
+    /**
+     * Drop what has aged out, every cycle, rather than letting the map grow.
+     *
+     * An entry is worthless the moment it falls outside LOCK_RECENCY_MS — the
+     * only reader treats it as absent — so keeping it costs state for nothing.
+     * This file already carries the lesson from the other direction: a note
+     * that outgrew its cap stopped saving silently, and nobody noticed for
+     * days. A map with one entry per locking DID and no expiry is the same
+     * shape of mistake, one release later.
+     */
+    for (const [did, at] of Object.entries(this.state.payerLockSeenAt)) {
+      if (!(at > 0) || (now - at) > LOCK_RECENCY_MS) delete this.state.payerLockSeenAt[did];
+    }
 
     /**
      * Whether the reputation file is worth filtering on.
@@ -340,7 +393,23 @@ export class TclkEngine {
      *
      * Among the proven, the old order still applies: a named job, then newest.
      */
+    /**
+     * Recency first, then the old order.
+     *
+     * Preferred rather than required, and that is the whole design: requiring a
+     * recent lock would have this lane accept nothing on a cold start, because
+     * `payerLockSeenAt` is empty until the reads fill it, and a filter that can
+     * refuse everything silently forever is the failure MIN_REP_PAYERS exists
+     * to avoid. As a sort key it costs nothing when the signal is missing and
+     * takes the whole benefit when it is present.
+     */
+    const locksRecently = (did) => {
+      const at = this.state.payerLockSeenAt?.[did];
+      return Boolean(at && (now - at) <= LOCK_RECENCY_MS);
+    };
     candidates.sort((a, b) => {
+      const recent = Number(locksRecently(b.frame.from)) - Number(locksRecently(a.frame.from));
+      if (recent !== 0) return recent;
       const trust = Number(isTrusted(this.payerRep, b.frame.from))
                   - Number(isTrusted(this.payerRep, a.frame.from));
       if (trust !== 0) return trust;

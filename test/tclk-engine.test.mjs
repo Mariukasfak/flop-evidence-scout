@@ -965,3 +965,61 @@ describe('tclk payee lane: the receipt may not contradict the rail', () => {
     assert.equal(framesFrom(venue, deal, me.did).some((f) => f.type === 'receipt'), false);
   });
 });
+
+describe('tclk payee lane: lock recency', () => {
+  /**
+   * Measured 2026-09-11 on a 42-minute export: of 1,154 payers this agent had
+   * marked trusted, 122 were still posting locks. Trust is a lifetime flag and
+   * the store keeps no dates, so "has finished one before" selects a population
+   * that is roughly nine-tenths dormant. These pin the signal that replaces it.
+   */
+  test('a lock frame on the board records when that payer was last seen locking', async () => {
+    const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
+    venue.say(OFFER_ROOM, payer.did, encodeFrame({ type: 'lock', from: payer.did, contract: '0x' + 'a'.repeat(64), rail: 'paper' }));
+    const engine = engineFor(venue, me);
+
+    await engine.runTurn();
+
+    assert.equal(engine.state.payerLockSeenAt[payer.did], T0);
+  });
+
+  test('an observation older than the window is dropped rather than kept forever', async () => {
+    const venue = makeVenue(); const me = generateIdentity();
+    const stale = generateIdentity(); const fresh = generateIdentity();
+    const engine = engineFor(venue, me);
+    await engine.runTurn();
+    engine.state.payerLockSeenAt[stale.did] = T0 - 7 * HOUR;   // past the six-hour window
+    engine.state.payerLockSeenAt[fresh.did] = T0 - 1 * HOUR;
+
+    await engine.runTurn();
+
+    assert.equal(engine.state.payerLockSeenAt[stale.did], undefined, 'aged out, so it must not be stored');
+    assert.equal(engine.state.payerLockSeenAt[fresh.did], T0 - HOUR);
+  });
+
+  test('a payer seen locking is preferred over one that is merely trusted', async () => {
+    const venue = makeVenue(); const me = generateIdentity();
+    const dormant = generateIdentity(); const active = generateIdentity();
+    // The dormant one is newer, so without the recency key it would win on seq.
+    venue.say(OFFER_ROOM, active.did, encodeFrame(payerOffer(active, { nonce: '1111111111111111' })));
+    venue.say(OFFER_ROOM, active.did, encodeFrame({ type: 'lock', from: active.did, contract: '0x' + 'b'.repeat(64), rail: 'paper' }));
+    venue.say(OFFER_ROOM, dormant.did, encodeFrame(payerOffer(dormant, { nonce: '2222222222222222' })));
+    const engine = engineFor(venue, me);
+
+    const result = await engine.runTurn();
+
+    assert.equal(result.action, 'offer_accepted');
+    assert.equal(result.payer, active.did, 'the payer that is actually locking takes the turn');
+  });
+
+  test('with no recency seen at all the lane still accepts, because the signal is a preference', async () => {
+    const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer)));
+    const engine = engineFor(venue, me);
+
+    const result = await engine.runTurn();
+
+    assert.equal(result.action, 'offer_accepted', 'a cold start must not be able to refuse everything');
+    assert.deepEqual(engine.state.payerLockSeenAt, {});
+  });
+});

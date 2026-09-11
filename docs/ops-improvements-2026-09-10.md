@@ -267,3 +267,14 @@ Rekomendacija: palikti discipliną ir nelaikyti nulio gedimu.
 Atviras klausimas, vertas atskiro tyrimo: kodėl gauname 0 užrakinimų vietoj
 statistiškai tikėtinų 13. Tai jau būtų požymis, kad mokėtojai renkasi ne
 atsitiktinai.
+
+> **Atsakyta 2026-09-11.** Klausimas uždarytas ir dalis aukščiau esančios
+> aritmetikos yra klaidinga. Prižiūrėtojo gija `flop-labs/tclk#41` nurodo du
+> dalykus, kurių čia nepadariau: užrakinimai vyksta **sandorio kambaryje**, ne
+> lentoje, tad skaičiavimas tik iš lentos juos praleidžia; ir `accept` kadrų
+> reikia **tikrinti parašus** — ten pat pamatuota, kad to nedarant rodiklis
+> iškraipomas dviese kartus (13,3 % prieš 26,0 %). Mano 6 779 `accept`
+> vardiklis parašų netikrino, tad „tikėtini 13" nėra patikimas skaičius.
+>
+> Tikroji priežastis kitokia ir pamatuota 2026-09-11: mūsų patikimų mokėtojų
+> sąrašas yra tikslus, bet negyvas. Detalės žemiau.
