@@ -164,7 +164,7 @@ source: 'The D-0438 and D-0440 chain is stated on flop.finance/intro/yellowpaper
   {
     id: 'ten-year-supply-reported',
     status: STATUS.CONFIRMED,
-    claim: 'The ten-year supply is 18,086,624,000 $FLOP and the genesis airdrop pool is 4,400,000,000. Aggregators reported ~18.1bn and ~4.4bn with validators at 1.2bn on 2026-09-10 and every part of that checks out against flop.finance, including the validator figure this board briefly said was unsupported. The ten-year total is genesis 4,400,000,000 plus ten years of block reward and Labs/Foundation subsidy',
+    claim: 'The ten-year supply is 18,086,624,000 $FLOP and genesis supply is 4,400,000,000. The airdrop is 3,600,000,000 of that, not 4,400,000,000: the paper says three airdrops of 1,200,000,000 each, plus an 800,000,000 reserve it explicitly calls ecosystem/incentives and not an airdrop. Secondary outlets reporting a 4.4bn airdrop are loose by that 800,000,000, and this board carried the same looseness on 2026-09-10. Everything else in those reports checks out, validators included',
     source: 'PANews and ChainCatcher via BTCC, both 2026-09-10, supplied by the operator; every figure then verified against flop.finance/intro/yellowpaper/ and /intro/revenue/ the same day. Arithmetic computed here from the paper section 9 as 4,400,000,000 + 63,072,000 blocks x (96+48+24+12+6) emission + x (16+8+4+2+1) subsidy; the subsidy term reproduces the stated 1,955,232,000, which is the check that the method matches theirs. Recorded because it is the first time this board was behind an aggregator on a first-party number',
     asOf: '2026-09-10'
   },
