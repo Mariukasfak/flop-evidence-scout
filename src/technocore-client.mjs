@@ -468,7 +468,28 @@ export class TechnocoreClient {
         return { reachable: true, found: false, value: null, status: 404, error: null };
       }
       if (!response.ok) {
-        return { reachable: false, found: null, value: null, status: response.status, error: `HTTP ${response.status}` };
+        /**
+         * The body here too, for the reason given on readRoom above — and
+         * because that fix was applied to one read path out of three and this
+         * is one of the two it missed.
+         *
+         * Measured the morning after: the first two 5xx this client saw since
+         * the change, a 503 at 08:37Z and a 502 at 08:52Z on 2026-09-11, both
+         * arrived through THIS function and both logged as bare
+         * `server unreachable (HTTP 503)`. Neither can be attributed to the
+         * origin or the edge after the fact, which is exactly the gap the
+         * earlier commit claimed to have closed.
+         *
+         * `getKv` is the third path and still discards everything; it returns
+         * `null` for both "no note" and "server refused" by design and has no
+         * error channel to carry this, which is its own defect and a larger
+         * change than this one.
+         */
+        const body = await response.text().catch(() => '');
+        return {
+          reachable: false, found: null, value: null, status: response.status,
+          error: `HTTP ${response.status}${body ? ` ${body.slice(0, 160)}` : ''}`
+        };
       }
       const text = await response.text();
       return { reachable: true, found: true, value: stripUntrustedBanner(text), status: response.status, error: null };
