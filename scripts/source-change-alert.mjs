@@ -111,6 +111,15 @@ lines.push('and third-party mirrors are the kind of unverified relay this projec
 
 const body = lines.join('\n');
 const bodyFile = path.resolve('data/source-change-body.md');
+/**
+ * `data/` is gitignored, so a fresh CI checkout does not have it and the write
+ * below threw ENOENT. It only threw on the runs that actually had something to
+ * say — a source change, or a blind source crossing `worthSaying` — so the
+ * failure was invisible on quiet runs and swallowed the report on loud ones.
+ * That is why `hayes-substack` reached 72 consecutive failures without this
+ * tracker ever announcing it.
+ */
+fs.mkdirSync(path.dirname(bodyFile), { recursive: true });
 fs.writeFileSync(bodyFile, body, 'utf8');
 
 gh(['label', 'create', TRACKER_LABEL, '--color', '0E8A16', '--description', 'Official source changed'], { allowFailure: true });
