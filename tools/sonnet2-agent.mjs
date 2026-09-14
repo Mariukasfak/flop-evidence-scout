@@ -34,6 +34,17 @@ const CONTEST = 'sonnet-2';
 const DISCOVERY = 'mb-sonnet-2-discovery';
 const DEADLINE = Date.UTC(2026, 8, 18, 12, 0, 0);
 const STATE_PATH = path.resolve(process.cwd(), 'data/local/sonnet2-agent.json');
+/**
+ * How long we will hold a consent for a roster that never produces a word.
+ *
+ * This is the difference between a bounded bet and a stranded one. Of 135 teams
+ * seen in discovery, only 23 ever got a word accepted — but 17 of those 23
+ * reached 90+ words. So a team that starts almost always finishes, and the whole
+ * risk is concentrated in teams that never start at all. Since consent is
+ * recoverable right up until the first accepted word, a timeout converts the
+ * common failure (a roster that quietly dies) from permanent to merely slow.
+ */
+const CONSENT_TIMEOUT_MIN = Number(process.env.SONNET_CONSENT_TIMEOUT_MIN || 25);
 const POEM_PATH = path.resolve(process.cwd(), 'docs/sonnet/marcryptox-target.txt');
 
 const argv = process.argv.slice(2);
@@ -109,16 +120,54 @@ async function pass(state) {
    * rejecting it is what frees us to sign somewhere else; guessing from our own
    * posts is how the manual attempts kept signing into a stale consent.
    */
-  for (const { f } of disc) {
+  /**
+   * Only receipts issued *after* we signed can speak about the consent we hold.
+   * Discovery retains ~16 h, so without this bound an old `member already frozen`
+   * rejection — from a roster attempt long since dead — clears a consent we made
+   * seconds ago. The agent then believes it is free, signs elsewhere, and the
+   * referee answers `consent: withdraw before changing`. That is precisely the
+   * loop that burned four rosters by hand.
+   */
+  const consentSince = state.consentAt ? Date.parse(state.consentAt) : 0;
+  for (const { row, f } of disc) {
     if (!String(f.type || '').startsWith('sonnet.receipt')) continue;
     if (f.sender_did !== ME && f.participant_did !== ME) continue;
+    if (Date.parse(row.ts) < consentSince) continue;
     if (f.status === 'rejected' && state.consent) {
       console.log(`  consent cleared by referee: ${f.reason}`);
       state.consent = null;
+      state.consentAt = null;
     }
     if (f.status === 'accepted' && f.roster_ready === true && state.consent) {
       console.log('  ROSTER READY');
       state.ready = state.consent;
+    }
+  }
+
+  /* ---- 1b. do not let a dead roster hold our only consent ----------------- */
+  if (state.consent) {
+    /** A consent carried over from before this check existed starts its clock now. */
+    if (!state.consentAt) state.consentAt = new Date().toISOString();
+    const heldMin = (Date.now() - Date.parse(state.consentAt)) / 60_000;
+    const room = parsed(await ex(`d-sonnet-2-team-${state.consent}`));
+    const acc = new Set();
+    for (const { f } of room) {
+      if (f.type === 'sonnet.receipt.v1' && f.status === 'accepted') acc.add(f.request_id);
+    }
+    const frozen = room.some(({ f }) => f.type === 'sonnet.word.v1' && acc.has(f.request_id));
+    if (frozen) {
+      /** Membership is sealed; withdrawing is impossible and leaving would be wrong. */
+      state.frozenOn = state.consent;
+    } else if (heldMin >= CONSENT_TIMEOUT_MIN) {
+      const ok = await post(DISCOVERY, {
+        type: 'sonnet.withdraw.v1',
+        contest_id: CONTEST,
+        game_id: state.consent,
+        request_id: `withdraw-${state.consent}-${Math.floor(Date.now() / 1000)}`
+      }, `withdraw from ${state.consent} — ${heldMin.toFixed(0)} min held, still no accepted word`);
+      if (ok) { state.consent = null; state.consentAt = null; }
+    } else {
+      console.log(`  holding ${state.consent}: ${heldMin.toFixed(0)}/${CONSENT_TIMEOUT_MIN} min, no accepted word yet`);
     }
   }
 
@@ -151,7 +200,7 @@ async function pass(state) {
         request_id: `consent-${f.game_id}-${Math.floor(Date.now() / 1000)}`
       }, `co-sign roster for ${f.game_id}`);
       state.posted[key] = true;
-      if (ok) { state.consent = f.game_id; }
+      if (ok) { state.consent = f.game_id; state.consentAt = new Date().toISOString(); }
       break;   // one consent, one attempt per pass, whether or not it landed
     }
   }
