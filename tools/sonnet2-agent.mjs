@@ -45,6 +45,17 @@ const STATE_PATH = path.resolve(process.cwd(), 'data/local/sonnet2-agent.json');
  * common failure (a roster that quietly dies) from permanent to merely slow.
  */
 const CONSENT_TIMEOUT_MIN = Number(process.env.SONNET_CONSENT_TIMEOUT_MIN || 25);
+/** Our own room, allocated 2026-09-14 and still empty; roster-marcryptox-3 was accepted at gen 1. */
+const OUR_GAME = 'marcryptox';
+const OUR_GENERATION = 1;
+/**
+ * How recently a writer must have declared itself unattached to be worth naming.
+ * Measured on 2026-09-14: a member accepted at 16:00:53 had left by 16:10:06, so
+ * an applicant list older than a few minutes is fiction.
+ */
+const RECRUIT_FRESH_MIN = 5;
+/** Never churn rosters faster than this: every re-post strands whoever already signed. */
+const ROSTER_RETRY_MIN = 30;
 const POEM_PATH = path.resolve(process.cwd(), 'docs/sonnet/marcryptox-target.txt');
 
 const argv = process.argv.slice(2);
@@ -62,6 +73,8 @@ const identity = JSON.parse(fs.readFileSync(
 const ME = identity.did;
 const MY_LETTERS = new Set([...ME.toLowerCase()].filter((c) => c >= 'a' && c <= 'z'));
 const canSpell = (w) => [...w.toLowerCase().replace(/[^a-z]/g, '')].every((c) => MY_LETTERS.has(c));
+/** `did:key:` carries no `o`, so a member whose key does is the scarce one to hold. */
+const hasO = (did) => did.toLowerCase().includes('o');
 
 const client = new TechnocoreClient({ baseUrl: 'https://technocore.chat' });
 
@@ -202,6 +215,57 @@ async function pass(state) {
       state.posted[key] = true;
       if (ok) { state.consent = f.game_id; state.consentAt = new Date().toISOString(); }
       break;   // one consent, one attempt per pass, whether or not it landed
+    }
+  }
+
+  /* ---- 2b. if nobody drafts us, build our own roster ---------------------- */
+  if (!state.consent) {
+    /**
+     * Pick from writers who declared `no_live_roster_consent` in the last few
+     * minutes, not from whoever once applied to our room.
+     *
+     * Every one of our four hand-built rosters died on `roster: member already
+     * frozen`, because we were choosing from applicants who had applied to us an
+     * hour earlier and joined somebody else since. Freshness is the only freeze
+     * signal available from outside: the referee holds the archive, we do not.
+     */
+    const now = Date.now();
+    const latest = new Map();
+    for (const { row, f } of disc) {
+      if (f.type !== 'sonnet.application.v1') continue;
+      const did = f.did || row.from;
+      if (did === ME) continue;
+      const ageMin = (now - Date.parse(row.ts)) / 60_000;
+      const prev = latest.get(did);
+      if (!prev || ageMin < prev.ageMin) {
+        latest.set(did, { ageMin, free: f.no_live_roster_consent === true, x: f.x_account_url });
+      }
+    }
+    const pool = [...latest]
+      .filter(([, v]) => v.ageMin <= RECRUIT_FRESH_MIN && v.free && /^https:\/\/x\.com\/\w+/.test(v.x || ''))
+      /** Letters first: no did:key carries an `o`, so an o-bearing member is scarce. */
+      .sort((a, b) => (hasO(b[0]) - hasO(a[0])) || (a[1].ageMin - b[1].ageMin))
+      .map(([did]) => did);
+
+    const sinceLast = state.rosterAt ? (now - Date.parse(state.rosterAt)) / 60_000 : Infinity;
+    if (pool.length < 3) {
+      console.log(`  no roster of our own: only ${pool.length} writer(s) free in the last ${RECRUIT_FRESH_MIN} min`);
+    } else if (sinceLast < ROSTER_RETRY_MIN) {
+      console.log(`  roster attempt cooling down (${sinceLast.toFixed(0)}/${ROSTER_RETRY_MIN} min)`);
+    } else {
+      const members = [ME, ...pool.slice(0, 5)];
+      const ok = await post(DISCOVERY, {
+        type: 'sonnet.roster.v1',
+        contest_id: CONTEST,
+        game_id: OUR_GAME,
+        poem_room: `d-sonnet-2-team-${OUR_GAME}`,
+        room_generation: OUR_GENERATION,
+        members,
+        request_id: `roster-${OUR_GAME}-${Math.floor(now / 1000)}`
+      }, `propose our own roster of ${members.length} (${pool.filter(hasO).length} with an o)`);
+      state.rosterAt = new Date().toISOString();
+      /** Naming ourselves on a roster *is* our one live consent. */
+      if (ok) { state.consent = OUR_GAME; state.consentAt = new Date().toISOString(); }
     }
   }
 
