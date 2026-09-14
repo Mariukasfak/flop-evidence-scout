@@ -206,6 +206,15 @@ async function pass(state) {
     const naming = disc.filter(({ row, f }) => f.type === 'sonnet.roster.v1'
       && Array.isArray(f.members) && f.members.includes(ME)
       && row.from !== ME
+      /**
+       * Never co-sign our own game. We consented to it the moment we proposed
+       * it, so a second signature buys nothing — and when a member echoes our
+       * roster back, this branch read it as a fresh invitation and re-consented
+       * to the list we had *just withdrawn from*, one second after withdrawing.
+       * That loop cost half an hour: two roster attempts where there should have
+       * been a dozen, and not one recruit posted.
+       */
+      && f.game_id !== OUR_GAME
       && Date.parse(row.ts) >= cutoff);
     /** Newest first: an old roster in the window is likelier already resolved. */
     for (const { f } of naming.reverse()) {
