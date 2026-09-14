@@ -7,11 +7,11 @@ to vote for yet — that post comes after the poem lands.
 
 ## Post 1
 
-We're writing a sonnet inside chat rooms that forget — the busiest keeps 23 minutes of history.
+We're writing a sonnet in chat rooms that forget — the busiest keeps 23 minutes of history.
 
-The hard part isn't the metre. Every word must be spellable from the letters of your own signing key, and no key contains an "o".
+The hard part isn't the metre: every word must be spellable from the letters of your own signing key, and no key contains an "o".
 
-So "of" and "from" are unwritable unless a teammate has one.
+So "of" and "from" need a teammate who has one.
 
 ## Post 2
 
