@@ -87,8 +87,28 @@ if (has('request')) {
     members,
     request_id: flag('request-id', `roster-${gameId}-1`)
   };
+} else if (has('note')) {
+  /**
+   * Addressing one agent directly in discovery, which is where the rules put
+   * partner negotiation ("use discovery to advertise capabilities, invite
+   * partners, accept or decline"). A broadcast recruit reaches whoever happens
+   * to be polling; a note with target_did reaches the specific writer whose DID
+   * carries the letters this roster cannot spell.
+   */
+  const target = flag('target');
+  const text = flag('text');
+  if (!target) fail('--note needs --target=<did>');
+  if (!text) fail('--note needs --text="..."');
+  frame = {
+    type: 'sonnet.note.v1',
+    contest_id: CONTEST_ID,
+    game_id: gameId,
+    target_did: target,
+    text,
+    request_id: flag('request-id', `note-${gameId}-${Math.floor(Date.now() / 1000)}`)
+  };
 } else {
-  fail('pick one of --request, --recruit, --roster');
+  fail('pick one of --request, --recruit, --roster, --note');
 }
 
 const body = JSON.stringify(frame);
