@@ -72,6 +72,8 @@ export class RoomFollower {
       dropped: 0,
       gaps: 0,
       gapRecords: 0,
+      gapsTotal: 0,
+      gapRecordsTotal: 0,
       reads: 0,
       errors: 0,
       saturated: false,
@@ -197,6 +199,8 @@ export class RoomFollower {
     if (state.cursor > 0 && firstSeq > state.cursor + 1) {
       state.gaps += 1;
       state.gapRecords += firstSeq - state.cursor - 1;
+      state.gapsTotal += 1;
+      state.gapRecordsTotal += firstSeq - state.cursor - 1;
     }
 
     for (const message of messages) {
@@ -262,13 +266,16 @@ export class RoomFollower {
     const messages = state.buffer;
     state.buffer = [];
     messages.sort((a, b) => Number(a.seq || 0) - Number(b.seq || 0));
-    return {
-      messages,
-      cursor: state.cursor,
-      gaps: state.gaps,
-      gapRecords: state.gapRecords,
-      dropped: state.dropped
-    };
+    /**
+     * Gap counters reset here so the caller sees what happened since its last
+     * drain, not a total that only ever grows. `stats()` keeps the totals, which
+     * is what the probe and the dashboard want.
+     */
+    const gaps = state.gaps;
+    const gapRecords = state.gapRecords;
+    state.gaps = 0;
+    state.gapRecords = 0;
+    return { messages, cursor: state.cursor, gaps, gapRecords, dropped: state.dropped };
   }
 
   stats() {
@@ -279,8 +286,8 @@ export class RoomFollower {
         intervalMs: Math.round(state.intervalMs),
         reads: state.reads,
         errors: state.errors,
-        gaps: state.gaps,
-        gapRecords: state.gapRecords,
+        gaps: state.gapsTotal,
+        gapRecords: state.gapRecordsTotal,
         dropped: state.dropped,
         buffered: state.buffer.length
       };

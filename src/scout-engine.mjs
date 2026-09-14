@@ -78,6 +78,13 @@ export class ScoutEngine {
       repeatWindowMs: SAME_AUTHOR_COOLDOWN_MS
     }),
     stateKey = null,
+    /**
+     * Optional RoomFollower. When it owns a room, its buffer replaces the single
+     * per-cycle read: same messages, same cursor discipline, collected often
+     * enough that the ring does not get ahead of us. See src/room-follower.mjs
+     * for the measurement that made this necessary.
+     */
+    follower = null,
     scribeIdentity = null,
     watchRooms = DEFAULT_WATCH_ROOMS,
     repoUrl = 'github.com/Mariukasfak/flop-evidence-scout',
@@ -102,6 +109,7 @@ export class ScoutEngine {
     this.identity = identity;
     this.scribeIdentity = scribeIdentity;
     this.client = client;
+    this.follower = follower;
     this.guardrails = guardrails;
     this.inquiryGuardrails = inquiryGuardrails;
     this.repoUrl = repoUrl;
@@ -232,6 +240,37 @@ export class ScoutEngine {
      * ?format=json carries the full DID in `from`. The mailbox already read it
      * this way; the room reader did not.
      */
+    /**
+     * A followed room is already being read on its own schedule, so reading it
+     * again here would both waste a request and re-fetch a window the follower
+     * has already consumed. Take its buffer instead.
+     */
+    if (this.follower?.has(room)) this.follower.seed(room, cursor);
+    const followed = this.follower?.has(room) ? this.follower.drain(room) : null;
+    if (followed) {
+      /**
+       * Filter on our own cursor as well as the follower's.
+       *
+       * The follower is seeded from this cursor a line above, but only once the
+       * scout's persisted state has actually loaded — on the first cycle after a
+       * restart the follower may have cold-started and buffered a window this
+       * agent already answered. Re-answering it would be the duplicate-reply
+       * failure the guardrails exist to stop, so the cursor filters here too.
+       */
+      const freshFollowed = followed.messages.filter(
+        (m) => Number(m.seq || m.id || 0) > cursor && m.from !== this.identity.did
+      );
+      let followedGap = null;
+      if (followed.gapRecords > 0) {
+        followedGap = { room, unread: followed.gapRecords, reads: followed.gaps };
+        console.warn(
+          `[Scout] /r/${room}: ${followed.gapRecords} message(s) went unread across `
+          + `${followed.gaps} follower read(s) — the room outran even the followed cadence.`
+        );
+      }
+      return { fresh: freshFollowed, maxSeq: Math.max(cursor, followed.cursor), gap: followedGap };
+    }
+
     const data = await this.client.readRoom(room, {
       since: cursor > 0 ? cursor : null,
       limit: READ_WINDOW,

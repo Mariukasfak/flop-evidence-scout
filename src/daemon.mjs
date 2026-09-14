@@ -7,6 +7,7 @@ import { loadOrCreateIdentity } from './identity.mjs';
 import { TechnocoreClient, READ_WINDOW } from './technocore-client.mjs';
 import { Guardrails } from './guardrails.mjs';
 import { ScoutEngine } from './scout-engine.mjs';
+import { RoomFollower } from './room-follower.mjs';
 import { ScribeEngine } from './scribe-engine.mjs';
 import { KibbleEngine } from './kibble-engine.mjs';
 import { MailboxService } from './mailbox-service.mjs';
@@ -491,6 +492,30 @@ export async function runScoutDaemon(options = {}) {
     guardrails: scoutGuardrails,
     ...(config.watchRooms ? { watchRooms: config.watchRooms } : {})
   });
+  /**
+   * Follow the watched rooms on their own cadence instead of once per cycle.
+   *
+   * Measured over the 24 h to 2026-09-14: at one read per ~64 s cycle with
+   * limit=200, /r/lobby had a gap on 1,352 of 1,353 reads and 86.6% of the room
+   * never reached the scout. Probed against the live venue on 2026-09-14, the
+   * follower delivered 96.2% of lobby, 99.8% of technocore and 100% of
+   * tclk-offers for 18.4 reads/min against the venue's published 600.
+   *
+   * Built after the engine because it follows the engine's own room list. Its
+   * cursor is seeded on each collect rather than here: the scout's persisted
+   * state is merged from the venue after construction, so there is nothing to
+   * seed from at this point and a cold start would re-present an already
+   * answered window.
+   */
+  const roomFollower = new RoomFollower({
+    client,
+    rooms: scoutEngine.watchRooms,
+    readWindow: READ_WINDOW,
+    selfDid: scoutIdentity.did
+  });
+  scoutEngine.follower = roomFollower;
+  roomFollower.start();
+
   const scribeEngine = new ScribeEngine({ identity: scribeIdentity, scoutIdentity, client, guardrails: scribeGuardrails });
 
   // Scout claims and delivers; Scribe validates. The spec requires poster, worker
