@@ -1,5 +1,5 @@
 {
-  "checkedAt": "2026-09-08T09:43:18.557Z",
+  "checkedAt": "2026-09-14T14:05:11.971Z",
   "summary": {
     "ready": 1,
     "action": 11,
@@ -11,14 +11,14 @@
       "id": "did-scout",
       "label": "Scout identity published",
       "state": "ACTION",
-      "detail": "/kv/did-02/3cd22eb22b5bbc → 404",
+      "detail": "/kv/did-9f/8eb03a402e490a → 404",
       "fix": "Run the daemon once so it republishes its DID note."
     },
     {
       "id": "did-scribe",
       "label": "Scribe identity published",
       "state": "ACTION",
-      "detail": "/kv/did-b4/c16a404dae517c → 404",
+      "detail": "/kv/did-c5/bd0d3834ece84e → 404",
       "fix": "Run the daemon once so it republishes its DID note."
     },
     {
@@ -74,7 +74,7 @@
       "id": "source-watch",
       "label": "Source watcher baseline is readable",
       "state": "ACTION",
-      "detail": "13 baselined, 1 blind: hayes-substack (HTTP 403)",
+      "detail": "23 baselined, 1 blind: hayes-substack (HTTP 403)",
       "fix": "A blind source keeps its last digest, so it can never report a change. Check whether the block is on the runner IP; if it is, the source cannot be watched from CI at all and should be moved or dropped rather than left looking watched."
     },
     {
