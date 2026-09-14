@@ -74,6 +74,7 @@ export class RoomFollower {
       gapRecords: 0,
       reads: 0,
       errors: 0,
+      saturated: false,
       lastSeq: 0,
       lastSeenAt: 0,
       ratePerMin: null,
@@ -102,10 +103,22 @@ export class RoomFollower {
     if (!state.ratePerMin || state.ratePerMin <= 0) return MAX_INTERVAL_MS / 2;
     const seconds = (this.readWindow * TARGET_FILL) / (state.ratePerMin / 60);
     const budgetFloorMs = (this.rooms.size * 60_000) / MAX_READS_PER_MINUTE;
-    return Math.min(
-      MAX_INTERVAL_MS,
-      Math.max(MIN_INTERVAL_MS, budgetFloorMs, seconds * 1000)
-    );
+    let ms = Math.min(MAX_INTERVAL_MS, Math.max(MIN_INTERVAL_MS, budgetFloorMs, seconds * 1000));
+
+    /**
+     * A full response is direct evidence the interval is too long, and it
+     * outranks the smoothed rate.
+     *
+     * The 6-minute probe on 2026-09-14 measured this: on the steady rooms the
+     * rate estimate was enough -- lobby delivered 93.3% and tclk-offers 100% --
+     * but `/r/technocore` swung between 371 and 1,196 a minute and delivered
+     * only 56.5%, because an EMA that is slow enough not to chase noise is by
+     * construction too slow to catch a burst. When `limit` records come back we
+     * do not know how many did not, so the honest reading of a full window is
+     * "possibly behind" rather than "exactly 200 arrived".
+     */
+    if (state.saturated) ms = Math.max(MIN_INTERVAL_MS, budgetFloorMs, ms / 3);
+    return ms;
   }
 
   /**
@@ -177,6 +190,8 @@ export class RoomFollower {
       state.dropped += state.buffer.length - MAX_BUFFER;
       state.buffer = state.buffer.slice(-MAX_BUFFER);
     }
+
+    state.saturated = messages.length >= this.readWindow;
 
     const maxSeq = messages.reduce((acc, m) => Math.max(acc, Number(m.seq || m.id || 0)), state.cursor);
     if (maxSeq > state.cursor) state.cursor = maxSeq;
