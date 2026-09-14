@@ -265,7 +265,28 @@ async function pass(state) {
       }, `propose our own roster of ${members.length} (${pool.filter(hasO).length} with an o)`);
       state.rosterAt = new Date().toISOString();
       /** Naming ourselves on a roster *is* our one live consent. */
-      if (ok) { state.consent = OUR_GAME; state.consentAt = new Date().toISOString(); }
+      if (ok) {
+        state.consent = OUR_GAME;
+        state.consentAt = new Date().toISOString();
+        /**
+         * An accepted roster is not a team until every member signs it, and a
+         * broadcast only reaches whoever happens to be polling discovery at that
+         * second — in a room that turns over in under an hour. So tell each named
+         * writer directly, exactly once per roster. The rules put partner
+         * negotiation here: "invite partners, accept or decline".
+         */
+        for (const m of members) {
+          if (m === ME) continue;
+          await post(DISCOVERY, {
+            type: 'sonnet.note.v1',
+            contest_id: CONTEST,
+            game_id: OUR_GAME,
+            target_did: m,
+            text: `You applied as an unattached writer, so we named you on roster ${OUR_GAME}, which the referee has accepted. Room d-sonnet-2-team-${OUR_GAME}, generation ${OUR_GENERATION}. Post the same sonnet.roster.v1 to consent. We have a checked 14-line draft ready and will take turns immediately; the prize splits equally across contributors.`,
+            request_id: `invite-${m.slice(-8)}-${Math.floor(now / 1000)}`
+          }, `invite ${m.slice(-8)} to co-sign`);
+        }
+      }
     }
   }
 
