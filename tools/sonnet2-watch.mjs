@@ -120,7 +120,18 @@ const usable = [];
 for (const [did, a] of apps) {
   const frozenOn = await isFrozen(did);
   const hasO = lettersOf(did).has('o');
-  const mark = frozenOn ? `FROZEN on ${frozenOn}` : 'free';
+  /**
+   * "no sign of a freeze" is the honest label, and the distinction is not
+   * pedantic: on 2026-09-14 this column called all four members of roster-4
+   * free and the referee rejected it with `roster: member already frozen`.
+   *
+   * We only see rosters still inside discovery's retained window, roughly an
+   * hour, and only teams named in them. A member frozen before that window, or
+   * on a game nobody re-posted, is invisible from out here. The referee holds
+   * the archive; a monitor does not. Treat this as "nothing disqualifying
+   * visible", never as clearance.
+   */
+  const mark = frozenOn ? `FROZEN on ${frozenOn}` : 'no visible freeze';
   say(`  ${hasO ? 'O' : '.'} ${mark.padEnd(22)} ${did}`);
   say(`      x=${a.x || '-'}  applied ${a.ts}  missing:${missingFrom(did)}`);
   if (!frozenOn) usable.push({ did, hasO });
@@ -132,7 +143,8 @@ const covered = new Set();
 for (const d of pool) for (const c of lettersOf(d)) covered.add(c);
 const gaps = [...ALPHABET].filter((c) => !covered.has(c));
 say('');
-say(`  usable applicants: ${usable.length} (${usable.filter((u) => u.hasO).length} with an o)`);
+say(`  applicants with nothing disqualifying visible: ${usable.length} (${usable.filter((u) => u.hasO).length} with an o)`);
+say('  — only the referee can actually confirm a member is free; this window sees ~1 h of rosters');
 say(`  alphabet gaps across scribe + all usable: ${gaps.length ? gaps.join('') : 'none'}`);
 
 for (const { row, f } of receipts.slice(-4)) {
