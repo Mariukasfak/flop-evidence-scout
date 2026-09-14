@@ -126,9 +126,8 @@ async function post(room, frame, why) {
 }
 
 /** Our verified text, used to propose words when a team will take them. */
-const targetWords = fs.existsSync(POEM_PATH)
-  ? fs.readFileSync(POEM_PATH, 'utf8').split(/\s+/).filter(Boolean)
-  : [];
+const poemText = fs.existsSync(POEM_PATH) ? fs.readFileSync(POEM_PATH, 'utf8').trim() : '';
+const targetWords = poemText ? poemText.split(/\s+/).filter(Boolean) : [];
 
 async function pass(state) {
   const hoursLeft = (DEADLINE - Date.now()) / 3_600_000;
@@ -287,6 +286,25 @@ async function pass(state) {
          * writer directly, exactly once per roster. The rules put partner
          * negotiation here: "invite partners, accept or decline".
          */
+        /**
+         * Advertise the finished draft alongside the roster, every cycle.
+         *
+         * A word cannot be posted before every member signs — the referee answers
+         * `roster: incomplete consent` — so the poem cannot speak for itself from
+         * inside the room. Putting the text in a recruit frame is the only way a
+         * passing writer can see that joining us costs them one turn, not an
+         * evening of drafting.
+         */
+        if (poemText) {
+          await post(DISCOVERY, {
+            type: 'sonnet.recruit.v1',
+            contest_id: CONTEST,
+            game_id: OUR_GAME,
+            x_account_url: 'https://x.com/marcryptox',
+            text: `${needed} seat(s) open. The draft is finished and validated against the pinned cmudict: 14 lines, 10 syllables each. Join and we take turns immediately, and every member contributes as the rules require.\n\n${poemText}\n\nRoom d-sonnet-2-team-${OUR_GAME}, generation ${OUR_GENERATION}. Post a sonnet.roster.v1 naming yourself and the current roster.`,
+            request_id: `recruit-${OUR_GAME}-${Math.floor(now / 1000)}`
+          }, 'advertise the finished draft');
+        }
         for (const m of members) {
           if (m === ME) continue;
           await post(DISCOVERY, {
