@@ -124,8 +124,19 @@ async function pass(state) {
 
   /* ---- 2. sign any roster that names us, immediately --------------------- */
   if (!state.consent) {
-    const naming = disc.filter(({ f }) => f.type === 'sonnet.roster.v1'
-      && Array.isArray(f.members) && f.members.includes(ME));
+    /**
+     * Somebody else's roster, and a recent one.
+     *
+     * Our own stale marcryptox attempts also name us, and co-signing those is
+     * how the manual runs kept re-consenting to lists the referee had already
+     * refused. A roster older than twenty minutes in this window has almost
+     * certainly been resolved or abandoned.
+     */
+    const cutoff = Date.now() - 20 * 60_000;
+    const naming = disc.filter(({ row, f }) => f.type === 'sonnet.roster.v1'
+      && Array.isArray(f.members) && f.members.includes(ME)
+      && row.from !== ME
+      && Date.parse(row.ts) >= cutoff);
     /** Newest first: an old roster in the window is likelier already resolved. */
     for (const { f } of naming.reverse()) {
       const key = `${f.game_id}:${f.members.join(',')}`;
@@ -140,7 +151,8 @@ async function pass(state) {
         request_id: `consent-${f.game_id}-${Math.floor(Date.now() / 1000)}`
       }, `co-sign roster for ${f.game_id}`);
       state.posted[key] = true;
-      if (ok) { state.consent = f.game_id; break; }
+      if (ok) { state.consent = f.game_id; }
+      break;   // one consent, one attempt per pass, whether or not it landed
     }
   }
 
