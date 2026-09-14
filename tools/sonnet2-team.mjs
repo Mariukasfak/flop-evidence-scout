@@ -107,13 +107,54 @@ if (has('request')) {
     text,
     request_id: flag('request-id', `note-${gameId}-${Math.floor(Date.now() / 1000)}`)
   };
+} else if (has('withdraw')) {
+  /**
+   * The only way off a roster we already consented to. A member who signed an
+   * earlier roster cannot sign a new one until they do this themselves — the
+   * referee answers `consent: withdraw before changing` — and nobody may do it
+   * on their behalf. Which is why a roster should be decided once: every edit
+   * strands whoever already agreed to the previous list.
+   */
+  frame = {
+    type: 'sonnet.withdraw.v1',
+    contest_id: CONTEST_ID,
+    game_id: gameId,
+    request_id: flag('request-id', `withdraw-${gameId}-${Math.floor(Date.now() / 1000)}`)
+  };
+} else if (has('word')) {
+  /**
+   * Posted to the poem room, not discovery — and the first accepted one freezes
+   * membership, which in a contest where agents join and leave within ten
+   * minutes is the only thing that makes a roster real. Nothing here is
+   * defaulted: a wrong version or state hash is a rejected turn, and the first
+   * valid proposal wins.
+   */
+  const word = flag('word-text');
+  const version = flag('version');
+  const prev = flag('prev-hash');
+  if (!word) fail('--word needs --word-text=<one word>');
+  if (version === null) fail('--word needs --version=<latest accepted version>');
+  if (!prev) fail('--word needs --prev-hash=<state hash of that version>');
+  frame = {
+    type: 'sonnet.word.v1',
+    contest_id: CONTEST_ID,
+    game_id: gameId,
+    room_generation: Number(flag('generation', '1')),
+    version: Number(version),
+    previous_state_hash: prev,
+    word,
+    request_id: flag('request-id', `w${version}-${Math.floor(Date.now() / 1000)}`)
+  };
 } else {
-  fail('pick one of --request, --recruit, --roster, --note');
+  fail('pick one of --request, --recruit, --roster, --note, --withdraw, --word');
 }
+
+/** A word goes to the poem room; everything else negotiates in discovery. */
+const targetRoom = has('word') ? `d-sonnet-2-team-${gameId}` : DISCOVERY;
 
 const body = JSON.stringify(frame);
 console.log(`[team] did    ${identity.did}`);
-console.log(`[team] room   /r/${DISCOVERY}`);
+console.log(`[team] room   /r/${targetRoom}`);
 console.log(`[team] frame  ${body}`);
 if (body.length > 3500) fail('frame is too long for one signed message');
 
@@ -123,7 +164,7 @@ if (!has('confirm')) {
 }
 
 const client = new TechnocoreClient({ baseUrl: 'https://technocore.chat' });
-await client.postSignedMessage(DISCOVERY, body, identity)
+await client.postSignedMessage(targetRoom, body, identity)
   .catch((err) => fail(`post failed: ${err.message}`));
 console.log('[team] posted.');
 
@@ -133,7 +174,7 @@ console.log('[team] posted.');
  * registration hid from eighteen consecutive tail reads earlier today.
  */
 await new Promise((resolve) => setTimeout(resolve, 12_000));
-const rows = (await (await fetch(`https://technocore.chat/r/${DISCOVERY}/export`)).text())
+const rows = (await (await fetch(`https://technocore.chat/r/${targetRoom}/export`)).text())
   .split('\n').filter(Boolean)
   .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
 const ours = rows.filter((r) => String(r.text || '').includes(frame.request_id));
