@@ -78,6 +78,7 @@ export class RoomFollower {
       lastSeq: 0,
       lastSeenAt: 0,
       ratePerMin: null,
+      peakPerMin: null,
       intervalMs: MIN_INTERVAL_MS * 2,
       generation: null
     };
@@ -100,8 +101,23 @@ export class RoomFollower {
    * hottest room cannot starve the others or the daemon.
    */
   intervalFor(state) {
-    if (!state.ratePerMin || state.ratePerMin <= 0) return MAX_INTERVAL_MS / 2;
-    const seconds = (this.readWindow * TARGET_FILL) / (state.ratePerMin / 60);
+    /**
+     * Size off the room's recent *peak*, not its average.
+     *
+     * The second probe measured why the average is the wrong statistic:
+     * `/r/technocore` sat at 230/min, which buys a 31 s interval, and then took
+     * a burst that put 436 records past the cursor inside one of those
+     * intervals. Saturation shortening only reacts after the gap it was meant to
+     * prevent, and no smoothing predicts a burst -- but a room that burst to
+     * 1,196/min ten minutes ago is a room that can do it again, so the interval
+     * that survives it is the one sized for that number even while it is quiet.
+     *
+     * The peak decays 2% per observation, so a room that has genuinely calmed
+     * relaxes over a few minutes instead of holding the fast cadence forever.
+     */
+    const basis = Math.max(state.ratePerMin || 0, state.peakPerMin || 0);
+    if (basis <= 0) return MAX_INTERVAL_MS / 2;
+    const seconds = (this.readWindow * TARGET_FILL) / (basis / 60);
     const budgetFloorMs = (this.rooms.size * 60_000) / MAX_READS_PER_MINUTE;
     let ms = Math.min(MAX_INTERVAL_MS, Math.max(MIN_INTERVAL_MS, budgetFloorMs, seconds * 1000));
 
@@ -138,6 +154,9 @@ export class RoomFollower {
         state.ratePerMin = state.ratePerMin === null
           ? sample
           : state.ratePerMin * 0.7 + sample * 0.3;
+        state.peakPerMin = state.peakPerMin === null
+          ? sample
+          : Math.max(sample, state.peakPerMin * 0.98);
       }
     }
     state.lastSeq = lastSeq;
