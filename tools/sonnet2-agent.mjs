@@ -44,7 +44,16 @@ const STATE_PATH = path.resolve(process.cwd(), 'data/local/sonnet2-agent.json');
  * recoverable right up until the first accepted word, a timeout converts the
  * common failure (a roster that quietly dies) from permanent to merely slow.
  */
-const CONSENT_TIMEOUT_MIN = Number(process.env.SONNET_CONSENT_TIMEOUT_MIN || 25);
+const CONSENT_TIMEOUT_MIN = Number(process.env.SONNET_CONSENT_TIMEOUT_MIN || 12);
+/**
+ * Ask for the smallest roster the rules allow.
+ *
+ * Measured 2026-09-14: 21 receipts said `roster_ready: true` against 283 saying
+ * false — roughly 7% of attempts complete. A roster is ready only when *every*
+ * named member signs, so each extra seat is another way to fail. Four is the
+ * referee's floor and needs three strangers to answer instead of five.
+ */
+const ROSTER_SIZE = 4;
 /** Our own room, allocated 2026-09-14 and still empty; roster-marcryptox-3 was accepted at gen 1. */
 const OUR_GAME = 'marcryptox';
 const OUR_GENERATION = 1;
@@ -55,7 +64,7 @@ const OUR_GENERATION = 1;
  */
 const RECRUIT_FRESH_MIN = 5;
 /** Never churn rosters faster than this: every re-post strands whoever already signed. */
-const ROSTER_RETRY_MIN = 30;
+const ROSTER_RETRY_MIN = 15;
 const POEM_PATH = path.resolve(process.cwd(), 'docs/sonnet/marcryptox-target.txt');
 
 const argv = process.argv.slice(2);
@@ -248,12 +257,15 @@ async function pass(state) {
       .map(([did]) => did);
 
     const sinceLast = state.rosterAt ? (now - Date.parse(state.rosterAt)) / 60_000 : Infinity;
-    if (pool.length < 3) {
-      console.log(`  no roster of our own: only ${pool.length} writer(s) free in the last ${RECRUIT_FRESH_MIN} min`);
+    const needed = ROSTER_SIZE - 1;
+    if (pool.length < needed) {
+      console.log(`  no roster of our own: only ${pool.length} of ${needed} writer(s) free in the last ${RECRUIT_FRESH_MIN} min`);
     } else if (sinceLast < ROSTER_RETRY_MIN) {
       console.log(`  roster attempt cooling down (${sinceLast.toFixed(0)}/${ROSTER_RETRY_MIN} min)`);
     } else {
-      const members = [ME, ...pool.slice(0, 5)];
+      /** The pool is o-first, so the scarce letter is taken before the seats run out. */
+      const members = [ME, ...pool.slice(0, needed)];
+      if (!members.some(hasO)) console.log('  warning: this roster spells no `o` — some lines will be unwritable');
       const ok = await post(DISCOVERY, {
         type: 'sonnet.roster.v1',
         contest_id: CONTEST,
