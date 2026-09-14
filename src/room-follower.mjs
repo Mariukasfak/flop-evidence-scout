@@ -53,6 +53,17 @@ const MAX_READS_PER_MINUTE = 90;
  */
 const MAX_BUFFER = 3_000;
 
+/**
+ * How many rooms may be followed at once.
+ *
+ * The scout reads its watch list plus one rotating room per cycle, and the
+ * rotating slot is how `/r/lobby` -- the fastest room we touch, and the one the
+ * 86.6% figure came from -- was being read without ever appearing in
+ * `watchRooms`. So rooms are adopted on demand rather than configured, and this
+ * caps what that can grow into.
+ */
+const MAX_FOLLOWED = 8;
+
 export class RoomFollower {
   constructor({ client, rooms = [], readWindow = 200, selfDid = null, now = () => Date.now() }) {
     this.client = client;
@@ -257,6 +268,33 @@ export class RoomFollower {
 
   has(room) {
     return this.rooms.has(room);
+  }
+
+  /**
+   * Follow a room that has proved it needs following.
+   *
+   * Called when a plain per-cycle read reports a gap, so a room earns the extra
+   * requests by demonstrating it outruns the cycle, and a quiet room never costs
+   * anything. At the cap the slowest room gives up its slot -- it is the one
+   * whose per-cycle read was adequate anyway.
+   */
+  adopt(room) {
+    if (this.rooms.has(room)) return false;
+    if (this.rooms.size >= MAX_FOLLOWED) {
+      let slowest = null;
+      for (const [name, state] of this.rooms) {
+        const rate = Math.max(state.ratePerMin || 0, state.peakPerMin || 0);
+        if (slowest === null || rate < slowest.rate) slowest = { name, rate };
+      }
+      if (!slowest) return false;
+      const timer = this.timers.get(slowest.name);
+      if (timer) clearTimeout(timer);
+      this.timers.delete(slowest.name);
+      this.rooms.delete(slowest.name);
+    }
+    this.rooms.set(room, this.blankState());
+    if (this.running) this.schedule(room);
+    return true;
   }
 
   /** Everything collected since the last drain, oldest first, and the cursor it reached. */

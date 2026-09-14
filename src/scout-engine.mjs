@@ -342,6 +342,15 @@ export class ScoutEngine {
        * loss we had written off.
        */
       gap = { room, from: cursor + 1, to: data.firstSeq - 1, unread: data.firstSeq - cursor - 1 };
+      /**
+       * This room just proved a once-a-cycle read cannot keep up with it, so
+       * follow it from now on. `/r/lobby` is read through the rotating slot and
+       * never appears in `watchRooms`, which is how the room that lost us 86.6%
+       * of its traffic was the one room the follower was not watching.
+       */
+      if (this.follower?.adopt(room)) {
+        console.warn(`[Scout] /r/${room}: now followed on its own cadence — a per-cycle read was not keeping up.`);
+      }
       console.warn(
         `[Scout] /r/${room}: ${gap.unread} message(s) between our cursor and this page went unread `
         + `— we asked for the newest window and the room had moved on. Some may still be retained.`

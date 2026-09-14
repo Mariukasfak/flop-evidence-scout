@@ -161,3 +161,29 @@ describe('RoomFollower', () => {
     assert.ok(drained.dropped > 0, 'and says how much it had to drop');
   });
 });
+
+describe('RoomFollower adoption', () => {
+  test('a room is adopted on demand and starts with a clean cursor', () => {
+    const follower = new RoomFollower({ client: fakeClient([{ head: 1 }]), rooms: ['a'] });
+    assert.equal(follower.has('lobby'), false, 'lobby is read through the rotating slot, not watchRooms');
+    assert.equal(follower.adopt('lobby'), true);
+    assert.equal(follower.has('lobby'), true);
+    assert.equal(follower.adopt('lobby'), false, 'adopting twice is a no-op, not a reset');
+  });
+
+  test('at the cap the slowest room gives up its slot, never the fastest', async () => {
+    let clock = 0;
+    const follower = new RoomFollower({ client: fakeClient([{ head: 10 }]), rooms: [], now: () => clock });
+    for (let i = 0; i < 8; i += 1) assert.equal(follower.adopt(`r${i}`), true);
+
+    // Give one room a real rate and leave the rest at nothing.
+    const fast = follower.rooms.get('r3');
+    fast.ratePerMin = 1200;
+    fast.peakPerMin = 1200;
+
+    assert.equal(follower.adopt('lobby'), true, 'the cap evicts rather than refusing');
+    assert.equal(follower.has('r3'), true, 'the fast room keeps its slot');
+    assert.equal(follower.has('lobby'), true);
+    assert.equal(follower.rooms.size, 8, 'and the cap still holds');
+  });
+});
