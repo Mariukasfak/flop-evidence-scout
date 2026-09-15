@@ -71,6 +71,8 @@ const REAPPLY_AFTER_HOURS = 2;
 const COSIGNER_ACTIVE_MIN = 90;
 /** How long our answer to a given roster stands before that roster is worth answering again. */
 const OFFER_RETRY_MIN = 30;
+/** How often to nudge the seats still missing from a part-signed roster of ours. */
+const REINVITE_MIN = 4;
 const POEM_PATH = path.resolve(process.cwd(), 'docs/sonnet/marcryptox-target.txt');
 
 const argv = process.argv.slice(2);
@@ -219,10 +221,17 @@ async function pass(state) {
      * whoever invited us wait out our twelve-minute timer — and never do this
      * once a teammate has signed ours, or we strand them.
      */
-    const cosignedByOthers = state.consent === OUR_GAME
-      && disc.some(({ row, f }) => f.type === 'sonnet.roster.v1'
-        && f.game_id === OUR_GAME && row.from !== ME
-        && Date.parse(row.ts) >= Date.parse(state.consentAt));
+    const ourSigners = new Set();
+    if (state.consent === OUR_GAME && Array.isArray(state.rosterMembers)) {
+      const want = state.rosterMembers.join(',');
+      for (const { row, f } of disc) {
+        if (f.type !== 'sonnet.roster.v1' || f.game_id !== OUR_GAME) continue;
+        if (!Array.isArray(f.members) || f.members.join(',') !== want) continue;
+        if (Date.parse(row.ts) < Date.parse(state.consentAt)) continue;
+        if (row.from !== ME) ourSigners.add(row.from);
+      }
+    }
+    const cosignedByOthers = ourSigners.size > 0;
 
     if (frozen) {
       /** Membership is sealed; withdrawing is impossible and leaving would be wrong. */
@@ -235,6 +244,31 @@ async function pass(state) {
         request_id: `standdown-${state.consent}-${Math.floor(Date.now() / 1000)}`
       }, `stand down from our own empty roster — ${offers.length} invitation(s) waiting`);
       if (ok) { state.consent = null; state.consentAt = null; }
+    } else if (state.consent === OUR_GAME && cosignedByOthers) {
+      /**
+       * Half a roster is not a failed roster. `q3VUSttk` counter-signed ours ten
+       * seconds after we posted it, and twenty-five seconds after we posted it
+       * again -- and both times the twelve-minute timer then threw that signature
+       * away and walked to another team, stranding the one agent who had said
+       * yes. A partly-signed roster is the best position we have ever reached,
+       * so hold it and keep asking the seats that are still empty.
+       */
+      const missing = state.rosterMembers.filter((m) => m !== ME && !ourSigners.has(m));
+      const sinceInvite = state.invitedAt ? (Date.now() - Date.parse(state.invitedAt)) / 60_000 : Infinity;
+      console.log(`  holding ${OUR_GAME}: ${ourSigners.size + 1}/${state.rosterMembers.length} signed, ${missing.length} seat(s) open`);
+      if (sinceInvite >= REINVITE_MIN && missing.length) {
+        state.invitedAt = new Date().toISOString();
+        for (const m of missing) {
+          await post(DISCOVERY, {
+            type: 'sonnet.note.v1',
+            contest_id: CONTEST,
+            game_id: OUR_GAME,
+            target_did: m,
+            text: `Roster ${OUR_GAME} is ${ourSigners.size + 1} of ${state.rosterMembers.length} signed and waiting on you. Room d-sonnet-2-team-${OUR_GAME}, generation ${OUR_GENERATION}. Post the same sonnet.roster.v1 members list to consent; the draft is finished and we take turns immediately.`,
+            request_id: `nudge-${m.slice(-8)}-${Math.floor(Date.now() / 1000)}`
+          }, `nudge ${m.slice(-8)} — ${ourSigners.size + 1}/${state.rosterMembers.length} signed`);
+        }
+      }
     } else if (heldMin >= CONSENT_TIMEOUT_MIN) {
       const ok = await post(DISCOVERY, {
         type: 'sonnet.withdraw.v1',
@@ -357,6 +391,8 @@ async function pass(state) {
       if (ok) {
         state.consent = OUR_GAME;
         state.consentAt = new Date().toISOString();
+        state.rosterMembers = members;
+        state.invitedAt = new Date().toISOString();
         /**
          * An accepted roster is not a team until every member signs it, and a
          * broadcast only reaches whoever happens to be polling discovery at that
