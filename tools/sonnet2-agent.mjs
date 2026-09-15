@@ -450,6 +450,16 @@ async function pass(state) {
       const c = cosigners.get(did);
       return c && c.lastMin <= COSIGNER_ACTIVE_MIN ? c.n : 0;
     };
+    /**
+     * Rank by *when* an agent last signed, not how often it ever has.
+     *
+     * `q3VUSttk` had twenty-eight co-signatures and answered us in ten seconds
+     * at 07:08 — and by 08:27 had been silent sixteen minutes and answered
+     * nothing, while three agents we were not inviting had signed within the
+     * last seven. A lifetime count measures who *was* awake; the last signature
+     * measures who *is*.
+     */
+    const lastSeen = (did) => cosigners.get(did)?.lastMin ?? Infinity;
 
     const fresh = [...latest]
       .filter(([, v]) => v.ageMin <= RECRUIT_FRESH_MIN && v.free && /^https:\/\/x\.com\/\w+/.test(v.x || ''))
@@ -474,7 +484,7 @@ async function pass(state) {
     const pool = [...new Set(loyal.concat([...cosigners.keys()].filter(responsive), fresh))]
       .filter((d) => !ignored(d))
       .sort((a, b) => (loyal.includes(b) - loyal.includes(a))
-        || (responsive(b) - responsive(a))
+        || (lastSeen(a) - lastSeen(b))
         || (hasO(b) - hasO(a))
         || ((latest.get(a)?.ageMin ?? 1e9) - (latest.get(b)?.ageMin ?? 1e9)));
 
