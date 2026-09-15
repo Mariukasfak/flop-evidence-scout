@@ -68,7 +68,7 @@ const ROSTER_RETRY_MIN = 15;
 /** How long an application stays good before the room has forgotten we exist. */
 const REAPPLY_AFTER_HOURS = 2;
 /** A co-signature older than this says nothing about whether the agent is still awake. */
-const COSIGNER_ACTIVE_MIN = 90;
+const COSIGNER_ACTIVE_MIN = 240;
 /** How long our answer to a given roster stands before that roster is worth answering again. */
 const OFFER_RETRY_MIN = 30;
 /** How often to nudge the seats still missing from a part-signed roster of ours. */
@@ -81,6 +81,8 @@ const REINVITE_MIN = 4;
 const PARTIAL_HOLD_MIN = 15;
 /** How long we remember that a named agent never answered. */
 const UNRESPONSIVE_HOURS = 6;
+/** How long an agent that signed one of our rosters stays our first choice. */
+const LOYAL_HOURS = 6;
 const POEM_PATH = path.resolve(process.cwd(), 'docs/sonnet/marcryptox-target.txt');
 
 const argv = process.argv.slice(2);
@@ -236,7 +238,12 @@ async function pass(state) {
         if (f.type !== 'sonnet.roster.v1' || f.game_id !== OUR_GAME) continue;
         if (!Array.isArray(f.members) || f.members.join(',') !== want) continue;
         if (Date.parse(row.ts) < Date.parse(state.consentAt)) continue;
-        if (row.from !== ME) ourSigners.add(row.from);
+        if (row.from !== ME) {
+          ourSigners.add(row.from);
+          /** Someone who signed *our* list is the best evidence we have about them. */
+          state.loyal = state.loyal || {};
+          state.loyal[row.from] = new Date().toISOString();
+        }
       }
     }
     const cosignedByOthers = ourSigners.size > 0;
@@ -406,9 +413,19 @@ async function pass(state) {
       const ageH = (Date.now() - Date.parse(at)) / 3_600_000;
       return Number.isFinite(ageH) && ageH < UNRESPONSIVE_HOURS;
     };
-    const pool = [...new Set([...cosigners.keys()].filter(responsive).concat(fresh))]
+    /**
+     * Agents that counter-signed one of our own rosters, most recently first.
+     * They answered *us*, not merely somebody; when a seat has to be replaced,
+     * rebuilding around them is far better than starting from strangers again.
+     */
+    const loyal = Object.entries(state.loyal || {})
+      .filter(([, at]) => (Date.now() - Date.parse(at)) / 3_600_000 < LOYAL_HOURS)
+      .sort((a, b) => Date.parse(b[1]) - Date.parse(a[1]))
+      .map(([did]) => did);
+    const pool = [...new Set(loyal.concat([...cosigners.keys()].filter(responsive), fresh))]
       .filter((d) => !ignored(d))
-      .sort((a, b) => (responsive(b) - responsive(a))
+      .sort((a, b) => (loyal.includes(b) - loyal.includes(a))
+        || (responsive(b) - responsive(a))
         || (hasO(b) - hasO(a))
         || ((latest.get(a)?.ageMin ?? 1e9) - (latest.get(b)?.ageMin ?? 1e9)));
 
