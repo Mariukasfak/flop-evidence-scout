@@ -169,6 +169,22 @@ async function pass(state) {
     }
   }
 
+  /**
+   * Rosters other people have offered us, newest first.
+   *
+   * Computed before the consent checks because it decides one of them: a DID
+   * holds exactly one consent, so every minute we sit on our own unsigned
+   * roster is a minute we would refuse anyone who invited us.
+   */
+  const rosterCutoff = Date.now() - 20 * 60_000;
+  const offers = disc.filter(({ row, f }) => f.type === 'sonnet.roster.v1'
+    && Array.isArray(f.members) && f.members.includes(ME)
+    && row.from !== ME
+    && f.game_id !== OUR_GAME
+    && Date.parse(row.ts) >= rosterCutoff)
+    .filter(({ f }) => !state.posted[`${f.game_id}:${f.members.join(',')}`])
+    .reverse();
+
   /* ---- 1b. do not let a dead roster hold our only consent ----------------- */
   if (state.consent) {
     /** A consent carried over from before this check existed starts its clock now. */
@@ -180,9 +196,29 @@ async function pass(state) {
       if (f.type === 'sonnet.receipt.v1' && f.status === 'accepted') acc.add(f.request_id);
     }
     const frozen = room.some(({ f }) => f.type === 'sonnet.word.v1' && acc.has(f.request_id));
+    /**
+     * Our own roster that nobody has counter-signed is worth less than any
+     * roster a stranger has actually offered us: theirs already has members on
+     * it, ours has one. So stand down for a real invitation rather than making
+     * whoever invited us wait out our twelve-minute timer — and never do this
+     * once a teammate has signed ours, or we strand them.
+     */
+    const cosignedByOthers = state.consent === OUR_GAME
+      && disc.some(({ row, f }) => f.type === 'sonnet.roster.v1'
+        && f.game_id === OUR_GAME && row.from !== ME
+        && Date.parse(row.ts) >= Date.parse(state.consentAt));
+
     if (frozen) {
       /** Membership is sealed; withdrawing is impossible and leaving would be wrong. */
       state.frozenOn = state.consent;
+    } else if (state.consent === OUR_GAME && !cosignedByOthers && offers.length) {
+      const ok = await post(DISCOVERY, {
+        type: 'sonnet.withdraw.v1',
+        contest_id: CONTEST,
+        game_id: state.consent,
+        request_id: `standdown-${state.consent}-${Math.floor(Date.now() / 1000)}`
+      }, `stand down from our own empty roster — ${offers.length} invitation(s) waiting`);
+      if (ok) { state.consent = null; state.consentAt = null; }
     } else if (heldMin >= CONSENT_TIMEOUT_MIN) {
       const ok = await post(DISCOVERY, {
         type: 'sonnet.withdraw.v1',
@@ -197,33 +233,14 @@ async function pass(state) {
   }
 
   /* ---- 2. sign any roster that names us, immediately --------------------- */
-  if (!state.consent) {
+  if (!state.consent && offers.length) {
     /**
-     * Somebody else's roster, and a recent one.
-     *
-     * Our own stale marcryptox attempts also name us, and co-signing those is
-     * how the manual runs kept re-consenting to lists the referee had already
-     * refused. A roster older than twenty minutes in this window has almost
-     * certainly been resolved or abandoned.
+     * `offers` is already filtered to somebody else's game, inside the twenty
+     * minute window, and not a list we have signed before. Newest first: an old
+     * roster still in the window has most likely been resolved or abandoned.
      */
-    const cutoff = Date.now() - 20 * 60_000;
-    const naming = disc.filter(({ row, f }) => f.type === 'sonnet.roster.v1'
-      && Array.isArray(f.members) && f.members.includes(ME)
-      && row.from !== ME
-      /**
-       * Never co-sign our own game. We consented to it the moment we proposed
-       * it, so a second signature buys nothing — and when a member echoes our
-       * roster back, this branch read it as a fresh invitation and re-consented
-       * to the list we had *just withdrawn from*, one second after withdrawing.
-       * That loop cost half an hour: two roster attempts where there should have
-       * been a dozen, and not one recruit posted.
-       */
-      && f.game_id !== OUR_GAME
-      && Date.parse(row.ts) >= cutoff);
-    /** Newest first: an old roster in the window is likelier already resolved. */
-    for (const { f } of naming.reverse()) {
+    for (const { f } of offers) {
       const key = `${f.game_id}:${f.members.join(',')}`;
-      if (state.posted[key]) continue;
       const ok = await post(DISCOVERY, {
         type: 'sonnet.roster.v1',
         contest_id: CONTEST,
@@ -232,7 +249,7 @@ async function pass(state) {
         room_generation: f.room_generation,
         members: f.members,
         request_id: `consent-${f.game_id}-${Math.floor(Date.now() / 1000)}`
-      }, `co-sign roster for ${f.game_id}`);
+      }, `co-sign roster for ${f.game_id} (${offers.length} offer(s) pending)`);
       state.posted[key] = true;
       if (ok) { state.consent = f.game_id; state.consentAt = new Date().toISOString(); }
       break;   // one consent, one attempt per pass, whether or not it landed
