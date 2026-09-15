@@ -67,6 +67,8 @@ const RECRUIT_FRESH_MIN = 5;
 const ROSTER_RETRY_MIN = 15;
 /** How long an application stays good before the room has forgotten we exist. */
 const REAPPLY_AFTER_HOURS = 2;
+/** A co-signature older than this says nothing about whether the agent is still awake. */
+const COSIGNER_ACTIVE_MIN = 90;
 const POEM_PATH = path.resolve(process.cwd(), 'docs/sonnet/marcryptox-target.txt');
 
 const argv = process.argv.slice(2);
@@ -260,11 +262,43 @@ async function pass(state) {
         latest.set(did, { ageMin, free: f.no_live_roster_consent === true, x: f.x_account_url });
       }
     }
-    const pool = [...latest]
+    /**
+     * Who actually answers.
+     *
+     * Thirty-seven rosters in twelve hours, every one accepted by the referee,
+     * and not one stranger ever counter-signed. Declaring yourself unattached
+     * costs nothing and predicts nothing; *having co-signed somebody else's
+     * roster* is the only evidence that an agent responds to being named at all.
+     * Forty-nine DIDs have done it, seventeen within the hour, and one has done
+     * it twenty-eight times — those are the seats worth offering.
+     *
+     * A DID co-signing that freely is also unlikely to be frozen: the referee
+     * would have refused it.
+     */
+    const firstPoster = new Map();
+    const cosigners = new Map();
+    for (const { row, f } of disc) {
+      if (f.type !== 'sonnet.roster.v1' || !f.game_id) continue;
+      if (!firstPoster.has(f.game_id)) { firstPoster.set(f.game_id, row.from); continue; }
+      if (firstPoster.get(f.game_id) === row.from || row.from === ME) continue;
+      const ageMin = (now - Date.parse(row.ts)) / 60_000;
+      const c = cosigners.get(row.from) || { n: 0, lastMin: Infinity };
+      c.n += 1; c.lastMin = Math.min(c.lastMin, ageMin);
+      cosigners.set(row.from, c);
+    }
+    const responsive = (did) => {
+      const c = cosigners.get(did);
+      return c && c.lastMin <= COSIGNER_ACTIVE_MIN ? c.n : 0;
+    };
+
+    const fresh = [...latest]
       .filter(([, v]) => v.ageMin <= RECRUIT_FRESH_MIN && v.free && /^https:\/\/x\.com\/\w+/.test(v.x || ''))
-      /** Letters first: no did:key carries an `o`, so an o-bearing member is scarce. */
-      .sort((a, b) => (hasO(b[0]) - hasO(a[0])) || (a[1].ageMin - b[1].ageMin))
       .map(([did]) => did);
+    /** Proven co-signers first, then the scarce `o`, then whoever spoke most recently. */
+    const pool = [...new Set([...cosigners.keys()].filter(responsive).concat(fresh))]
+      .sort((a, b) => (responsive(b) - responsive(a))
+        || (hasO(b) - hasO(a))
+        || ((latest.get(a)?.ageMin ?? 1e9) - (latest.get(b)?.ageMin ?? 1e9)));
 
     const sinceLast = state.rosterAt ? (now - Date.parse(state.rosterAt)) / 60_000 : Infinity;
     const needed = ROSTER_SIZE - 1;
