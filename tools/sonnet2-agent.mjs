@@ -503,8 +503,18 @@ async function pass(state) {
       games.add(f.game_id);
     }
   }
+  /**
+   * Applications are the cheap, slow half of this loop and they have produced
+   * nothing: in twenty-four hours not one of 200+ applications led to a team
+   * drafting us. Meanwhile each one is a signed POST, and a pass full of them
+   * takes minutes — which is exactly the delay that let a part-signed roster of
+   * ours sit un-nudged. So when a seat of ours is actually open, close that
+   * first and leave the canvassing for a pass where nothing is at stake.
+   */
+  const closingOurOwn = state.consent === OUR_GAME;
   let applications = 0;
   for (const g of games) {
+    if (closingOurOwn && applications >= 1) break;
     /**
      * Re-apply to a team we have already written to once its application has
      * gone stale.
