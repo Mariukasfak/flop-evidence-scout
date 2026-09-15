@@ -37,6 +37,12 @@ const STATE_PATH = path.resolve(process.cwd(), 'data/local/sonnet2-agent.json');
 /**
  * How long we will hold a consent for a roster that never produces a word.
  *
+ * Treat each roster as one cheap trial rather than a negotiation. The agents we
+ * name answer within ten to twenty-five seconds or not at all, so a roster still
+ * short of its seats after six minutes is three stragglers who are asleep, and
+ * the fastest way to four signatures is another draw from a fresh pool -- not a
+ * longer wait on this one.
+ *
  * This is the difference between a bounded bet and a stranded one. Of 135 teams
  * seen in discovery, only 23 ever got a word accepted — but 17 of those 23
  * reached 90+ words. So a team that starts almost always finishes, and the whole
@@ -44,7 +50,7 @@ const STATE_PATH = path.resolve(process.cwd(), 'data/local/sonnet2-agent.json');
  * recoverable right up until the first accepted word, a timeout converts the
  * common failure (a roster that quietly dies) from permanent to merely slow.
  */
-const CONSENT_TIMEOUT_MIN = Number(process.env.SONNET_CONSENT_TIMEOUT_MIN || 12);
+const CONSENT_TIMEOUT_MIN = Number(process.env.SONNET_CONSENT_TIMEOUT_MIN || 6);
 /**
  * Ask for the smallest roster the rules allow.
  *
@@ -64,7 +70,7 @@ const OUR_GENERATION = 1;
  */
 const RECRUIT_FRESH_MIN = 5;
 /** Never churn rosters faster than this: every re-post strands whoever already signed. */
-const ROSTER_RETRY_MIN = 15;
+const ROSTER_RETRY_MIN = 3;
 /** How long an application stays good before the room has forgotten we exist. */
 const REAPPLY_AFTER_HOURS = 2;
 /** A co-signature older than this says nothing about whether the agent is still awake. */
@@ -78,15 +84,15 @@ const REINVITE_MIN = 4;
  * problem rather than the wait. Two agents counter-signed ours inside twenty
  * seconds; one that has ignored four nudges is not going to sign.
  */
-const PARTIAL_HOLD_MIN = 15;
+const PARTIAL_HOLD_MIN = 6;
 /**
  * Give our own roster a moment before trading it for an invitation. Our
  * co-signers answer in ten to twenty-five seconds, and standing down twenty-
  * seven seconds after posting cost us a roster before anyone could reach it.
  */
-const STANDDOWN_AFTER_MIN = 5;
+const STANDDOWN_AFTER_MIN = 4;
 /** How long we remember that a named agent never answered. */
-const UNRESPONSIVE_HOURS = 6;
+const UNRESPONSIVE_HOURS = 0.5;
 /** How long an agent that signed one of our rosters stays our first choice. */
 const LOYAL_HOURS = 6;
 const POEM_PATH = path.resolve(process.cwd(), 'docs/sonnet/marcryptox-target.txt');
@@ -613,38 +619,65 @@ async function pass(state) {
 
   /* ---- 3. take a turn if a poem we are in is live ------------------------- */
   if (state.consent) {
-    const room = await ex(`d-sonnet-2-team-${state.consent}`);
-    const acc = new Set();
-    const words = new Map();
-    let head = null;
-    for (const { f } of parsed(room)) {
-      if (f.type === 'sonnet.receipt.v1' && f.status === 'accepted') {
-        acc.add(f.request_id);
-        if (f.version !== undefined) head = { version: f.version, hash: f.state_hash, by: f.sender_did };
-      } else if (f.type === 'sonnet.word.v1') words.set(f.request_id, f);
-    }
-    const placed = [...words.entries()].filter(([id]) => acc.has(id))
-      .map(([, f]) => f).sort((a, b) => a.version - b.version).map((f) => f.word);
-    console.log(`  poem ${state.consent}: ${placed.length} accepted word(s)`);
+    const room = parsed(await ex(`d-sonnet-2-team-${state.consent}`));
 
-    if (head && head.by !== ME) {
-      const next = targetWords[placed.length];
+    /**
+     * The opening move needs a hash we do not generate.
+     *
+     * A word frame carries `previous_state_hash`, and the first one -- version 0
+     * -- must carry the hash of the empty poem, which arrives only on the
+     * referee's `roster_ready` receipt. The old code keyed entirely off word
+     * receipts, so with none yet there was no head and the agent could never
+     * open a poem at all: it could only ever join one already in progress.
+     */
+    let initialHash = null;
+    let generation = OUR_GENERATION;
+    let last = null;              // newest accepted word receipt
+    const accepted = new Set();
+    for (const { f } of room) {
+      if (f.type !== 'sonnet.receipt.v1' || f.status !== 'accepted') continue;
+      if (f.room_generation !== undefined) generation = f.room_generation;
+      if (f.version === undefined) {
+        if (f.state_hash) initialHash = f.state_hash;
+        continue;
+      }
+      accepted.add(f.request_id);
+      if (!last || f.version > last.version) {
+        last = { version: f.version, hash: f.state_hash, by: f.sender_did, complete: f.complete };
+      }
+    }
+    const placed = room.filter(({ f }) => f.type === 'sonnet.word.v1' && accepted.has(f.request_id)).length;
+    console.log(`  poem ${state.consent}: ${placed} accepted word(s)${last?.complete ? ' — COMPLETE' : ''}`);
+
+    /** Version 0 opens on the roster hash; every later turn chains off the last receipt. */
+    const head = last
+      ? { version: last.version, hash: last.hash, by: last.by }
+      : (initialHash ? { version: 0, hash: initialHash, by: null } : null);
+
+    if (head && last?.complete) {
+      console.log('  poem is finished; nothing to add');
+    } else if (head && head.by === ME) {
+      console.log('  our word was last; a teammate must go next');
+    } else if (head) {
+      const next = targetWords[placed];
       if (next && canSpell(next)) {
         await post(`d-sonnet-2-team-${state.consent}`, {
           type: 'sonnet.word.v1',
           contest_id: CONTEST,
           game_id: state.consent,
-          room_generation: 1,
+          room_generation: generation,
           version: head.version,
           previous_state_hash: head.hash,
           word: next,
           request_id: `w${head.version}-${Math.floor(Date.now() / 1000)}`
-        }, `propose "${next}"`);
+        }, `propose "${next}" at version ${head.version}`);
       } else if (next) {
-        console.log(`  next target word "${next}" is not spellable by us — waiting for a teammate`);
+        console.log(`  "${next}" needs letters our key lacks — a teammate must place it`);
+      } else {
+        console.log('  our draft is exhausted; the room is past our text');
       }
-    } else if (head) {
-      console.log('  our word was last; waiting for someone else to go');
+    } else {
+      console.log('  no roster hash yet — the poem has not been opened');
     }
   }
 
