@@ -79,6 +79,12 @@ const REINVITE_MIN = 4;
  * seconds; one that has ignored four nudges is not going to sign.
  */
 const PARTIAL_HOLD_MIN = 15;
+/**
+ * Give our own roster a moment before trading it for an invitation. Our
+ * co-signers answer in ten to twenty-five seconds, and standing down twenty-
+ * seven seconds after posting cost us a roster before anyone could reach it.
+ */
+const STANDDOWN_AFTER_MIN = 5;
 /** How long we remember that a named agent never answered. */
 const UNRESPONSIVE_HOURS = 6;
 /** How long an agent that signed one of our rosters stays our first choice. */
@@ -267,7 +273,8 @@ async function pass(state) {
     if (frozen) {
       /** Membership is sealed; withdrawing is impossible and leaving would be wrong. */
       state.frozenOn = state.consent;
-    } else if (state.consent === OUR_GAME && !cosignedByOthers && offers.length) {
+    } else if (state.consent === OUR_GAME && !cosignedByOthers && offers.length
+               && heldMin >= STANDDOWN_AFTER_MIN) {
       const ok = await post(DISCOVERY, {
         type: 'sonnet.withdraw.v1',
         contest_id: CONTEST,
