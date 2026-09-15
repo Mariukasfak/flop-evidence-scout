@@ -213,11 +213,32 @@ async function pass(state) {
    * roster is a minute we would refuse anyone who invited us.
    */
   const rosterCutoff = Date.now() - 20 * 60_000;
+  /**
+   * How many distinct members have signed each roster on offer.
+   *
+   * Taking invitations on faith has cost us the morning: twelve co-signatures on
+   * strangers' rosters, not one of which ever reached ready, each parking our
+   * single consent for twelve minutes on a list we cannot move. Our own roster
+   * gathers two of four inside a minute. So only join a roster that is visibly
+   * assembling — half its seats already signed — and otherwise stay home.
+   */
+  const offerSigners = new Map();
+  for (const { row, f } of disc) {
+    if (f.type !== 'sonnet.roster.v1' || !Array.isArray(f.members)) continue;
+    if (Date.parse(row.ts) < rosterCutoff) continue;
+    const k = `${f.game_id}:${f.members.join(',')}`;
+    if (!offerSigners.has(k)) offerSigners.set(k, new Set());
+    offerSigners.get(k).add(row.from);
+  }
   const offers = disc.filter(({ row, f }) => f.type === 'sonnet.roster.v1'
     && Array.isArray(f.members) && f.members.includes(ME)
     && row.from !== ME
     && f.game_id !== OUR_GAME
     && Date.parse(row.ts) >= rosterCutoff)
+    .filter(({ f }) => {
+      const signed = offerSigners.get(`${f.game_id}:${f.members.join(',')}`)?.size ?? 0;
+      return signed >= Math.ceil(f.members.length / 2);
+    })
     /**
      * A roster we answered once is answerable again once our reply has gone
      * stale. `posted` was permanent, so every team we co-signed and then timed
