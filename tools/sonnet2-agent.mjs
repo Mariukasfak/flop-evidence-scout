@@ -167,11 +167,27 @@ async function pass(state) {
    * referee answers `consent: withdraw before changing`. That is precisely the
    * loop that burned four rosters by hand.
    */
+  /**
+   * Match receipts to the exact request that created our consent, not to a time
+   * window.
+   *
+   * The referee answers slowly and out of order: at 07:43 it rejected
+   * `withdraw-flopdsh-1789452602`, a withdraw we had posted at 06:03 — a hundred
+   * minutes earlier — and that stale answer knocked us off a marcryptox roster
+   * made at 07:33 that was already 2 of 4. A timestamp guard cannot catch this,
+   * because the receipt really is newer than the consent it destroyed. Only the
+   * request_id can.
+   */
   const consentSince = state.consentAt ? Date.parse(state.consentAt) : 0;
   for (const { row, f } of disc) {
     if (!String(f.type || '').startsWith('sonnet.receipt')) continue;
     if (f.sender_did !== ME && f.participant_did !== ME) continue;
     if (Date.parse(row.ts) < consentSince) continue;
+    const aboutOurConsent = state.consentRequestId && f.request_id === state.consentRequestId;
+    if (f.status === 'rejected' && state.consent && !aboutOurConsent) {
+      console.log(`  ignoring a rejection for ${String(f.request_id || '?').slice(0, 32)} — not the request we hold consent under`);
+      continue;
+    }
     if (f.status === 'rejected' && state.consent) {
       console.log(`  consent cleared by referee: ${f.reason}`);
       state.consent = null;
@@ -335,6 +351,7 @@ async function pass(state) {
      */
     for (const { f } of offers) {
       const key = `${f.game_id}:${f.members.join(',')}`;
+      const requestId = `consent-${f.game_id}-${Math.floor(Date.now() / 1000)}`;
       const ok = await post(DISCOVERY, {
         type: 'sonnet.roster.v1',
         contest_id: CONTEST,
@@ -342,10 +359,14 @@ async function pass(state) {
         poem_room: f.poem_room,
         room_generation: f.room_generation,
         members: f.members,
-        request_id: `consent-${f.game_id}-${Math.floor(Date.now() / 1000)}`
+        request_id: requestId
       }, `co-sign roster for ${f.game_id} (${offers.length} offer(s) pending)`);
       state.posted[key] = new Date().toISOString();
-      if (ok) { state.consent = f.game_id; state.consentAt = new Date().toISOString(); }
+      if (ok) {
+        state.consent = f.game_id;
+        state.consentAt = new Date().toISOString();
+        state.consentRequestId = requestId;
+      }
       break;   // one consent, one attempt per pass, whether or not it landed
     }
   }
@@ -438,6 +459,7 @@ async function pass(state) {
     } else {
       /** The pool is o-first, so the scarce letter is taken before the seats run out. */
       const members = [ME, ...pool.slice(0, needed)];
+      const rosterRequestId = `roster-${OUR_GAME}-${Math.floor(now / 1000)}`;
       if (!members.some(hasO)) console.log('  warning: this roster spells no `o` — some lines will be unwritable');
       const ok = await post(DISCOVERY, {
         type: 'sonnet.roster.v1',
@@ -446,13 +468,14 @@ async function pass(state) {
         poem_room: `d-sonnet-2-team-${OUR_GAME}`,
         room_generation: OUR_GENERATION,
         members,
-        request_id: `roster-${OUR_GAME}-${Math.floor(now / 1000)}`
+        request_id: rosterRequestId
       }, `propose our own roster of ${members.length} (${pool.filter(hasO).length} with an o)`);
       state.rosterAt = new Date().toISOString();
       /** Naming ourselves on a roster *is* our one live consent. */
       if (ok) {
         state.consent = OUR_GAME;
         state.consentAt = new Date().toISOString();
+        state.consentRequestId = rosterRequestId;
         state.rosterMembers = members;
         state.invitedAt = new Date().toISOString();
         /**
