@@ -633,9 +633,11 @@ async function pass(state) {
     let initialHash = null;
     let generation = OUR_GENERATION;
     let last = null;              // newest accepted word receipt
+    let rosterReady = false;
     const accepted = new Set();
     for (const { f } of room) {
       if (f.type !== 'sonnet.receipt.v1' || f.status !== 'accepted') continue;
+      if (f.roster_ready === true) rosterReady = true;
       if (f.room_generation !== undefined) generation = f.room_generation;
       if (f.version === undefined) {
         if (f.state_hash) initialHash = f.state_hash;
@@ -654,7 +656,15 @@ async function pass(state) {
       ? { version: last.version, hash: last.hash, by: last.by }
       : (initialHash ? { version: 0, hash: initialHash, by: null } : null);
 
-    if (head && last?.complete) {
+    /**
+     * Writing to a team room needs the referee to have added our key to
+     * `/kv/room-allow/<room>`, which happens when the roster is ready. Until
+     * then every word is an HTTP 403 -- we posted five of them at 2 of 4 before
+     * this gate existed, which is noise in a room other people read.
+     */
+    if (head && !rosterReady && placed === 0) {
+      console.log('  roster is not ready; the room will refuse our writes until it is');
+    } else if (head && last?.complete) {
       console.log('  poem is finished; nothing to add');
     } else if (head && head.by === ME) {
       console.log('  our word was last; a teammate must go next');
