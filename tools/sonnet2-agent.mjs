@@ -283,7 +283,19 @@ async function pass(state) {
   }
 
   /* ---- 2. sign any roster that names us, immediately --------------------- */
-  if (!state.consent && offers.length) {
+  /**
+   * Ours first, a stranger's second.
+   *
+   * Eleven co-signatures on other people's rosters have produced nothing: each
+   * one parks our single consent for twelve minutes on a list we cannot
+   * influence, and none has ever reached ready. Our own roster reached 2 of 4
+   * within ten seconds, twice, because we name agents with a track record of
+   * signing. So a stranger's roster is worth our slot only while our own is in
+   * its cooldown -- which is also when the slot would otherwise sit idle.
+   */
+  const ownRosterCoolingDown = state.rosterAt
+    && (Date.now() - Date.parse(state.rosterAt)) / 60_000 < ROSTER_RETRY_MIN;
+  if (!state.consent && offers.length && ownRosterCoolingDown) {
     /**
      * `offers` is already filtered to somebody else's game, inside the twenty
      * minute window, and not a list we have signed before. Newest first: an old
