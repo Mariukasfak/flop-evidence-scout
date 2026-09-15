@@ -73,6 +73,14 @@ const COSIGNER_ACTIVE_MIN = 90;
 const OFFER_RETRY_MIN = 30;
 /** How often to nudge the seats still missing from a part-signed roster of ours. */
 const REINVITE_MIN = 4;
+/**
+ * How long a part-signed roster is worth holding before the empty seat is the
+ * problem rather than the wait. Two agents counter-signed ours inside twenty
+ * seconds; one that has ignored four nudges is not going to sign.
+ */
+const PARTIAL_HOLD_MIN = 15;
+/** How long we remember that a named agent never answered. */
+const UNRESPONSIVE_HOURS = 6;
 const POEM_PATH = path.resolve(process.cwd(), 'docs/sonnet/marcryptox-target.txt');
 
 const argv = process.argv.slice(2);
@@ -255,7 +263,24 @@ async function pass(state) {
        */
       const missing = state.rosterMembers.filter((m) => m !== ME && !ourSigners.has(m));
       const sinceInvite = state.invitedAt ? (Date.now() - Date.parse(state.invitedAt)) / 60_000 : Infinity;
-      console.log(`  holding ${OUR_GAME}: ${ourSigners.size + 1}/${state.rosterMembers.length} signed, ${missing.length} seat(s) open`);
+      console.log(`  holding ${OUR_GAME}: ${ourSigners.size + 1}/${state.rosterMembers.length} signed, ${missing.length} seat(s) open (${heldMin.toFixed(0)}/${PARTIAL_HOLD_MIN} min)`);
+
+      /**
+       * Holding a part-signed roster forever is the mirror of abandoning it too
+       * soon, and both lose the seat. Once the wait is clearly the empty chair,
+       * remember who never answered, release, and rebuild around someone else.
+       */
+      if (heldMin >= PARTIAL_HOLD_MIN) {
+        state.unresponsive = state.unresponsive || {};
+        for (const m of missing) state.unresponsive[m] = new Date().toISOString();
+        const ok = await post(DISCOVERY, {
+          type: 'sonnet.withdraw.v1',
+          contest_id: CONTEST,
+          game_id: OUR_GAME,
+          request_id: `rebuild-${OUR_GAME}-${Math.floor(Date.now() / 1000)}`
+        }, `release ${OUR_GAME} — ${missing.length} seat(s) never answered in ${PARTIAL_HOLD_MIN} min`);
+        if (ok) { state.consent = null; state.consentAt = null; state.rosterAt = null; }
+      } else
       if (sinceInvite >= REINVITE_MIN && missing.length) {
         state.invitedAt = new Date().toISOString();
         for (const m of missing) {
@@ -374,7 +399,15 @@ async function pass(state) {
       .filter(([, v]) => v.ageMin <= RECRUIT_FRESH_MIN && v.free && /^https:\/\/x\.com\/\w+/.test(v.x || ''))
       .map(([did]) => did);
     /** Proven co-signers first, then the scarce `o`, then whoever spoke most recently. */
+    const mute = state.unresponsive || {};
+    const ignored = (did) => {
+      const at = mute[did];
+      if (!at) return false;
+      const ageH = (Date.now() - Date.parse(at)) / 3_600_000;
+      return Number.isFinite(ageH) && ageH < UNRESPONSIVE_HOURS;
+    };
     const pool = [...new Set([...cosigners.keys()].filter(responsive).concat(fresh))]
+      .filter((d) => !ignored(d))
       .sort((a, b) => (responsive(b) - responsive(a))
         || (hasO(b) - hasO(a))
         || ((latest.get(a)?.ageMin ?? 1e9) - (latest.get(b)?.ageMin ?? 1e9)));
