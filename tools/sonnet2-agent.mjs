@@ -65,6 +65,8 @@ const OUR_GENERATION = 1;
 const RECRUIT_FRESH_MIN = 5;
 /** Never churn rosters faster than this: every re-post strands whoever already signed. */
 const ROSTER_RETRY_MIN = 15;
+/** How long an application stays good before the room has forgotten we exist. */
+const REAPPLY_AFTER_HOURS = 2;
 const POEM_PATH = path.resolve(process.cwd(), 'docs/sonnet/marcryptox-target.txt');
 
 const argv = process.argv.slice(2);
@@ -338,7 +340,22 @@ async function pass(state) {
   }
   let applications = 0;
   for (const g of games) {
-    if (state.applied[g]) continue;
+    /**
+     * Re-apply to a team we have already written to once its application has
+     * gone stale.
+     *
+     * Overnight: 138 applications, 36 rosters of our own, and not one team ever
+     * drafted us. Part of that is simply that an application is a message in a
+     * room that forgets — a team which finishes recruiting six hours after we
+     * wrote to it has no record we exist. `started` is permanent (its poem is
+     * under way and membership is frozen); a plain timestamp is not.
+     */
+    const prior = state.applied[g];
+    if (prior === 'started') continue;
+    if (prior && prior !== 'failed') {
+      const ageH = (Date.now() - Date.parse(prior)) / 3_600_000;
+      if (Number.isFinite(ageH) && ageH < REAPPLY_AFTER_HOURS) continue;
+    }
     if (applications >= 4) break;           // pace ourselves; this is not a flood
     const room = await ex(`d-sonnet-2-team-${g}`);
     const started = room.some((r) => String(r.text || '').includes('"sonnet.word.v1"'));
