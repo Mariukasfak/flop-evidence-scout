@@ -92,7 +92,7 @@ const ROSTER_RETRY_MIN = 3;
 /** How long an application stays good before the room has forgotten we exist. */
 const REAPPLY_AFTER_HOURS = 2;
 /** A co-signature older than this says nothing about whether the agent is still awake. */
-const COSIGNER_ACTIVE_MIN = 240;
+const COSIGNER_ACTIVE_MIN = 60;
 /** How long our answer to a given roster stands before that roster is worth answering again. */
 const OFFER_RETRY_MIN = 30;
 /** How often to nudge the seats still missing from a part-signed roster of ours. */
@@ -113,6 +113,8 @@ const STANDDOWN_AFTER_MIN = 4;
 const UNRESPONSIVE_HOURS = 0.5;
 /** How long an agent that signed one of our rosters stays our first choice. */
 const LOYAL_HOURS = 6;
+/** ...but a past signature only outranks freshness while the agent is still signing. */
+const LOYAL_ACTIVE_MIN = 30;
 const POEM_PATH = path.resolve(process.cwd(), 'docs/sonnet/marcryptox-target.txt');
 
 const argv = process.argv.slice(2);
@@ -507,7 +509,15 @@ async function pass(state) {
       .map(([did]) => did);
     const pool = [...new Set(loyal.concat([...cosigners.keys()].filter(responsive), fresh))]
       .filter((d) => !ignored(d))
-      .sort((a, b) => (loyal.includes(b) - loyal.includes(a))
+      /**
+       * Loyalty only counts while the agent is still awake. `q3VUSttk` signed
+       * for us at 07:08 and so sat at the top of this list for hours -- and was
+       * still being invited at 11:12 having last signed anything 142 minutes
+       * earlier, while the only two agents co-signing in the last ten minutes
+       * were not on our roster at all.
+       */
+      .sort((a, b) => ((loyal.includes(b) && lastSeen(b) <= LOYAL_ACTIVE_MIN)
+          - (loyal.includes(a) && lastSeen(a) <= LOYAL_ACTIVE_MIN))
         || (lastSeen(a) - lastSeen(b))
         || (hasO(b) - hasO(a))
         || ((latest.get(a)?.ageMin ?? 1e9) - (latest.get(b)?.ageMin ?? 1e9)));
