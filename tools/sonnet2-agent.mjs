@@ -225,9 +225,15 @@ async function pass(state) {
      * pool is cheaper than testing them one at a time at hours per test.
      */
     if (f.reason === 'roster: unregistered' && state.rosterHistory?.[f.request_id]) {
-      state.unresponsive = state.unresponsive || {};
+      /**
+       * A separate list from `unresponsive`, and a permanent one. Being asleep
+       * for half an hour is temporary; not being a registered writer is a fact
+       * about this contest that will not change before the deadline, so a
+       * thirty-minute bench would simply re-draw the same unregistered DID.
+       */
+      state.unregistered = state.unregistered || {};
       const named = state.rosterHistory[f.request_id].filter((m) => m !== ME);
-      for (const m of named) state.unresponsive[m] = new Date().toISOString();
+      for (const m of named) state.unregistered[m] = new Date().toISOString();
       console.log(`  benching ${named.length} writer(s) named on an unregistered roster: ${named.map((m) => m.slice(-8)).join(' ')}`);
     }
     const aboutOurConsent = state.consentRequestId && f.request_id === state.consentRequestId;
@@ -526,7 +532,9 @@ async function pass(state) {
       .map(([did]) => did);
     /** Proven co-signers first, then the scarce `o`, then whoever spoke most recently. */
     const mute = state.unresponsive || {};
+    const barred = state.unregistered || {};
     const ignored = (did) => {
+      if (barred[did]) return true;           // never re-draw an unregistered writer
       const at = mute[did];
       if (!at) return false;
       const ageH = (Date.now() - Date.parse(at)) / 3_600_000;
