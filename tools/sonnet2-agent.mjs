@@ -69,6 +69,8 @@ const ROSTER_RETRY_MIN = 15;
 const REAPPLY_AFTER_HOURS = 2;
 /** A co-signature older than this says nothing about whether the agent is still awake. */
 const COSIGNER_ACTIVE_MIN = 90;
+/** How long our answer to a given roster stands before that roster is worth answering again. */
+const OFFER_RETRY_MIN = 30;
 const POEM_PATH = path.resolve(process.cwd(), 'docs/sonnet/marcryptox-target.txt');
 
 const argv = process.argv.slice(2);
@@ -182,7 +184,21 @@ async function pass(state) {
     && row.from !== ME
     && f.game_id !== OUR_GAME
     && Date.parse(row.ts) >= rosterCutoff)
-    .filter(({ f }) => !state.posted[`${f.game_id}:${f.members.join(',')}`])
+    /**
+     * A roster we answered once is answerable again once our reply has gone
+     * stale. `posted` was permanent, so every team we co-signed and then timed
+     * out of was struck off for good -- twelve rosters naming us in one
+     * twenty-minute window, all of them already crossed out, while their teams
+     * were very likely still trying. Signing the same list twice costs one
+     * message; never signing it again costs the seat.
+     */
+    .filter(({ f }) => {
+      const at = state.posted[`${f.game_id}:${f.members.join(',')}`];
+      if (!at) return true;
+      const ageMin = (Date.now() - Date.parse(at)) / 60_000;
+      /** Legacy entries stored `true` and carry no time; treat them as already stale. */
+      return Number.isFinite(ageMin) ? ageMin >= OFFER_RETRY_MIN : true;
+    })
     .reverse();
 
   /* ---- 1b. do not let a dead roster hold our only consent ----------------- */
@@ -250,7 +266,7 @@ async function pass(state) {
         members: f.members,
         request_id: `consent-${f.game_id}-${Math.floor(Date.now() / 1000)}`
       }, `co-sign roster for ${f.game_id} (${offers.length} offer(s) pending)`);
-      state.posted[key] = true;
+      state.posted[key] = new Date().toISOString();
       if (ok) { state.consent = f.game_id; state.consentAt = new Date().toISOString(); }
       break;   // one consent, one attempt per pass, whether or not it landed
     }
