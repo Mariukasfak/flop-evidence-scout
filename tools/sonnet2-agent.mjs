@@ -321,7 +321,9 @@ async function pass(state) {
       /** Membership is sealed; withdrawing is impossible and leaving would be wrong. */
       state.frozenOn = state.consent;
     } else if (state.consent === OUR_GAME && !cosignedByOthers && offers.length
-               && heldMin >= STANDDOWN_AFTER_MIN) {
+               && heldMin >= STANDDOWN_AFTER_MIN
+               && !(Array.isArray(state.rosterMembers)
+                    && state.rosterMembers.every((m) => m === ME || ourSigners.has(m)))) {
       const ok = await post(DISCOVERY, {
         type: 'sonnet.withdraw.v1',
         contest_id: CONTEST,
@@ -347,7 +349,17 @@ async function pass(state) {
        * soon, and both lose the seat. Once the wait is clearly the empty chair,
        * remember who never answered, release, and rebuild around someone else.
        */
-      if (heldMin >= PARTIAL_HOLD_MIN) {
+      if (missing.length === 0) {
+        /**
+         * Every seat signed. This is the finish line for assembly and the only
+         * thing left is the referee, which is running about four hours behind --
+         * so there is nothing to time out against and nothing better to trade
+         * for. On 2026-09-15 a roster reached 4 of 4 at 14:35:31 and this branch
+         * did not exist: the six-minute cap fired at 14:39 and threw away a
+         * complete team, which then had to be rebuilt by hand.
+         */
+        console.log(`  ${OUR_GAME} is COMPLETE (${state.rosterMembers.length}/${state.rosterMembers.length}) — holding for the referee`);
+      } else if (heldMin >= PARTIAL_HOLD_MIN) {
         state.unresponsive = state.unresponsive || {};
         for (const m of missing) state.unresponsive[m] = new Date().toISOString();
         const ok = await post(DISCOVERY, {
