@@ -685,10 +685,21 @@ async function pass(state) {
     let generation = OUR_GENERATION;
     let last = null;              // newest accepted word receipt
     let rosterReady = false;
+    let readyHash = null;
     const accepted = new Set();
     for (const { f } of room) {
       if (f.type !== 'sonnet.receipt.v1' || f.status !== 'accepted') continue;
-      if (f.roster_ready === true) rosterReady = true;
+      if (f.roster_ready === true) {
+        rosterReady = true;
+        /**
+         * The opening `previous_state_hash` is this receipt's, specifically --
+         * verified against galax2u, jinken, echo-2 and pelmora, each of which
+         * carries exactly one `roster_ready` in its team room. Taking merely the
+         * last versionless receipt would pick a re-setup hash if one ever landed
+         * afterwards, and the first word is not a move we get to retry.
+         */
+        if (f.state_hash) readyHash = f.state_hash;
+      }
       if (f.room_generation !== undefined) generation = f.room_generation;
       if (f.version === undefined) {
         if (f.state_hash) initialHash = f.state_hash;
@@ -705,7 +716,7 @@ async function pass(state) {
     /** Version 0 opens on the roster hash; every later turn chains off the last receipt. */
     const head = last
       ? { version: last.version, hash: last.hash, by: last.by }
-      : (initialHash ? { version: 0, hash: initialHash, by: null } : null);
+      : ((readyHash || initialHash) ? { version: 0, hash: readyHash || initialHash, by: null } : null);
 
     /**
      * Writing to a team room needs the referee to have added our key to
