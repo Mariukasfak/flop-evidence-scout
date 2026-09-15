@@ -215,6 +215,21 @@ async function pass(state) {
     if (!String(f.type || '').startsWith('sonnet.receipt')) continue;
     if (f.sender_did !== ME && f.participant_did !== ME) continue;
     if (Date.parse(row.ts) < consentSince) continue;
+    /**
+     * `roster: unregistered` means one of the writers we named is not registered,
+     * and the referee does not say which. It arrives hours late -- four of ours
+     * came back between 18:51 and 20:22 for rosters posted at 09:33-10:19 -- and
+     * there is no identity list to check against beforehand, so this verdict is
+     * the only evidence that exists. Bench everyone it named: we cannot tell
+     * which of the three was the problem, and re-drawing from the rest of the
+     * pool is cheaper than testing them one at a time at hours per test.
+     */
+    if (f.reason === 'roster: unregistered' && state.rosterHistory?.[f.request_id]) {
+      state.unresponsive = state.unresponsive || {};
+      const named = state.rosterHistory[f.request_id].filter((m) => m !== ME);
+      for (const m of named) state.unresponsive[m] = new Date().toISOString();
+      console.log(`  benching ${named.length} writer(s) named on an unregistered roster: ${named.map((m) => m.slice(-8)).join(' ')}`);
+    }
     const aboutOurConsent = state.consentRequestId && f.request_id === state.consentRequestId;
     if (f.status === 'rejected' && state.consent && !aboutOurConsent) {
       console.log(`  ignoring a rejection for ${String(f.request_id || '?').slice(0, 32)} — not the request we hold consent under`);
@@ -572,6 +587,11 @@ async function pass(state) {
         state.consentAt = new Date().toISOString();
         state.consentRequestId = rosterRequestId;
         state.rosterMembers = members;
+        /** Keep a short history so a late verdict can be attributed to a list. */
+        state.rosterHistory = state.rosterHistory || {};
+        state.rosterHistory[rosterRequestId] = members;
+        const ids = Object.keys(state.rosterHistory);
+        for (const old of ids.slice(0, Math.max(0, ids.length - 40))) delete state.rosterHistory[old];
         state.invitedAt = new Date().toISOString();
         /**
          * An accepted roster is not a team until every member signs it, and a
