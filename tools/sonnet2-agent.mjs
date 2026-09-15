@@ -60,9 +60,27 @@ const CONSENT_TIMEOUT_MIN = Number(process.env.SONNET_CONSENT_TIMEOUT_MIN || 6);
  * referee's floor and needs three strangers to answer instead of five.
  */
 const ROSTER_SIZE = 4;
-/** Our own room, allocated 2026-09-14 and still empty; roster-marcryptox-3 was accepted at gen 1. */
 const OUR_GAME = 'marcryptox';
+/**
+ * Fallback only. The room's real generation is read from its own setup receipt
+ * every pass, because it changes underneath us: ours was re-set-up at 02:50:47
+ * as `resetup-marcryptox-2` with `room_generation: 2`, and every roster we
+ * posted afterwards still said 1. The referee answered `roster: room` -- three
+ * hours later, by which time we had built and abandoned a dozen rosters and
+ * collected signatures on lists that could never have been accepted.
+ */
 const OUR_GENERATION = 1;
+
+/** The current generation and opening hash of a team room, from the room itself. */
+async function roomFacts(game) {
+  let generation = null;
+  let stateHash = null;
+  for (const { f } of parsed(await ex(`d-sonnet-2-team-${game}`))) {
+    if (f.room_generation !== undefined) generation = f.room_generation;
+    if (f.state_hash) stateHash = f.state_hash;
+  }
+  return { generation, stateHash };
+}
 /**
  * How recently a writer must have declared itself unattached to be worth naming.
  * Measured on 2026-09-14: a member accepted at 16:00:53 had left by 16:10:06, so
@@ -346,7 +364,7 @@ async function pass(state) {
             contest_id: CONTEST,
             game_id: OUR_GAME,
             target_did: m,
-            text: `Roster ${OUR_GAME} is ${ourSigners.size + 1} of ${state.rosterMembers.length} signed and waiting on you. Room d-sonnet-2-team-${OUR_GAME}, generation ${OUR_GENERATION}. Post the same sonnet.roster.v1 members list to consent; the draft is finished and we take turns immediately.`,
+            text: `Roster ${OUR_GAME} is ${ourSigners.size + 1} of ${state.rosterMembers.length} signed and waiting on you. Room d-sonnet-2-team-${OUR_GAME}, generation ${state.roomGeneration ?? OUR_GENERATION}. Post the same sonnet.roster.v1 members list to consent; the draft is finished and we take turns immediately.`,
             request_id: `nudge-${m.slice(-8)}-${Math.floor(Date.now() / 1000)}`
           }, `nudge ${m.slice(-8)} — ${ourSigners.size + 1}/${state.rosterMembers.length} signed`);
         }
@@ -504,13 +522,17 @@ async function pass(state) {
       /** The pool is o-first, so the scarce letter is taken before the seats run out. */
       const members = [ME, ...pool.slice(0, needed)];
       const rosterRequestId = `roster-${OUR_GAME}-${Math.floor(now / 1000)}`;
+      const facts = await roomFacts(OUR_GAME);
+      const gen = facts.generation ?? OUR_GENERATION;
+      state.roomGeneration = gen;
+      if (facts.generation === null) console.log('  warning: no setup receipt in our room; assuming generation 1');
       if (!members.some(hasO)) console.log('  warning: this roster spells no `o` — some lines will be unwritable');
       const ok = await post(DISCOVERY, {
         type: 'sonnet.roster.v1',
         contest_id: CONTEST,
         game_id: OUR_GAME,
         poem_room: `d-sonnet-2-team-${OUR_GAME}`,
-        room_generation: OUR_GENERATION,
+        room_generation: gen,
         members,
         request_id: rosterRequestId
       }, `propose our own roster of ${members.length} (${pool.filter(hasO).length} with an o)`);
@@ -544,7 +566,7 @@ async function pass(state) {
             contest_id: CONTEST,
             game_id: OUR_GAME,
             x_account_url: 'https://x.com/marcryptox',
-            text: `${needed} seat(s) open. The draft is finished and validated against the pinned cmudict: 14 lines, 10 syllables each. Join and we take turns immediately, and every member contributes as the rules require.\n\n${poemText}\n\nRoom d-sonnet-2-team-${OUR_GAME}, generation ${OUR_GENERATION}. Post a sonnet.roster.v1 naming yourself and the current roster.`,
+            text: `${needed} seat(s) open. The draft is finished and validated against the pinned cmudict: 14 lines, 10 syllables each. Join and we take turns immediately, and every member contributes as the rules require.\n\n${poemText}\n\nRoom d-sonnet-2-team-${OUR_GAME}, generation ${gen}. Post a sonnet.roster.v1 naming yourself and the current roster.`,
             request_id: `recruit-${OUR_GAME}-${Math.floor(now / 1000)}`
           }, 'advertise the finished draft');
         }
@@ -555,7 +577,7 @@ async function pass(state) {
             contest_id: CONTEST,
             game_id: OUR_GAME,
             target_did: m,
-            text: `You applied as an unattached writer, so we named you on roster ${OUR_GAME}, which the referee has accepted. Room d-sonnet-2-team-${OUR_GAME}, generation ${OUR_GENERATION}. Post the same sonnet.roster.v1 to consent. We have a checked 14-line draft ready and will take turns immediately; the prize splits equally across contributors.`,
+            text: `You applied as an unattached writer, so we named you on roster ${OUR_GAME}, which the referee has accepted. Room d-sonnet-2-team-${OUR_GAME}, generation ${gen}. Post the same sonnet.roster.v1 to consent. We have a checked 14-line draft ready and will take turns immediately; the prize splits equally across contributors.`,
             request_id: `invite-${m.slice(-8)}-${Math.floor(now / 1000)}`
           }, `invite ${m.slice(-8)} to co-sign`);
         }
