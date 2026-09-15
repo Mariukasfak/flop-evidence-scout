@@ -306,7 +306,14 @@ async function pass(state) {
       for (const { row, f } of disc) {
         if (f.type !== 'sonnet.roster.v1' || f.game_id !== OUR_GAME) continue;
         if (!Array.isArray(f.members) || f.members.join(',') !== want) continue;
-        if (Date.parse(row.ts) < Date.parse(state.consentAt)) continue;
+        /**
+         * No time bound here. Consent attaches to the member list, not to our
+         * latest post of it, and the window is already only what discovery
+         * retains. Filtering on `consentAt` made a restored roster look unsigned:
+         * the three counter-signatures had landed at 14:33-14:35 and the restored
+         * post was 14:57, so a complete team read as 1/4 and would have been
+         * churned away a second time.
+         */
         if (row.from !== ME) {
           ourSigners.add(row.from);
           /** Someone who signed *our* list is the best evidence we have about them. */
