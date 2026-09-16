@@ -168,7 +168,12 @@ function saveState(s) {
  * overnight on 2026-09-15/16 — and a stall spanning the moment `roster_ready`
  * lands is the one failure that cannot be made up.
  */
-const FETCH_TIMEOUT_MS = 45_000;
+/**
+ * Measured 2026-09-16: the discovery export is 6.5 MB and takes 53.6 s cold
+ * (0.9 s warm), so a 45 s bound was rejecting a read that was simply working.
+ * The team room, by contrast, answers in under a second.
+ */
+const FETCH_TIMEOUT_MS = 80_000;
 /** No single pass may outlive this; the watchdog's stall threshold is 15 minutes. */
 const PASS_BUDGET_MS = 4 * 60_000;
 
@@ -216,12 +221,19 @@ async function pass(state) {
   console.log(`\n[agent] ${new Date().toISOString().slice(11, 19)}Z  ${hoursLeft.toFixed(1)}h left  consent=${state.consent || 'none'}`);
   if (hoursLeft <= 0) { console.log('[agent] contest closed'); return false; }
 
+  /**
+   * Discovery being unreachable must not blind us to our own poem.
+   *
+   * Three passes in a row failed to read it at 10:25-10:27 and each skipped
+   * everything, including the team-room check — and the team room is where
+   * `roster_ready` appears and where our turn has to be taken. It is also a
+   * thousandth the size and answers in under a second. So a failed discovery
+   * read now suspends only the roster and consent decisions, which are the ones
+   * that need it; the poem is checked either way.
+   */
   const discRows = await ex(DISCOVERY);
-  if (discRows === null) {
-    console.log('  discovery read failed — skipping this pass rather than acting on nothing');
-    return true;
-  }
-  const disc = parsed(discRows);
+  const disc = discRows === null ? null : parsed(discRows);
+  if (!disc) console.log('  discovery unreadable — roster decisions suspended, poem still checked');
 
   /**
    * Receipts naming us are the only authority on our own consent. The referee
@@ -296,6 +308,7 @@ async function pass(state) {
    * holds exactly one consent, so every minute we sit on our own unsigned
    * roster is a minute we would refuse anyone who invited us.
    */
+  if (disc) {
   const rosterCutoff = Date.now() - 20 * 60_000;
   /**
    * How many distinct members have signed each roster on offer.
@@ -734,6 +747,8 @@ async function pass(state) {
     state.applied[g] = ok ? new Date().toISOString() : 'failed';
     applications += 1;
   }
+
+  }   /* end of the discovery-dependent section */
 
   /* ---- 3. take a turn if a poem we are in is live ------------------------- */
   if (state.consent) {
