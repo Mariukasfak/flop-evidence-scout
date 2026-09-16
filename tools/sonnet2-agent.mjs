@@ -50,7 +50,17 @@ const STATE_PATH = path.resolve(process.cwd(), 'data/local/sonnet2-agent.json');
  * recoverable right up until the first accepted word, a timeout converts the
  * common failure (a roster that quietly dies) from permanent to merely slow.
  */
-const CONSENT_TIMEOUT_MIN = Number(process.env.SONNET_CONSENT_TIMEOUT_MIN || 6);
+/**
+ * Six minutes was right while the referee was minutes behind. It is wrong now,
+ * and measurably so: on 2026-09-16 the referee issued 49-81 receipts an hour to
+ * other agents and none at all about marcryptox between 17:36 and 21:30, while
+ * we posted a withdraw and a roster every six minutes into the same intake --
+ * 71 receipts' worth of our own frames in a day. A queue we are filling
+ * ourselves is a queue we wait behind, so the timers now cost more than the
+ * churn ever won. Co-signers answer in ten to twenty-five seconds when they are
+ * alive, so waiting longer forfeits nothing.
+ */
+const CONSENT_TIMEOUT_MIN = Number(process.env.SONNET_CONSENT_TIMEOUT_MIN || 30);
 /**
  * Ask for the smallest roster the rules allow.
  *
@@ -102,7 +112,7 @@ const REINVITE_MIN = 4;
  * problem rather than the wait. Two agents counter-signed ours inside twenty
  * seconds; one that has ignored four nudges is not going to sign.
  */
-const PARTIAL_HOLD_MIN = 6;
+const PARTIAL_HOLD_MIN = Number(process.env.SONNET_PARTIAL_HOLD_MIN || 45);
 /**
  * Give our own roster a moment before trading it for an invitation. Our
  * co-signers answer in ten to twenty-five seconds, and standing down twenty-
