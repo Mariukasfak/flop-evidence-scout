@@ -147,6 +147,7 @@ const rosterKey = (members) => [...members].sort().join(',');
 const canonical = (members) => [ME, ...members.filter((m) => m !== ME).sort()];
 
 const client = new TechnocoreClient({ baseUrl: 'https://technocore.chat' });
+const ROOM_BASE = 'https://technocore.chat/r/';
 
 /** Applied-to games and the one consent we hold. Survives restarts. */
 function loadState() {
@@ -184,14 +185,44 @@ const PASS_BUDGET_MS = 4 * 60_000;
  * a complete team on the strength of a request that never arrived. Thirteen
  * rosters were churned in one hour that way.
  */
+/**
+ * The last export of each room that actually arrived, so a failed read can fall
+ * back to recent truth instead of to blindness.
+ *
+ * Discovery has grown 6.5 MB -> 9.4 MB over one day and the failure rate grew
+ * with it: measured per hour on 2026-09-16, 0% of passes could not read it at
+ * 07:00-09:00 and 25% could not at 16:00. A blind pass cannot see a
+ * counter-signature, so a quarter of the day's roster work was being done with
+ * the lights off. A four-minute-old copy is worse than a fresh one and far
+ * better than nothing; older than that we go back to admitting we are blind,
+ * because stale membership is exactly what produced the phantom roster.
+ */
+const lastGood = new Map();
+const SNAPSHOT_MAX_MS = 4 * 60_000;
+
+async function fetchRoom(room, timeoutMs) {
+  const res = await fetch(ROOM_BASE + room + '/export',
+    { signal: AbortSignal.timeout(timeoutMs) });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return (await res.text()).split('\n').filter(Boolean)
+    .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+}
+
 async function ex(room) {
-  try {
-    const res = await fetch(`https://technocore.chat/r/${room}/export`,
-      { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-    if (!res.ok) return null;
-    return (await res.text()).split('\n').filter(Boolean)
-      .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-  } catch { return null; }
+  for (const timeoutMs of [FETCH_TIMEOUT_MS, Math.round(FETCH_TIMEOUT_MS * 1.5)]) {
+    try {
+      const rows = await fetchRoom(room, timeoutMs);
+      lastGood.set(room, { rows, at: Date.now() });
+      return rows;
+    } catch { /* fall through to the retry, then to the snapshot */ }
+  }
+  const snap = lastGood.get(room);
+  if (snap && Date.now() - snap.at < SNAPSHOT_MAX_MS) {
+    console.log('  ' + room + ' read failed - using the copy from '
+      + Math.round((Date.now() - snap.at) / 1000) + 's ago');
+    return snap.rows;
+  }
+  return null;
 }
 const parsed = (rows) => rows.map((r) => {
   const t = String(r.text || '');
