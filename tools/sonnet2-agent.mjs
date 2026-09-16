@@ -114,6 +114,14 @@ const REINVITE_MIN = 4;
  */
 const PARTIAL_HOLD_MIN = Number(process.env.SONNET_PARTIAL_HOLD_MIN || 45);
 /**
+ * What a part-signed roster is worth waiting on, by how many others have signed
+ * it. A rebuild voids every signature we hold, so the wait has to be priced in
+ * signatures, not minutes: one seat open is worth holding longer than the
+ * referee's own backlog, because the referee will reach us before a fresh
+ * roster could ever be assembled and confirmed.
+ */
+const holdMinutesFor = (signed) => (signed >= 2 ? 480 : signed === 1 ? 120 : PARTIAL_HOLD_MIN);
+/**
  * Give our own roster a moment before trading it for an invitation. Our
  * co-signers answer in ten to twenty-five seconds, and standing down twenty-
  * seven seconds after posting cost us a roster before anyone could reach it.
@@ -544,15 +552,27 @@ async function pass(state) {
          * complete team, which then had to be rebuilt by hand.
          */
         console.log(`  ${OUR_GAME} is COMPLETE (${state.rosterMembers.length}/${state.rosterMembers.length}) — holding for the referee`);
-      } else if (heldMin >= PARTIAL_HOLD_MIN) {
+      } else if (heldMin >= holdMinutesFor(ourSigners.size)) {
+        /**
+         * Releasing costs every signature we hold, because consent attaches to
+         * the exact member list and any change voids it. So the price of a
+         * rebuild is the number of agents who already said yes, and the timer
+         * has to scale with it. At 22:27 on 2026-09-16 a flat 45-minute cap
+         * fired on a roster that stood at 3 of 4 and threw away both
+         * counter-signatures to chase one silent seat -- with co-signers this
+         * scarce that trade can never pay.
+         */
         state.unresponsive = state.unresponsive || {};
         for (const m of missing) state.unresponsive[m] = new Date().toISOString();
+        /** Whoever signed has earned their seat back on the next list. */
+        state.keepNext = [...ourSigners];
         const ok = await post(DISCOVERY, {
           type: 'sonnet.withdraw.v1',
           contest_id: CONTEST,
           game_id: OUR_GAME,
           request_id: `rebuild-${OUR_GAME}-${Math.floor(Date.now() / 1000)}`
-        }, `release ${OUR_GAME} — ${missing.length} seat(s) never answered in ${PARTIAL_HOLD_MIN} min`);
+        }, `release ${OUR_GAME} — ${missing.length} seat(s) silent for `
+          + `${holdMinutesFor(ourSigners.size)} min, keeping ${ourSigners.size} signer(s)`);
         if (ok) { state.consent = null; state.consentAt = null; state.rosterAt = null; }
       } else
       if (sinceInvite >= REINVITE_MIN && missing.length) {
@@ -728,8 +748,19 @@ async function pass(state) {
     } else if (sinceLast < ROSTER_RETRY_MIN) {
       console.log(`  roster attempt cooling down (${sinceLast.toFixed(0)}/${ROSTER_RETRY_MIN} min)`);
     } else {
+      /**
+       * Anyone who signed the list we just released keeps their seat on the next
+       * one. They have already proved they answer, which is the scarcest thing
+       * in this contest -- on 2026-09-16 a release at 3 of 4 dropped both
+       * counter-signatures and invited three strangers instead, and none of the
+       * three ever replied.
+       */
+      const kept = (state.keepNext || []).filter((d) => !ignored(d) && d !== ME);
       /** The pool is o-first, so the scarce letter is taken before the seats run out. */
-      const members = canonical([ME, ...pool.slice(0, needed)]);
+      const members = canonical([ME, ...kept,
+        ...pool.filter((d) => !kept.includes(d)).slice(0, Math.max(0, needed - kept.length))]);
+      if (kept.length) console.log(`  keeping ${kept.length} proven signer(s) on the new list`);
+      state.keepNext = null;
       const rosterRequestId = `roster-${OUR_GAME}-${Math.floor(now / 1000)}`;
       const facts = await roomFacts(OUR_GAME);
       const gen = facts.generation ?? OUR_GENERATION;
