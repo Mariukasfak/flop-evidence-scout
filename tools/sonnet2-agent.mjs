@@ -260,7 +260,7 @@ async function pass(state) {
    * request_id can.
    */
   const consentSince = state.consentAt ? Date.parse(state.consentAt) : 0;
-  for (const { row, f } of disc) {
+  for (const { row, f } of (disc || [])) {
     if (!String(f.type || '').startsWith('sonnet.receipt')) continue;
     if (f.sender_did !== ME && f.participant_did !== ME) continue;
     if (Date.parse(row.ts) < consentSince) continue;
