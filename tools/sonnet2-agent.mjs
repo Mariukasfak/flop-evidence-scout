@@ -294,6 +294,7 @@ async function pass(state) {
       console.log(`  consent cleared by referee: ${f.reason}`);
       state.consent = null;
       state.consentAt = null;
+      state.completeRoster = null;
     }
     if (f.status === 'accepted' && f.roster_ready === true && state.consent) {
       console.log('  ROSTER READY');
@@ -395,7 +396,29 @@ async function pass(state) {
         }
       }
     }
-    const cosignedByOthers = ourSigners.size > 0;
+    /**
+     * Once a roster has been seen complete, it stays complete until the referee
+     * says otherwise.
+     *
+     * Co-signatures are only knowable while they sit in discovery's retained
+     * window, which is 22.5 h now and shrinks as traffic rises — the
+     * registration room went 70 → 49 → 38 min over one day the same way. If our
+     * signatures roll out of view before the referee (11 h behind) reaches them,
+     * a live reading would say 1 of 4 and the loop would demolish a finished
+     * team on the strength of a room forgetting. So the observation is recorded
+     * once and trusted afterwards; only a rejection clears it.
+     */
+    const heldKey = Array.isArray(state.rosterMembers) ? rosterKey(state.rosterMembers) : null;
+    if (state.consent === OUR_GAME && heldKey
+        && state.rosterMembers.every((m) => m === ME || ourSigners.has(m))) {
+      if (state.completeRoster?.key !== heldKey) {
+        state.completeRoster = { key: heldKey, at: new Date().toISOString() };
+        console.log(`  recorded ${OUR_GAME} as complete; it will not be rebuilt on a later thin read`);
+      }
+    }
+    const rememberedComplete = state.consent === OUR_GAME
+      && heldKey && state.completeRoster?.key === heldKey;
+    const cosignedByOthers = ourSigners.size > 0 || rememberedComplete;
 
     if (frozen) {
       /** Membership is sealed; withdrawing is impossible and leaving would be wrong. */
@@ -420,7 +443,9 @@ async function pass(state) {
        * yes. A partly-signed roster is the best position we have ever reached,
        * so hold it and keep asking the seats that are still empty.
        */
-      const missing = state.rosterMembers.filter((m) => m !== ME && !ourSigners.has(m));
+      const missing = rememberedComplete
+        ? []
+        : state.rosterMembers.filter((m) => m !== ME && !ourSigners.has(m));
       const sinceInvite = state.invitedAt ? (Date.now() - Date.parse(state.invitedAt)) / 60_000 : Infinity;
       console.log(`  holding ${OUR_GAME}: ${ourSigners.size + 1}/${state.rosterMembers.length} signed, ${missing.length} seat(s) open (${heldMin.toFixed(0)}/${PARTIAL_HOLD_MIN} min)`);
 
