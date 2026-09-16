@@ -12,6 +12,10 @@
 LOG=/root/TriAgent/data/local/sonnet2-agent.log
 NOTE=/root/TriAgent/data/local/sonnet2-events.log
 STALL_MIN=15
+# The agent parses a 6.5 MB export every pass; RSS went 58 -> 102 MB in half an
+# hour. Restarting is cheap now that the roster is recorded in state, and an
+# OOM at the moment roster_ready lands is not recoverable.
+RSS_MAX_MB=400
 
 while true; do
   NOW=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
@@ -20,6 +24,17 @@ while true; do
     AGE=$(( ( $(date +%s) - $(stat -c %Y "$LOG") ) / 60 ))
     if [ "$AGE" -ge "$STALL_MIN" ]; then
       echo "$NOW  STALL: log silent ${AGE}m, restarting agent" >> "$NOTE"
+      systemctl restart sonnet2-agent
+      sleep 60
+      continue
+    fi
+  fi
+
+  PID=$(pgrep -f 'sonnet2-agent.mjs' | head -1)
+  if [ -n "$PID" ]; then
+    RSS=$(( $(ps -o rss= -p "$PID" 2>/dev/null || echo 0) / 1024 ))
+    if [ "$RSS" -ge "$RSS_MAX_MB" ]; then
+      echo "$NOW  MEMORY: agent at ${RSS}MB, restarting before it is killed" >> "$NOTE"
       systemctl restart sonnet2-agent
       sleep 60
       continue
