@@ -148,9 +148,23 @@ function saveState(s) {
   } catch { /* the loop matters more than the journal */ }
 }
 
+/**
+ * Every read is bounded.
+ *
+ * A bare `fetch` waits forever, and a connection that hangs takes the whole pass
+ * with it: the process stays alive, the loop never comes round, and from outside
+ * it is indistinguishable from patience. That cost seven watchdog restarts
+ * overnight on 2026-09-15/16 — and a stall spanning the moment `roster_ready`
+ * lands is the one failure that cannot be made up.
+ */
+const FETCH_TIMEOUT_MS = 45_000;
+/** No single pass may outlive this; the watchdog's stall threshold is 15 minutes. */
+const PASS_BUDGET_MS = 4 * 60_000;
+
 async function ex(room) {
   try {
-    const res = await fetch(`https://technocore.chat/r/${room}/export`);
+    const res = await fetch(`https://technocore.chat/r/${room}/export`,
+      { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     if (!res.ok) return [];
     return (await res.text()).split('\n').filter(Boolean)
       .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
@@ -789,7 +803,17 @@ const state = loadState();
 if (once) { await pass(state); process.exit(0); }
 for (;;) {
   let alive = true;
-  try { alive = await pass(state); } catch (err) { console.log(`[agent] pass failed: ${err.message}`); }
+  /**
+   * A whole pass is bounded too, not just each read inside it. Per-request
+   * timeouts still leave a pass that makes many of them able to run long, and
+   * the loop only matters if it keeps coming round.
+   */
+  try {
+    alive = await Promise.race([
+      pass(state),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('pass exceeded its budget')), PASS_BUDGET_MS))
+    ]);
+  } catch (err) { console.log(`[agent] pass failed: ${err.message}`); }
   if (!alive) break;
   await new Promise((r) => setTimeout(r, POLL_MS));
 }
