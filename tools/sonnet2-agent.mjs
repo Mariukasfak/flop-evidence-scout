@@ -134,6 +134,17 @@ const MY_LETTERS = new Set([...ME.toLowerCase()].filter((c) => c >= 'a' && c <= 
 const canSpell = (w) => [...w.toLowerCase().replace(/[^a-z]/g, '')].every((c) => MY_LETTERS.has(c));
 /** `did:key:` carries no `o`, so a member whose key does is the scarce one to hold. */
 const hasO = (did) => did.toLowerCase().includes('o');
+/**
+ * One canonical ordering for a roster, and one key for comparing two.
+ *
+ * The same four writers in a different order are the same team, but a literal
+ * `members.join(',')` says otherwise: on 2026-09-16 the agent re-proposed our
+ * complete roster with the members shuffled, could no longer match the three
+ * signatures already sitting in discovery, read its own finished team as 1 of 4
+ * and started the six-minute demolition timer on it.
+ */
+const rosterKey = (members) => [...members].sort().join(',');
+const canonical = (members) => [ME, ...members.filter((m) => m !== ME).sort()];
 
 const client = new TechnocoreClient({ baseUrl: 'https://technocore.chat' });
 
@@ -287,7 +298,7 @@ async function pass(state) {
   for (const { row, f } of disc) {
     if (f.type !== 'sonnet.roster.v1' || !Array.isArray(f.members)) continue;
     if (Date.parse(row.ts) < rosterCutoff) continue;
-    const k = `${f.game_id}:${f.members.join(',')}`;
+    const k = `${f.game_id}:${rosterKey(f.members)}`;
     if (!offerSigners.has(k)) offerSigners.set(k, new Set());
     offerSigners.get(k).add(row.from);
   }
@@ -297,7 +308,7 @@ async function pass(state) {
     && f.game_id !== OUR_GAME
     && Date.parse(row.ts) >= rosterCutoff)
     .filter(({ f }) => {
-      const signed = offerSigners.get(`${f.game_id}:${f.members.join(',')}`)?.size ?? 0;
+      const signed = offerSigners.get(`${f.game_id}:${rosterKey(f.members)}`)?.size ?? 0;
       return signed >= Math.ceil(f.members.length / 2);
     })
     /**
@@ -309,7 +320,7 @@ async function pass(state) {
      * message; never signing it again costs the seat.
      */
     .filter(({ f }) => {
-      const at = state.posted[`${f.game_id}:${f.members.join(',')}`];
+      const at = state.posted[`${f.game_id}:${rosterKey(f.members)}`];
       if (!at) return true;
       const ageMin = (Date.now() - Date.parse(at)) / 60_000;
       /** Legacy entries stored `true` and carry no time; treat them as already stale. */
@@ -337,10 +348,10 @@ async function pass(state) {
      */
     const ourSigners = new Set();
     if (state.consent === OUR_GAME && Array.isArray(state.rosterMembers)) {
-      const want = state.rosterMembers.join(',');
+      const want = rosterKey(state.rosterMembers);
       for (const { row, f } of disc) {
         if (f.type !== 'sonnet.roster.v1' || f.game_id !== OUR_GAME) continue;
-        if (!Array.isArray(f.members) || f.members.join(',') !== want) continue;
+        if (!Array.isArray(f.members) || rosterKey(f.members) !== want) continue;
         /**
          * No time bound here. Consent attaches to the member list, not to our
          * latest post of it, and the window is already only what discovery
@@ -458,7 +469,7 @@ async function pass(state) {
      * roster still in the window has most likely been resolved or abandoned.
      */
     for (const { f } of offers) {
-      const key = `${f.game_id}:${f.members.join(',')}`;
+      const key = `${f.game_id}:${rosterKey(f.members)}`;
       const requestId = `consent-${f.game_id}-${Math.floor(Date.now() / 1000)}`;
       const ok = await post(DISCOVERY, {
         type: 'sonnet.roster.v1',
@@ -586,7 +597,7 @@ async function pass(state) {
       console.log(`  roster attempt cooling down (${sinceLast.toFixed(0)}/${ROSTER_RETRY_MIN} min)`);
     } else {
       /** The pool is o-first, so the scarce letter is taken before the seats run out. */
-      const members = [ME, ...pool.slice(0, needed)];
+      const members = canonical([ME, ...pool.slice(0, needed)]);
       const rosterRequestId = `roster-${OUR_GAME}-${Math.floor(now / 1000)}`;
       const facts = await roomFacts(OUR_GAME);
       const gen = facts.generation ?? OUR_GENERATION;
