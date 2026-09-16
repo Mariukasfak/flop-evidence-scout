@@ -334,7 +334,15 @@ async function pass(state) {
      * which of the three was the problem, and re-drawing from the rest of the
      * pool is cheaper than testing them one at a time at hours per test.
      */
-    if (f.reason === 'roster: unregistered' && state.rosterHistory?.[f.request_id]) {
+    /**
+     * `roster: member already frozen` is the same kind of permanent fact as
+     * `roster: unregistered`, and it was not being learned from. A DID on a
+     * frozen roster has started writing somewhere else and can never join us;
+     * re-drawing it burns a whole roster attempt at hours per attempt. Three of
+     * these came back on 2026-09-16 and the pool kept offering the same names.
+     */
+    const PERMANENT_BENCH = ['roster: unregistered', 'roster: member already frozen'];
+    if (PERMANENT_BENCH.includes(f.reason) && state.rosterHistory?.[f.request_id]) {
       /**
        * A separate list from `unresponsive`, and a permanent one. Being asleep
        * for half an hour is temporary; not being a registered writer is a fact
@@ -344,7 +352,7 @@ async function pass(state) {
       state.unregistered = state.unregistered || {};
       const named = state.rosterHistory[f.request_id].filter((m) => m !== ME);
       for (const m of named) state.unregistered[m] = new Date().toISOString();
-      console.log(`  benching ${named.length} writer(s) named on an unregistered roster: ${named.map((m) => m.slice(-8)).join(' ')}`);
+      console.log(`  benching ${named.length} writer(s) — "${f.reason}": ${named.map((m) => m.slice(-8)).join(' ')}`);
     }
     const aboutOurConsent = state.consentRequestId && f.request_id === state.consentRequestId;
     if (f.status === 'rejected' && state.consent && !aboutOurConsent) {
