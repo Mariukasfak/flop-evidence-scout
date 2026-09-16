@@ -42,7 +42,13 @@ for (const line of fs.readFileSync(dictPath, 'utf8').split('\n')) {
   const [wordRaw, ...phones] = line.trim().split(/\s+/);
   const word = wordRaw.replace(/\(\d+\)$/, '').toLowerCase();
   const count = phones.filter((p) => /\d/.test(p)).length;
-  if (!syllables.has(word) || syllables.get(word) > count) syllables.set(word, count);
+  /**
+   * The official validator charges the *largest* listed pronunciation:
+   * `counts[word] = max(counts.get(word, 0), count)`. Taking the minimum, as
+   * this did, quietly under-counts every word with a short variant and would
+   * pass a line the referee rejects for overflowing ten syllables.
+   */
+  if (!syllables.has(word) || syllables.get(word) < count) syllables.set(word, count);
 }
 
 const A = 'abcdefghijklmnopqrstuvwxyz';
