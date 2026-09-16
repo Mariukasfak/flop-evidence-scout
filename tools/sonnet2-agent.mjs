@@ -375,6 +375,7 @@ async function pass(state) {
      * once a teammate has signed ours, or we strand them.
      */
     const ourSigners = new Set();
+    const signedAt = new Map();
     if (state.consent === OUR_GAME && Array.isArray(state.rosterMembers)) {
       const want = rosterKey(state.rosterMembers);
       for (const { row, f } of disc) {
@@ -390,6 +391,7 @@ async function pass(state) {
          */
         if (row.from !== ME) {
           ourSigners.add(row.from);
+          signedAt.set(row.from, row.ts);
           /** Someone who signed *our* list is the best evidence we have about them. */
           state.loyal = state.loyal || {};
           state.loyal[row.from] = new Date().toISOString();
@@ -408,15 +410,40 @@ async function pass(state) {
      * team on the strength of a room forgetting. So the observation is recorded
      * once and trusted afterwards; only a rejection clears it.
      */
+    /**
+     * A remembered roster still has to yield to a member leaving in public.
+     * One DID holds one live consent, so a later roster naming a different game,
+     * or a withdraw from ours, is that member gone - not a thin read. Without
+     * this the memory outlived the team: all three co-signers moved on between
+     * 08:57 and 12:22 on 2026-09-16 and the loop reported "COMPLETE (4/4)" for
+     * eight hours while it held nothing but its own signature.
+     */
+    const departed = new Set();
+    if (state.consent === OUR_GAME && Array.isArray(state.rosterMembers)) {
+      for (const { row, f } of disc) {
+        if (row.from === ME || !state.rosterMembers.includes(row.from)) continue;
+        const leaves = (f.type === 'sonnet.withdraw.v1' && f.game_id === OUR_GAME)
+          || (f.type === 'sonnet.roster.v1' && f.game_id !== OUR_GAME);
+        if (!leaves) continue;
+        const since = signedAt.get(row.from);
+        if (!since || row.ts > since) departed.add(row.from);
+      }
+    }
+    for (const m of departed) ourSigners.delete(m);
+    if (departed.size && state.completeRoster) {
+      console.log(`  ${departed.size} member(s) left ${OUR_GAME} in public - the roster is not complete any more`);
+      state.completeRoster = null;
+    }
+
     const heldKey = Array.isArray(state.rosterMembers) ? rosterKey(state.rosterMembers) : null;
-    if (state.consent === OUR_GAME && heldKey
+    if (state.consent === OUR_GAME && heldKey && !departed.size
         && state.rosterMembers.every((m) => m === ME || ourSigners.has(m))) {
       if (state.completeRoster?.key !== heldKey) {
         state.completeRoster = { key: heldKey, at: new Date().toISOString() };
         console.log(`  recorded ${OUR_GAME} as complete; it will not be rebuilt on a later thin read`);
       }
     }
-    const rememberedComplete = state.consent === OUR_GAME
+    const rememberedComplete = state.consent === OUR_GAME && !departed.size
       && heldKey && state.completeRoster?.key === heldKey;
     const cosignedByOthers = ourSigners.size > 0 || rememberedComplete;
 
