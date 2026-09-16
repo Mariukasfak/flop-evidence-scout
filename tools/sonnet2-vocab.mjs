@@ -35,6 +35,7 @@ const VOWELS = new Set(['AA', 'AE', 'AH', 'AO', 'AW', 'AY', 'EH', 'ER', 'EY',
  * rejects as over-long, which is how our own checker disagreed with it.
  */
 const syll = new Map();
+const syllMin = new Map();
 const rhyme = new Map();
 for (const line of fs.readFileSync(dictPath, 'utf8').split('\n')) {
   const fields = line.split('#')[0].trim().split(/\s+/);
@@ -45,6 +46,7 @@ for (const line of fs.readFileSync(dictPath, 'utf8').split('\n')) {
   const n = phones.filter((p) => VOWELS.has(p.slice(0, -1)) && /[012]$/.test(p)).length;
   if (!n) continue;
   syll.set(word, Math.max(syll.get(word) || 0, n));
+  syllMin.set(word, Math.min(syllMin.has(word) ? syllMin.get(word) : 99, n));
   /** Rhyme runs from the last stressed vowel to the end of the word. */
   let last = -1;
   for (let i = phones.length - 1; i >= 0; i--) if (/[12]$/.test(phones[i])) { last = i; break; }
@@ -121,6 +123,72 @@ console.log('');
 console.log(`rhyme families with 3+ short words every member can reach: ${ranked.length} (need 7)`);
 for (const [k, v] of ranked.slice(0, topN)) {
   console.log(`  ${k.padEnd(12)} ${v.slice(0, 14).join(' ')}`);
+}
+
+/**
+ * The palette is the list a poem can actually be written from.
+ *
+ * cmudict is 124k entries and most are surnames and abbreviations, so "87,703
+ * words are writable" is true and useless: the list opens with aarti, abee, ac,
+ * achee. Intersecting it with an ordinary working vocabulary turns it into
+ * something a line can be built out of, grouped by how many members could take
+ * the turn -- because a word only one member can write cannot sit next to
+ * another word only that same member can write.
+ */
+if (argv.includes('--palette')) {
+  const listPath = path.resolve(process.cwd(), flag('common', 'data/common-words.txt'));
+  if (!fs.existsSync(listPath)) fail(`no word list at ${listPath}`);
+  const common = [...new Set(fs.readFileSync(listPath, 'utf8')
+    .split('\n').filter((l) => !l.startsWith('#')).join(' ')
+    .toLowerCase().match(/[a-z']+/g) || [])];
+  const buckets = new Map();
+  const dead = [];
+  for (const w of common) {
+    if (!syll.has(w)) continue;
+    const who = writers(w);
+    if (!who.length) { dead.push(w); continue; }
+    const k = `${who.length}|${syll.get(w)}`;
+    if (!buckets.has(k)) buckets.set(k, []);
+    buckets.get(k).push(w);
+  }
+  console.log('');
+  console.log(`palette from ${common.length} common words`);
+  for (const cover of [4, 3, 2, 1]) {
+    for (const n of [1, 2, 3, 4]) {
+      const list = buckets.get(`${cover}|${n}`);
+      if (!list || !list.length) continue;
+      console.log('');
+      console.log(`  ${cover} writer(s), ${n} syllable(s) — ${list.length} words`);
+      console.log(`    ${list.sort().join(' ')}`);
+    }
+  }
+  console.log('');
+  console.log(`  UNWRITABLE by anyone (${dead.length}): ${dead.sort().join(' ')}`);
+}
+
+/**
+ * Words the referee counts as longer than anyone reads them.
+ *
+ * `am` is one syllable in every line of English ever written and two in
+ * cmudict, because the file also lists it as "A.M." -- and the official
+ * validator charges the largest listed pronunciation. Six lines of a finished
+ * draft came back one syllable over for exactly this reason and nothing in the
+ * poem looked wrong. These are the words to keep out of a line, or to count
+ * twice on purpose.
+ */
+if (argv.includes('--traps')) {
+  const listPath = path.resolve(process.cwd(), flag('common', 'data/common-words.txt'));
+  const common = fs.existsSync(listPath)
+    ? [...new Set(fs.readFileSync(listPath, 'utf8')
+      .split('\n').filter((l) => !l.startsWith('#')).join(' ')
+      .toLowerCase().match(/[a-z']+/g) || [])]
+    : [];
+  const traps = common
+    .filter((w) => syll.has(w) && syll.get(w) > syllMin.get(w))
+    .map((w) => `${w}(reads ${syllMin.get(w)}, charged ${syll.get(w)})`);
+  console.log('');
+  console.log(`syllable traps in the common vocabulary: ${traps.length}`);
+  console.log(`  ${traps.sort().join('  ') || '(none)'}`);
 }
 
 const probe = flag('words');
