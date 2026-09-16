@@ -208,21 +208,33 @@ async function fetchRoom(room, timeoutMs) {
     .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
 }
 
+/**
+ * A fresh snapshot is tried before the slow retry, not after it.
+ *
+ * Retrying first cost 80 s + 120 s before the fallback, and a pass only has a
+ * four minute budget -- so the repair for blind passes would have made every
+ * blind pass eat the whole budget instead. The long retry is what we do when
+ * there is nothing to fall back on.
+ */
 async function ex(room) {
-  for (const timeoutMs of [FETCH_TIMEOUT_MS, Math.round(FETCH_TIMEOUT_MS * 1.5)]) {
-    try {
-      const rows = await fetchRoom(room, timeoutMs);
-      lastGood.set(room, { rows, at: Date.now() });
-      return rows;
-    } catch { /* fall through to the retry, then to the snapshot */ }
-  }
+  try {
+    const rows = await fetchRoom(room, FETCH_TIMEOUT_MS);
+    lastGood.set(room, { rows, at: Date.now() });
+    return rows;
+  } catch { /* fall through */ }
+
   const snap = lastGood.get(room);
   if (snap && Date.now() - snap.at < SNAPSHOT_MAX_MS) {
     console.log('  ' + room + ' read failed - using the copy from '
       + Math.round((Date.now() - snap.at) / 1000) + 's ago');
     return snap.rows;
   }
-  return null;
+
+  try {
+    const rows = await fetchRoom(room, Math.round(FETCH_TIMEOUT_MS * 1.5));
+    lastGood.set(room, { rows, at: Date.now() });
+    return rows;
+  } catch { return null; }
 }
 const parsed = (rows) => rows.map((r) => {
   const t = String(r.text || '');
