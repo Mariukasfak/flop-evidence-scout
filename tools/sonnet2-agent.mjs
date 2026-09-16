@@ -75,7 +75,7 @@ const OUR_GENERATION = 1;
 async function roomFacts(game) {
   let generation = null;
   let stateHash = null;
-  for (const { f } of parsed(await ex(`d-sonnet-2-team-${game}`))) {
+  for (const { f } of parsed(await ex(`d-sonnet-2-team-${game}`) || [])) {
     if (f.room_generation !== undefined) generation = f.room_generation;
     if (f.state_hash) stateHash = f.state_hash;
   }
@@ -172,14 +172,21 @@ const FETCH_TIMEOUT_MS = 45_000;
 /** No single pass may outlive this; the watchdog's stall threshold is 15 minutes. */
 const PASS_BUDGET_MS = 4 * 60_000;
 
+/**
+ * Returns null when the read *failed*, and an array when it succeeded — even an
+ * empty one. The distinction is the whole point: a timeout or a 503 that came
+ * back as `[]` read as "nobody has signed our roster", and the agent tore down
+ * a complete team on the strength of a request that never arrived. Thirteen
+ * rosters were churned in one hour that way.
+ */
 async function ex(room) {
   try {
     const res = await fetch(`https://technocore.chat/r/${room}/export`,
       { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-    if (!res.ok) return [];
+    if (!res.ok) return null;
     return (await res.text()).split('\n').filter(Boolean)
       .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-  } catch { return []; }
+  } catch { return null; }
 }
 const parsed = (rows) => rows.map((r) => {
   const t = String(r.text || '');
@@ -209,7 +216,12 @@ async function pass(state) {
   console.log(`\n[agent] ${new Date().toISOString().slice(11, 19)}Z  ${hoursLeft.toFixed(1)}h left  consent=${state.consent || 'none'}`);
   if (hoursLeft <= 0) { console.log('[agent] contest closed'); return false; }
 
-  const disc = parsed(await ex(DISCOVERY));
+  const discRows = await ex(DISCOVERY);
+  if (discRows === null) {
+    console.log('  discovery read failed — skipping this pass rather than acting on nothing');
+    return true;
+  }
+  const disc = parsed(discRows);
 
   /**
    * Receipts naming us are the only authority on our own consent. The referee
@@ -333,7 +345,9 @@ async function pass(state) {
     /** A consent carried over from before this check existed starts its clock now. */
     if (!state.consentAt) state.consentAt = new Date().toISOString();
     const heldMin = (Date.now() - Date.parse(state.consentAt)) / 60_000;
-    const room = parsed(await ex(`d-sonnet-2-team-${state.consent}`));
+    const roomRows = await ex(`d-sonnet-2-team-${state.consent}`);
+    if (roomRows === null) { console.log('  team room read failed — leaving the poem alone this pass'); saveState(state); return true; }
+    const room = parsed(roomRows);
     const acc = new Set();
     for (const { f } of room) {
       if (f.type === 'sonnet.receipt.v1' && f.status === 'accepted') acc.add(f.request_id);
@@ -703,7 +717,7 @@ async function pass(state) {
       if (Number.isFinite(ageH) && ageH < REAPPLY_AFTER_HOURS) continue;
     }
     if (applications >= 4) break;           // pace ourselves; this is not a flood
-    const room = await ex(`d-sonnet-2-team-${g}`);
+    const room = await ex(`d-sonnet-2-team-${g}`) || [];
     const started = room.some((r) => String(r.text || '').includes('"sonnet.word.v1"'));
     if (started) { state.applied[g] = 'started'; continue; }
     const ok = await post(DISCOVERY, {
@@ -723,7 +737,9 @@ async function pass(state) {
 
   /* ---- 3. take a turn if a poem we are in is live ------------------------- */
   if (state.consent) {
-    const room = parsed(await ex(`d-sonnet-2-team-${state.consent}`));
+    const roomRows = await ex(`d-sonnet-2-team-${state.consent}`);
+    if (roomRows === null) { console.log('  team room read failed — leaving the poem alone this pass'); saveState(state); return true; }
+    const room = parsed(roomRows);
 
     /**
      * The opening move needs a hash we do not generate.
