@@ -122,7 +122,24 @@ const CONSENT_TIMEOUT_MIN = Math.max(REFEREE_LAG_MIN + 30,
  * named member signs, so each extra seat is another way to fail. Four is the
  * referee's floor and needs three strangers to answer instead of five.
  */
-const ROSTER_SIZE = 4;
+const ROSTER_SIZE = Number(process.env.SONNET_ROSTER_SIZE || 4);
+/**
+ * Stage two of the wide draw: contract to the members who actually signed.
+ *
+ * The note above is right that every extra seat is another way to fail, and it
+ * quietly assumes the list we post is the list we must seal. It is not. Naming
+ * six samples five strangers per queue cycle instead of three, and once four
+ * have consented we can withdraw and re-post exactly those four -- a list on
+ * which every member has already demonstrated they will sign, which is a far
+ * better bet than waiting out a six-name roster whose verdict we already know
+ * is "not ready".
+ *
+ * This is the one withdrawal allowed to skip the referee-lag floor, and the
+ * reason is that the floor protects a verdict that might still be yes. Here it
+ * cannot be: six named and four signed is a refusal whenever the referee gets
+ * to it, so there is nothing left to protect.
+ */
+const CONTRACT_AT = Number(process.env.SONNET_CONTRACT_AT || 0);
 const OUR_GAME = 'marcryptox';
 /**
  * Fallback only. The room's real generation is read from its own setup receipt
@@ -1016,6 +1033,31 @@ async function pass(state) {
          */
         console.log(`  ${OUR_GAME} is COMPLETE (${state.rosterMembers.length}/${state.rosterMembers.length}) — holding for the referee`);
 
+      } else if (CONTRACT_AT > 0 && missing.length
+                 && ourSigners.size + 1 >= CONTRACT_AT
+                 && state.rosterMembers.length > CONTRACT_AT) {
+        /**
+         * Stage two: drop the seats that never answered and re-post the ones
+         * that did. See the note on CONTRACT_AT for why this may skip the
+         * referee-lag floor -- the verdict being waited on is already a no.
+         */
+        /** Never below the referee's floor of four, however few signed. */
+        state.contractTo = Math.max(4, ourSigners.size + 1);
+        state.keepNext = [...ourSigners];
+        for (const m of missing) {
+          state.tried = state.tried || {};
+          state.tried[m] = new Date().toISOString();
+        }
+        const ok = await post(DISCOVERY, {
+          type: 'sonnet.withdraw.v1',
+          contest_id: CONTEST,
+          game_id: OUR_GAME,
+          request_id: `contract-${OUR_GAME}-${Math.floor(Date.now() / 1000)}`
+        }, `contract ${state.rosterMembers.length} named to the ${state.contractTo} that signed `
+          + `(dropping ${missing.map((d) => d.slice(-8)).join(' ')}) — every remaining member `
+          + 'has already consented once');
+        if (ok) { state.consent = null; state.consentAt = null; state.rosterAt = null; }
+
       } else if (ourSigners.size >= 2) {
         /**
          * At three of four, hold. Nothing is worth our place in the queue.
@@ -1678,7 +1720,12 @@ async function pass(state) {
         || ((latest.get(a)?.ageMin ?? 1e9) - (latest.get(b)?.ageMin ?? 1e9)));
 
     const sinceLast = state.rosterAt ? (now - Date.parse(state.rosterAt)) / 60_000 : Infinity;
-    const needed = ROSTER_SIZE - 1;
+    /**
+     * Once stage two has fired, the target is the number that signed, not the
+     * wide draw we opened with -- otherwise the builder would refill the seats
+     * we just dropped and we would be back to waiting on strangers.
+     */
+    const needed = (state.contractTo || ROSTER_SIZE) - 1;
     if (pool.length < needed) {
       console.log(`  no roster of our own: only ${pool.length} of ${needed} writer(s) free in the last ${RECRUIT_FRESH_MIN} min`);
     } else if (sinceLast < ROSTER_RETRY_MIN) {
