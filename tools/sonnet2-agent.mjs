@@ -363,6 +363,8 @@ async function pass(state) {
    * because the receipt really is newer than the consent it destroyed. Only the
    * request_id can.
    */
+  /** How many others have signed the roster we hold, readable outside the block that counts them. */
+  let ownRosterSigners = 0;
   const consentSince = state.consentAt ? Date.parse(state.consentAt) : 0;
   for (const { row, f } of (disc || [])) {
     if (!String(f.type || '').startsWith('sonnet.receipt')) continue;
@@ -552,6 +554,8 @@ async function pass(state) {
       }
     }
     for (const m of departed) ourSigners.delete(m);
+    /** Visible to the invitation logic further down, which runs outside this block. */
+    ownRosterSigners = ourSigners.size;
     if (departed.size && state.completeRoster) {
       console.log(`  ${departed.size} member(s) left ${OUR_GAME} in public - the roster is not complete any more`);
       state.completeRoster = null;
@@ -718,9 +722,32 @@ async function pass(state) {
    * signing. So a stranger's roster is worth our slot only while our own is in
    * its cooldown -- which is also when the slot would otherwise sit idle.
    */
+  /**
+     * Trade our own empty roster for a real invitation.
+     *
+     * The comment above says a stranger's roster has never reached ready for us,
+     * and that was true when it was written. Measured again on 2026-09-17 over
+     * the whole discovery window: nine games invited us and one of them —
+     * luxion-1 — reached the referee's ready state, while every roster we
+     * founded ourselves across a full day reached zero. One in nine beats none
+     * in many, and with thirty hours left there is no time to keep proving the
+     * worse option. So a roster of ours that nobody has counter-signed is worth
+     * less than an invitation somebody actually sent, and we withdraw for it.
+     */
+  const ourRosterEmpty = state.consent === OUR_GAME && ownRosterSigners === 0;
+  if (ourRosterEmpty && offers.length) {
+    const ok = await post(DISCOVERY, {
+      type: 'sonnet.withdraw.v1',
+      contest_id: CONTEST,
+      game_id: OUR_GAME,
+      request_id: `standdown-${OUR_GAME}-${Math.floor(Date.now() / 1000)}`
+    }, `stand down from our unsigned roster — ${offers.length} invitation(s) to take instead`);
+    if (ok) { state.consent = null; state.consentAt = null; state.rosterAt = null; }
+  }
+
   const ownRosterCoolingDown = state.rosterAt
     && (Date.now() - Date.parse(state.rosterAt)) / 60_000 < ROSTER_RETRY_MIN;
-  if (!state.consent && offers.length && ownRosterCoolingDown) {
+  if (!state.consent && offers.length) {
     /**
      * `offers` is already filtered to somebody else's game, inside the twenty
      * minute window, and not a list we have signed before. Newest first: an old
