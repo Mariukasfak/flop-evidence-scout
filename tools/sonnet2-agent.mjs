@@ -140,6 +140,11 @@ const SILENT_SEAT_MIN = Number(process.env.SONNET_SILENT_SEAT_MIN || 45);
 const LOYAL_HOURS = 6;
 /** ...but a past signature only outranks freshness while the agent is still signing. */
 const LOYAL_ACTIVE_MIN = 30;
+/**
+ * How far back to look for candidates once the shortlist cannot fill a roster.
+ * Only used as a fallback: the shortlist is better evidence while it exists.
+ */
+const WIDEN_POOL_HOURS = Number(process.env.SONNET_WIDEN_POOL_HOURS || 6);
 const POEM_PATH = path.resolve(process.cwd(), 'docs/sonnet/marcryptox-target.txt');
 
 const argv = process.argv.slice(2);
@@ -338,6 +343,22 @@ async function pass(state) {
   const discRows = await ex(DISCOVERY);
   const disc = discRows === null ? null : parsed(discRows);
   if (!disc) console.log('  discovery unreadable — roster decisions suspended, poem still checked');
+
+  /**
+   * When each DID last said anything at all in discovery.
+   *
+   * Used both for seat liveness and for widening the candidate pool, which sit
+   * in different blocks -- it lived inside the consent block and was a
+   * ReferenceError from the other one, the same scoping mistake twice in a day.
+   */
+  const spokeAt = new Map();
+  for (const { row } of (disc || [])) {
+    const prev = spokeAt.get(row.from);
+    if (!prev || row.ts > prev) spokeAt.set(row.from, row.ts);
+  }
+  const spokeMin = (did) => (spokeAt.has(did)
+    ? (Date.now() - Date.parse(spokeAt.get(did))) / 60_000
+    : Infinity);
 
   /**
    * Receipts naming us are the only authority on our own consent. The referee
@@ -555,16 +576,6 @@ async function pass(state) {
      * 08:57 and 12:22 on 2026-09-16 and the loop reported "COMPLETE (4/4)" for
      * eight hours while it held nothing but its own signature.
      */
-    /** When each DID last said anything at all in discovery, for seat liveness. */
-    const spokeAt = new Map();
-    for (const { row } of (disc || [])) {
-      const prev = spokeAt.get(row.from);
-      if (!prev || row.ts > prev) spokeAt.set(row.from, row.ts);
-    }
-    const spokeMin = (did) => (spokeAt.has(did)
-      ? (Date.now() - Date.parse(spokeAt.get(did))) / 60_000
-      : Infinity);
-
     const departed = new Set();
     if (state.consent === OUR_GAME && Array.isArray(state.rosterMembers)) {
       for (const { row, f } of disc) {
@@ -955,8 +966,33 @@ async function pass(state) {
       }
     }
 
-    const everyone = [...new Set(loyal.concat([...cosigners.keys()].filter(responsive), fresh))]
+    /**
+     * When the field goes quiet, widen to everyone the referee has ever
+     * accepted.
+     *
+     * The base pool is agents that co-signed for us, agents that co-signed for
+     * anyone in the last hour, and applicants from the last five minutes. That
+     * is the right shortlist while rosters are being posted every few minutes.
+     * At 08:13 on 2026-09-17 it returned two people and the agent reported "no
+     * roster of our own: only 2 of 3 writer(s) free" -- it could no longer field
+     * a roster at all, with twenty-eight hours left.
+     *
+     * Being named costs a writer nothing and being on somebody's list is how
+     * agents here get recruited, so falling back to every referee-proven
+     * registered writer seen in the last few hours is strictly better than not
+     * proposing. Most will be asleep; naming them is free and one may wake.
+     */
+    const seenRecently = (did) => spokeMin(did) <= WIDEN_POOL_HOURS * 60;
+    const shortlist = [...new Set(loyal.concat([...cosigners.keys()].filter(responsive), fresh))]
       .filter((d) => !ignored(d));
+    const everyone = shortlist.length >= ROSTER_SIZE - 1
+      ? shortlist
+      : [...new Set(shortlist.concat([...proven].filter((d) => d !== ME && seenRecently(d))))]
+        .filter((d) => !ignored(d));
+    if (everyone.length > shortlist.length) {
+      console.log(`  shortlist was ${shortlist.length}; widened to ${everyone.length} `
+        + `referee-proven writer(s) seen in the last ${WIDEN_POOL_HOURS}h`);
+    }
     const unattached = everyone.filter((d) => !attached(d));
     /** Only fall back to the attached ones if holding out would leave no roster at all. */
     const pool = unattached.length >= ROSTER_SIZE - 1 ? unattached : everyone;
