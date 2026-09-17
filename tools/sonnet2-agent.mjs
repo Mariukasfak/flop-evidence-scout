@@ -838,13 +838,39 @@ async function pass(state) {
         }
       }
     } else if (heldMin >= CONSENT_TIMEOUT_MIN) {
-      const ok = await post(DISCOVERY, {
-        type: 'sonnet.withdraw.v1',
-        contest_id: CONTEST,
-        game_id: state.consent,
-        request_id: `withdraw-${state.consent}-${Math.floor(Date.now() / 1000)}`
-      }, `withdraw from ${state.consent} — ${heldMin.toFixed(0)} min held, still no accepted word`);
-      if (ok) { state.consent = null; state.consentAt = null; }
+      /**
+       * Withdrawing is only worth anything if there is somewhere else to go.
+       *
+       * The timeout fired on zuobai, the agent withdrew, and then section 2
+       * signed the best offer -- which was zuobai, because it was the only one.
+       * That ran for over an hour on a thirty minute cycle, and every cycle
+       * threw away a consent the roster needed to be holding. Worse, zuobai's
+       * team room has two frames in it, both from 09-13: the game never
+       * started, so the clock was never going to produce a word no matter how
+       * many times we re-signed.
+       *
+       * A game we have timed out on twice has had its chance, so it is struck
+       * off and we stop offering it our only consent.
+       */
+      state.strikes = state.strikes || {};
+      state.strikes[state.consent] = (state.strikes[state.consent] || 0) + 1;
+      const strikes = state.strikes[state.consent];
+      const elsewhere = offers.some(({ f }) => f.game_id !== state.consent);
+      if (!elsewhere && state.consent !== OUR_GAME && strikes < 2) {
+        console.log(`  ${state.consent} has run out its ${CONSENT_TIMEOUT_MIN} min `
+          + `(strike ${strikes}) but no other game is offering — holding rather than `
+          + 're-signing the same roster we just left');
+        state.consentAt = new Date().toISOString();
+      } else {
+        const ok = await post(DISCOVERY, {
+          type: 'sonnet.withdraw.v1',
+          contest_id: CONTEST,
+          game_id: state.consent,
+          request_id: `withdraw-${state.consent}-${Math.floor(Date.now() / 1000)}`
+        }, `withdraw from ${state.consent} — ${heldMin.toFixed(0)} min held, still no accepted word`
+          + (strikes >= 2 ? ` — strike ${strikes}, struck off` : ''));
+        if (ok) { state.consent = null; state.consentAt = null; }
+      }
     } else {
       console.log(`  holding ${state.consent}: ${heldMin.toFixed(0)}/${CONSENT_TIMEOUT_MIN} min, no accepted word yet`);
     }
@@ -916,7 +942,14 @@ async function pass(state) {
      * minute window, and not a list we have signed before. Newest first: an old
      * roster still in the window has most likely been resolved or abandoned.
      */
-    for (const { f } of offers) {
+    /** A game that has already burned two of our consents does not get a third. */
+    const struckOff = (g) => ((state.strikes || {})[g] || 0) >= 2;
+    const worthTaking = offers.filter(({ f }) => !struckOff(f.game_id));
+    if (!worthTaking.length && offers.length) {
+      console.log(`  ${offers.length} invitation(s), all from games that already ran our `
+        + 'consent out twice — building our own roster instead');
+    }
+    for (const { f } of worthTaking) {
       const key = `${f.game_id}:${rosterKey(f.members)}`;
       const requestId = `consent-${f.game_id}-${Math.floor(Date.now() / 1000)}`;
       const ok = await post(DISCOVERY, {
@@ -927,7 +960,7 @@ async function pass(state) {
         room_generation: f.room_generation,
         members: f.members,
         request_id: requestId
-      }, `co-sign roster for ${f.game_id} (${offers.length} offer(s) pending)`);
+      }, `co-sign roster for ${f.game_id} (${worthTaking.length} of ${offers.length} offer(s) worth taking)`);
       state.posted[key] = new Date().toISOString();
       if (ok) {
         state.consent = f.game_id;
