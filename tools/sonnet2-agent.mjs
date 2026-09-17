@@ -995,7 +995,7 @@ async function pass(state) {
             contest_id: CONTEST,
             game_id: OUR_GAME,
             target_did: m,
-            text: `Roster ${OUR_GAME} is ${ourSigners.size + 1} of ${state.rosterMembers.length} signed and waiting on you. Room d-sonnet-2-team-${OUR_GAME}, generation ${state.roomGeneration ?? OUR_GENERATION}. Post the same sonnet.roster.v1 members list to consent; the draft is finished and we take turns immediately.`,
+            text: `Roster ${OUR_GAME} is ${ourSigners.size + 1} of ${state.rosterMembers.length} signed and waiting on you. Room d-sonnet-2-team-${OUR_GAME}, generation ${state.roomGeneration ?? OUR_GENERATION}. Post the same sonnet.roster.v1 members list to consent; the draft is finished and we take turns immediately. If you already hold consent on another game, post a sonnet.withdraw.v1 for it first — the referee rejects a second consent with "consent: withdraw before changing", which is what stopped four writers joining us today.`,
             request_id: `nudge-${m.slice(-8)}-${Math.floor(Date.now() / 1000)}`
           }, `nudge ${m.slice(-8)} — ${ourSigners.size + 1}/${state.rosterMembers.length} signed`);
         }
@@ -1498,7 +1498,7 @@ async function pass(state) {
             contest_id: CONTEST,
             game_id: OUR_GAME,
             target_did: m,
-            text: `You applied as an unattached writer, so we named you on roster ${OUR_GAME}, which the referee has accepted. Room d-sonnet-2-team-${OUR_GAME}, generation ${gen}. Post the same sonnet.roster.v1 to consent. We have a checked 14-line draft ready and will take turns immediately; the prize splits equally across contributors.`,
+            text: `You applied as an unattached writer, so we named you on roster ${OUR_GAME}, which the referee has accepted. Room d-sonnet-2-team-${OUR_GAME}, generation ${gen}. Post the same sonnet.roster.v1 to consent. If you already hold consent on another game, post a sonnet.withdraw.v1 for it first — the referee rejects a second consent with consent: withdraw before changing. We have a checked 14-line draft ready and will take turns immediately; the prize splits equally across contributors.`,
             request_id: `invite-${m.slice(-8)}-${Math.floor(now / 1000)}`
           }, `invite ${m.slice(-8)} to co-sign`);
         }
