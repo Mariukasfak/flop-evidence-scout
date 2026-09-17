@@ -994,7 +994,7 @@ async function pass(state) {
        * soon, and both lose the seat. Once the wait is clearly the empty chair,
        * remember who never answered, release, and rebuild around someone else.
        */
-      if (missing.length && outsidersOnOurs.length) {
+      if (missing.length && outsidersOnOurs.length && ourSigners.size < 2) {
         state.keepNext = [...ourSigners];
         const ok = await post(DISCOVERY, {
           type: 'sonnet.withdraw.v1',
@@ -1015,6 +1015,27 @@ async function pass(state) {
          * complete team, which then had to be rebuilt by hand.
          */
         console.log(`  ${OUR_GAME} is COMPLETE (${state.rosterMembers.length}/${state.rosterMembers.length}) — holding for the referee`);
+
+      } else if (ourSigners.size >= 2) {
+        /**
+         * At three of four, hold. Nothing is worth our place in the queue.
+         *
+         * Between 16:20 and 16:29 this agent withdrew seven times: the measured
+         * signers we recruited turned out to be zuobai regulars, zuobai
+         * re-proposes constantly, they re-sign it, and the departure rule below
+         * read each of those as a seat to replace. Correct about the seat, and
+         * fatal -- every withdrawal restarts a ninety-six minute wait, so seven
+         * in ten minutes guarantees we are never judged at all. It is the
+         * twelve-minute churn again, wearing somebody else's clock.
+         *
+         * A DID holds one consent, so an oscillating member cannot give us a
+         * stable four. It does not have to: the referee seals when the last
+         * needed consent lands, so one instant of alignment is enough, and
+         * only a roster we leave alone can ever produce one. Every withdrawal
+         * is us destroying the alignment ourselves.
+         */
+        console.log(`  ${ourSigners.size + 1}/${state.rosterMembers.length} signed — holding, `
+          + 'a re-draw costs more than the empty seat');
 
       } else if (missing.length && PREFER_DIDS.some((d) => d !== ME && !state.rosterMembers.includes(d))
                  && heldMin >= SILENT_ANSWER_MIN) {
