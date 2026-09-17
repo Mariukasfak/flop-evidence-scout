@@ -60,7 +60,21 @@ for (const file of files) {
   const keepLines = (m) => m.replace(/[^\n]/g, ' ');
   let code = src
     .replace(/\/\*[\s\S]*?\*\//g, keepLines)
-    .replace(/(^|[^:])\/\/[^\n]*/g, (m, p) => p + keepLines(m.slice(p.length)))
+    .replace(/(^|[^:])\/\/[^\n]*/g, (m, p) => p + keepLines(m.slice(p.length)));
+  /**
+   * A quote inside a regex character class is not a string.
+   *
+   * `/[^a-z']/` reads as the start of a string here, and everything up to the
+   * next apostrophe -- often the rest of the file -- disappears with it, taking
+   * real declarations along and turning the report into a wall of English. Only
+   * brackets that look like a character class are disarmed, so an ordinary
+   * array of strings is left alone.
+   */
+  code = code.replace(
+    /(^|[=(,:;&|!?{[+\s])\/(?![/*])(?:\\.|\[(?:\\.|[^\]\n\\])*\]|[^/\n\\])+\/[gimsuyd]*/g,
+    (m, p) => p + m.slice(p.length).replace(/['"]/g, ' ')
+  );
+  code = code
     .replace(/'(?:\\.|[^'\\])*'/g, "''")
     .replace(/"(?:\\.|[^"\\])*"/g, '""');
   code = code.replace(/`(?:\\.|[^`\\])*`/g, (lit) => {
