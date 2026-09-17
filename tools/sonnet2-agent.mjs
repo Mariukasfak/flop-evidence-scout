@@ -1331,8 +1331,11 @@ async function pass(state) {
         last = { version: f.version, hash: f.state_hash, by: f.sender_did, complete: f.complete };
       }
     }
-    const placed = room.filter(({ f }) => f.type === 'sonnet.word.v1' && accepted.has(f.request_id)).length;
+    const placedWords = room.filter(({ f }) => f.type === 'sonnet.word.v1' && accepted.has(f.request_id))
+      .map(({ f }) => String(f.word || ''));
+    const placed = placedWords.length;
     console.log(`  poem ${state.consent}: ${placed} accepted word(s)${last?.complete ? ' — COMPLETE' : ''}`);
+    if (placed) console.log(`    so far: ${placedWords.join(' ')}`);
 
     /** Version 0 opens on the roster hash; every later turn chains off the last receipt. */
     const head = last
@@ -1352,7 +1355,24 @@ async function pass(state) {
     } else if (head && head.by === ME) {
       console.log('  our word was last; a teammate must go next');
     } else if (head) {
-      const next = wordsFor(draftFor(state, placed), state.rosterMembers)[placed];
+      /**
+       * The room is the poem, not our draft.
+       *
+       * `placed` is only a count, and the next word is taken from our draft at
+       * that index -- which silently assumes every teammate writes the draft we
+       * advertised. A teammate who writes anything else shifts the whole poem
+       * one slot out of step with us, and we would go on posting our words into
+       * a text that no longer has room for them, breaking the line structure
+       * the published hash is built from. Nothing here can stop a teammate
+       * choosing their own word, but we should not be the last to know.
+       */
+      const fitted = wordsFor(draftFor(state, placed), state.rosterMembers);
+      const drifted = placedWords.findIndex((w, i) => w.toLowerCase() !== String(fitted[i] || '').toLowerCase());
+      if (drifted >= 0) {
+        console.log(`  DRIFT at word ${drifted + 1}: the room has "${placedWords[drifted]}", `
+          + `our draft has "${fitted[drifted] || '(past the end)'}" — the poem is no longer our text`);
+      }
+      const next = fitted[placed];
       if (next && canSpell(next)) {
         await post(`d-sonnet-2-team-${state.consent}`, {
           type: 'sonnet.word.v1',
