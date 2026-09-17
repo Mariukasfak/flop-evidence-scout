@@ -414,6 +414,42 @@ async function pass(state) {
   if (!disc) console.log('  discovery unreadable — roster decisions suspended, poem still checked');
 
   /**
+   * A writer the referee has accepted is registered, whatever the bench says.
+   *
+   * `roster: unregistered` names only the sender, and means *someone* on that
+   * roster is not registered. Benching everyone it named was a deliberate
+   * trade -- we could not tell which of the three -- but better evidence
+   * arrives on its own: a DID that appears in a roster the referee ACCEPTED is
+   * registered by definition. Fifteen writers were on this bench and four of
+   * them were the only four who had ever co-signed for us, all four accepted
+   * elsewhere. So clear the ones the referee has since vouched for, every pass.
+   */
+  const proven = new Set();
+  if (disc) {
+    const rosterById = new Map();
+    for (const { f } of disc) {
+      if (f.type === 'sonnet.roster.v1' && f.request_id && Array.isArray(f.members)) {
+        rosterById.set(f.request_id, f.members);
+      }
+    }
+    const refDid = disc.find(({ f }) => String(f.type || '').startsWith('sonnet.receipt'))?.row.from;
+    for (const { row, f } of disc) {
+      if (!refDid || row.from !== refDid) continue;
+      const items = f.type === 'sonnet.receipts.v1' ? (f.receipts || []) : [f];
+      for (const it of items) {
+        if (it.status !== 'accepted') continue;
+        for (const m of rosterById.get(it.request_id) || []) proven.add(m);
+      }
+    }
+    const cleared = Object.keys(state.unregistered || {}).filter((d) => proven.has(d));
+    if (cleared.length) {
+      for (const d of cleared) delete state.unregistered[d];
+      console.log(`  clearing ${cleared.length} writer(s) the referee has accepted elsewhere: `
+        + cleared.map((d) => d.slice(-8)).join(' '));
+    }
+  }
+
+  /**
    * When each DID last said anything at all in discovery.
    *
    * Used both for seat liveness and for widening the candidate pool, which sit
@@ -485,7 +521,7 @@ async function pass(state) {
        * thirty-minute bench would simply re-draw the same unregistered DID.
        */
       state.unregistered = state.unregistered || {};
-      const named = state.rosterHistory[f.request_id].filter((m) => m !== ME);
+      const named = state.rosterHistory[f.request_id].filter((m) => m !== ME && !proven.has(m));
       for (const m of named) state.unregistered[m] = new Date().toISOString();
       console.log(`  benching ${named.length} writer(s) — "${f.reason}": ${named.map((m) => m.slice(-8)).join(' ')}`);
     }
@@ -1023,17 +1059,7 @@ async function pass(state) {
         rosterById.set(f.request_id, f.members);
       }
     }
-    /** Receipts are the only frames the referee signs, so they identify it. */
-    const refDid = disc.find(({ f }) => String(f.type || '').startsWith('sonnet.receipt'))?.row.from;
-    const proven = new Set();
-    for (const { row, f } of disc) {
-      if (!refDid || row.from !== refDid) continue;
-      const items = f.type === 'sonnet.receipts.v1' ? (f.receipts || []) : [f];
-      for (const it of items) {
-        if (it.status !== 'accepted') continue;
-        for (const m of rosterById.get(it.request_id) || []) proven.add(m);
-      }
-    }
+    /** `proven` is built once at the top of the pass, where it also clears the bench. */
 
     /**
      * When the field goes quiet, widen to everyone the referee has ever
