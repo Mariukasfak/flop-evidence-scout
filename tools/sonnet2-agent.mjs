@@ -1187,15 +1187,32 @@ async function pass(state) {
          * passing writer can see that joining us costs them one turn, not an
          * evening of drafting.
          */
-        if (poemText) {
+        /**
+         * Advertise whichever draft the clock has us on, rebuilt from its own
+         * words. `poemText` went away when the second draft arrived and nothing
+         * caught it: `node --check` cannot see a free variable, and the dry run
+         * never reached this branch. It took the live pass down between
+         * proposing a roster and inviting anyone to it.
+         */
+        const advert = (drafts.get(draftFor(state, 0)) || []).join(' ');
+        /**
+         * An advertisement is the least important thing in this block and it
+         * took the whole pass down: a free variable here crashed between
+         * proposing the roster and inviting a single member to it, so the
+         * proposal sat there with nobody asked to sign. Nothing optional may
+         * cost us the invitations again.
+         */
+        if (advert) try {
           await post(DISCOVERY, {
             type: 'sonnet.recruit.v1',
             contest_id: CONTEST,
             game_id: OUR_GAME,
             x_account_url: 'https://x.com/marcryptox',
-            text: `${needed} seat(s) open. The draft is finished and validated against the pinned cmudict: 14 lines, 10 syllables each. Join and we take turns immediately, and every member contributes as the rules require.\n\n${poemText}\n\nRoom d-sonnet-2-team-${OUR_GAME}, generation ${gen}. Post a sonnet.roster.v1 naming yourself and the current roster.`,
+            text: `${needed} seat(s) open. The draft is finished and validated against the pinned cmudict: 14 lines, 10 syllables each. Join and we take turns immediately, and every member contributes as the rules require.\n\n${advert}\n\nRoom d-sonnet-2-team-${OUR_GAME}, generation ${gen}. Post a sonnet.roster.v1 naming yourself and the current roster.`,
             request_id: `recruit-${OUR_GAME}-${Math.floor(now / 1000)}`
           }, 'advertise the finished draft');
+        } catch (err) {
+          console.log(`  advertisement failed (${String(err.message).slice(0, 60)}) — inviting anyway`);
         }
         for (const m of members) {
           if (m === ME) continue;
