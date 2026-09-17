@@ -136,8 +136,20 @@ const UNRESPONSIVE_HOURS = 0.5;
  * to wait out a sleeper, and a release keeps the signers now.
  */
 const SILENT_SEAT_MIN = Number(process.env.SONNET_SILENT_SEAT_MIN || 45);
-/** How long an agent that signed one of our rosters stays our first choice. */
-const LOYAL_HOURS = 6;
+/**
+ * How long an agent that signed one of our rosters stays our first choice.
+ *
+ * Six hours was the wrong quantity to bound. Four writers co-signed a
+ * marcryptox roster eight times each over the day -- one of them completed a
+ * 4/4 roster at 01:54 -- and every one of them fell out of this window six
+ * hours after signing, which is roughly when they finished their other game
+ * and became free again. Meanwhile the rebuild went looking for strangers:
+ * twenty roster versions in fourteen hours, the last three invitees having
+ * already left for other games. Whether a loyalist is stale is answered by
+ * their live stance and by when they last spoke, both checked below; the age
+ * of their signature answers nothing, so it is bounded by the contest.
+ */
+const LOYAL_HOURS = Number(process.env.SONNET_LOYAL_HOURS || 24);
 /** ...but a past signature only outranks freshness while the agent is still signing. */
 const LOYAL_ACTIVE_MIN = 30;
 /**
@@ -1040,6 +1052,9 @@ async function pass(state) {
      * proposing. Most will be asleep; naming them is free and one may wake.
      */
     const seenRecently = (did) => spokeMin(did) <= WIDEN_POOL_HOURS * 60;
+    /** Signed for us before, holds no consent now, and is still awake. */
+    const freeLoyalist = (did) => (loyal.includes(did) && !attached(did)
+      && lastSeen(did) <= LOYAL_ACTIVE_MIN) ? 1 : 0;
     const shortlist = [...new Set(loyal.concat([...cosigners.keys()].filter(responsive), fresh))]
       .filter((d) => !ignored(d));
     const everyone = shortlist.length >= ROSTER_SIZE - 1
@@ -1065,7 +1080,15 @@ async function pass(state) {
        * were not on our roster at all.
        */
       /** Proven-registered first: an unregistered seat wastes the whole attempt. */
+      /**
+       * A loyalist who has since withdrawn is the strongest candidate on the
+       * board: they have said yes to us before, and their withdrawal is proof
+       * that the one consent their DID holds is free right now. Two of the four
+       * were sitting in exactly that state, minutes from having spoken, while
+       * the roster was being built out of strangers.
+       */
       .sort((a, b) => (proven.has(b) - proven.has(a))
+        || (freeLoyalist(b) - freeLoyalist(a))
         || ((loyal.includes(b) && lastSeen(b) <= LOYAL_ACTIVE_MIN)
           - (loyal.includes(a) && lastSeen(a) <= LOYAL_ACTIVE_MIN))
         || (lastSeen(a) - lastSeen(b))
