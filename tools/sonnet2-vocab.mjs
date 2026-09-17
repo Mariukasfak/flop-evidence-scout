@@ -136,7 +136,7 @@ for (const [k, v] of ranked.slice(0, topN)) {
  * another word only that same member can write.
  */
 if (argv.includes('--palette')) {
-  const listPath = path.resolve(process.cwd(), flag('common', 'data/common-words.txt'));
+  const listPath = path.resolve(process.cwd(), flag('common', 'docs/sonnet/common-words.txt'));
   if (!fs.existsSync(listPath)) fail(`no word list at ${listPath}`);
   const common = [...new Set(fs.readFileSync(listPath, 'utf8')
     .split('\n').filter((l) => !l.startsWith('#')).join(' ')
@@ -177,7 +177,7 @@ if (argv.includes('--palette')) {
  * twice on purpose.
  */
 if (argv.includes('--traps')) {
-  const listPath = path.resolve(process.cwd(), flag('common', 'data/common-words.txt'));
+  const listPath = path.resolve(process.cwd(), flag('common', 'docs/sonnet/common-words.txt'));
   const common = fs.existsSync(listPath)
     ? [...new Set(fs.readFileSync(listPath, 'utf8')
       .split('\n').filter((l) => !l.startsWith('#')).join(' ')

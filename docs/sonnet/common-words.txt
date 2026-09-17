@@ -1,0 +1,83 @@
+# A poet's working vocabulary, intersected against the roster's letters by
+# tools/sonnet2-vocab.mjs --palette. cmudict holds 124k entries and most of them
+# are surnames and abbreviations, so an unfiltered "writable" list is useless for
+# writing: it opens with aarti, abee, ac, achee. These are words a sonnet can
+# actually use.
+a an and as at be been am are is was were the this that these those
+i me my mine we us our you your he him his she her they them their it its
+one two three four five six seven eight nine ten first last half
+no not nor none nothing all any some each every both few many much more most
+but or if then than so because though although while when where what which who whom how why
+of in on to into onto from by for with without within about above below under over
+after before between beyond across along around through during until since again
+here there now soon late early never always often once still yet ever
+very too only just even quite almost enough rather nearly
+can could will would shall should may might must
+do does did done make makes made making
+have has had having get gets got give gives gave given
+go goes went gone come comes came coming
+say says said tell tells told speak speaks spoke spoken
+know knows knew known think thinks thought believe believes believed
+see sees saw seen look looks looked watch watches watched
+hear hears heard listen listens listened sound sounds sounded
+feel feels felt touch touches touched hold holds held keep keeps kept
+take takes took taken leave leaves left lose loses lost find finds found
+love loves loved like likes liked want wants wanted need needs needed
+live lives lived die dies died dead death born birth breathe breath breathes
+wait waits waited stay stays stayed stop stops stopped start starts started
+begin begins began begun end ends ended finish finished
+open opens opened close closes closed shut break breaks broke broken
+build builds built carry carries carried bring brings brought
+run runs ran walk walks walked move moves moved turn turns turned
+rise rises rose fall falls fell fallen sit sits sat stand stands stood
+sleep sleeps slept wake wakes woke waking dream dreams dreamed
+read reads write writes wrote written sing sings sang song songs
+call calls called answer answers answered ask asks asked
+remember remembers remembered forget forgets forgot forgotten
+learn learns learned teach teaches taught
+work works worked play plays played
+save saves saved keep help helps helped
+wish wishes wished hope hopes hoped fear fears feared
+laugh laughs laughed cry cries cried weep weeps wept smile smiles smiled
+time times hour hours minute minutes second seconds day days night nights
+morning evening afternoon noon midnight dawn dusk sunrise sunset
+week weeks month months year years age ages moment moments
+today tonight tomorrow yesterday summer winter autumn spring season
+light lights dark darkness shadow shadows bright shine shines shone
+sun moon star stars sky skies cloud clouds rain rains snow wind winds storm
+fire fires flame flames smoke ash water waters sea seas ocean river rivers
+lake stream wave waves tide shore beach sand stone stones rock rocks
+earth ground land field fields hill hills mountain valley forest wood woods
+tree trees leaf leaves branch root roots flower flowers grass garden
+bird birds wing wings feather song animal horse dog cat fish
+house houses home homes room rooms door doors window windows wall walls
+floor roof stair stairs kitchen table chair chairs bed beds lamp lamps
+street streets road roads path paths bridge city cities town village
+world worlds place places country ground space
+man men woman women child children boy girl people person
+friend friends mother father parent sister brother family
+hand hands arm arms finger foot feet leg head heads face faces
+eye eyes ear ears mouth lip lips tooth hair heart hearts
+mind minds soul souls body bodies blood bone skin voice voices
+word words name names letter letters line lines page book books
+story stories poem poems verse song music note notes
+question answer reason reasons truth lie thought thoughts idea
+memory memories dream hope fear joy sorrow grief pain
+love hate anger peace war life lives death
+machine machines engine wire light screen phone number numbers
+glass mirror paper ink pen clock bell key keys box
+food bread water wine milk salt sweet
+good bad better best worse worst great small little big large
+new old young ancient long short high low deep shallow
+wide narrow near far close distant open closed empty full
+warm cold hot cool dry wet clear clean soft hard heavy
+light quiet loud silent still calm slow fast quick
+strong weak rich poor free lost found true false real
+happy sad glad sorry afraid brave kind cruel gentle
+beautiful lovely fair plain simple strange quiet ordinary
+first final single every other another same different
+white black red green blue gold silver grey brown
+morning quiet certain sure only whole broken perfect
+alone lonely together apart away back again forward
+alive awake asleep tired weary
+yes yeah well oh ah

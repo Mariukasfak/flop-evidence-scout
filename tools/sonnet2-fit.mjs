@@ -65,7 +65,7 @@ const writersOf = (word) => sets.filter((s) => [...letters(word)].every((c) => s
  * large: the dictionary is mostly surnames, and a repair that reaches for
  * "abee" to fix a line has not helped anyone read it.
  */
-const listPath = path.resolve(process.cwd(), flag('common', 'data/common-words.txt'));
+const listPath = path.resolve(process.cwd(), flag('common', 'docs/sonnet/common-words.txt'));
 const commonOrder = new Map();
 if (fs.existsSync(listPath)) {
   const words = fs.readFileSync(listPath, 'utf8').split('\n').filter((l) => !l.startsWith('#'))
