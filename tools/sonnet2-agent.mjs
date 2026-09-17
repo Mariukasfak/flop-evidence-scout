@@ -173,6 +173,14 @@ const LOYAL_ACTIVE_MIN = 30;
 /** A writer that answers an invitation within this many minutes is a live seat. */
 const FAST_SIGN_MIN = Number(process.env.SONNET_FAST_SIGN_MIN || 5);
 /**
+ * A pool this deep changes the arithmetic: stop waiting, start re-drawing.
+ * Six free writers means at least two fresh rosters we have not tried yet.
+ */
+const DEEP_POOL = Number(process.env.SONNET_DEEP_POOL || 6);
+const FAST_CYCLE_MIN = Number(process.env.SONNET_FAST_CYCLE_MIN || 12);
+/** How long a name we have already asked stays at the back of the queue. */
+const TRIED_COOLDOWN_MIN = Number(process.env.SONNET_TRIED_COOLDOWN_MIN || 45);
+/**
  * How far back to look for candidates once the shortlist cannot fill a roster.
  * Only used as a fallback: the shortlist is better evidence while it exists.
  */
@@ -929,6 +937,32 @@ async function pass(state) {
          */
         console.log(`  ${OUR_GAME} is COMPLETE (${state.rosterMembers.length}/${state.rosterMembers.length}) — holding for the referee`);
 
+      } else if (disc && missing.length && replacements >= DEEP_POOL
+                 && heldMin >= FAST_CYCLE_MIN) {
+        /**
+         * With a deep pool, the roster is a lottery ticket, so buy more of them.
+         *
+         * Reading the campaign room turned three candidates into twenty-eight,
+         * and the arithmetic changes with it: waiting forty minutes on one
+         * unsigned seat when seventeen free writers are awake spends the only
+         * thing we cannot get back. Writers who mean to join answer in under a
+         * minute -- the measured median across the fast half of the field is
+         * zero -- so twelve minutes is already a generous answer, and a fresh
+         * three names is a fresh chance.
+         */
+        state.keepNext = [...ourSigners];
+        for (const m of missing) {
+          state.tried = state.tried || {};
+          state.tried[m] = new Date().toISOString();
+        }
+        const ok = await post(DISCOVERY, {
+          type: 'sonnet.withdraw.v1',
+          contest_id: CONTEST,
+          game_id: OUR_GAME,
+          request_id: `cycle-${OUR_GAME}-${Math.floor(Date.now() / 1000)}`
+        }, `re-draw ${missing.length} unsigned seat(s) after ${heldMin.toFixed(0)} min — `
+          + `${replacements} free writer(s) to try instead, keeping ${ourSigners.size} signer(s)`);
+        if (ok) { state.consent = null; state.consentAt = null; state.rosterAt = null; }
       } else if (disc && replacements > 0 && missing.length
                  && heldMin >= AWAKE_REFUSAL_MIN * (1 + ourSigners.size)
                  && missing.some((m) => spokeMin(m) <= LOYAL_ACTIVE_MIN)) {
@@ -1376,6 +1410,11 @@ async function pass(state) {
     const answersFast = (did) => (signLatency(did) <= FAST_SIGN_MIN
       && (latencies.get(did) || []).length >= 1) ? 1 : 0;
 
+    const triedRecently = (did) => {
+      const at = (state.tried || {})[did];
+      if (!at) return 0;
+      return (Date.now() - Date.parse(at)) / 60_000 < TRIED_COOLDOWN_MIN ? 1 : 0;
+    };
     const seenRecently = (did) => spokeMin(did) <= WIDEN_POOL_HOURS * 60;
     /** Signed for us before, holds no consent now, and is still awake. */
     const freeLoyalist = (did) => (loyal.includes(did) && !attached(did)
@@ -1430,7 +1469,13 @@ async function pass(state) {
        * were sitting in exactly that state, minutes from having spoken, while
        * the roster was being built out of strangers.
        */
+      /**
+       * A name we asked ten minutes ago and that did not answer goes to the
+       * back: re-drawing the same three writers is not a fresh chance, it is
+       * the same one, and we only get so many left.
+       */
       .sort((a, b) => (proven.has(b) - proven.has(a))
+        || (triedRecently(a) - triedRecently(b))
         || (answersFast(b) - answersFast(a))
         || (signLatency(a) - signLatency(b))
         || (freeLoyalist(b) - freeLoyalist(a))
