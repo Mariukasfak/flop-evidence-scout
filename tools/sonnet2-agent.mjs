@@ -168,6 +168,19 @@ const WIDEN_POOL_HOURS = Number(process.env.SONNET_WIDEN_POOL_HOURS || 6);
  */
 const POEM_LONG = path.resolve(process.cwd(), 'docs/sonnet/marcryptox-target.txt');
 const POEM_SHORT = path.resolve(process.cwd(), 'docs/sonnet/marcryptox-draft-v8-short.txt');
+/**
+ * A sonnet is 140 syllables however it is written, so the number of turns is
+ * decided by syllables per word, not by length. The long draft averages 1.26
+ * and costs 111 turns; this one averages 1.56 and costs 90. At the twelve
+ * minutes a turn we can afford that is four hours, and a finished poem that
+ * took bigtoe-2 eighty hours is not something to be casual about.
+ *
+ * Denser is not free, though: a longer word needs more distinct letters and
+ * every word has to come out of one member's DID, so the shortest draft is also
+ * the one a given roster is likeliest to be unable to write. Which is why the
+ * choice below is made against the real roster rather than guessed here.
+ */
+const POEM_DENSE = path.resolve(process.cwd(), 'docs/sonnet/marcryptox-draft-v9-dense.txt');
 /** Minutes per accepted word: the median of the five live teams was ten; round up. */
 const MIN_PER_WORD = Number(process.env.SONNET_MIN_PER_WORD || 11);
 /** Publication and submission come after the last word, and are not instant. */
@@ -331,22 +344,47 @@ const readDraft = (p) => {
   const t = fs.existsSync(p) ? fs.readFileSync(p, 'utf8').trim() : '';
   return t ? t.split(/\s+/).filter(Boolean) : [];
 };
-const drafts = new Map([[POEM_LONG, readDraft(POEM_LONG)], [POEM_SHORT, readDraft(POEM_SHORT)]]);
+const drafts = new Map([POEM_DENSE, POEM_SHORT, POEM_LONG].map((p) => [p, readDraft(p)]));
+/** Fewest turns first: that is the only axis the clock cares about. */
+const DRAFT_ORDER = [POEM_DENSE, POEM_SHORT, POEM_LONG].filter((p) => drafts.get(p).length);
 
 /**
  * The draft the remaining clock can still finish -- and, once a word is down,
  * the one we already committed to whatever the clock now says.
  */
-function draftFor(state, placed) {
+/**
+ * Pick the draft against the roster we actually have, not the one we feared.
+ *
+ * Guessing between drafts from a desk is guessing twice: whether the clock can
+ * afford the turns, and whether four particular DIDs can spell the words. The
+ * first is knowable now, the second only once the roster seals -- so take the
+ * fewest turns the clock allows, and drop to the next draft whenever the fitter
+ * says this roster cannot write it.
+ *
+ * Once a word is down the choice is frozen, because an accepted word cannot be
+ * taken back and the poem is whatever the room already holds.
+ */
+function draftFor(state, members, placed) {
   if (state.poemPath && drafts.has(state.poemPath)) return state.poemPath;
   const budgetH = (DEADLINE - Date.now()) / 3_600_000 - PUBLISH_RESERVE_H;
   const needH = (p) => (drafts.get(p).length * MIN_PER_WORD) / 60;
-  const chosen = budgetH >= needH(POEM_LONG) ? POEM_LONG : POEM_SHORT;
+  const affordable = DRAFT_ORDER.filter((p) => needH(p) <= budgetH);
+  /**
+   * If nothing fits the clock we are already losing, and an unwritable draft
+   * loses faster than a long one: fall back to the whole list so the loop below
+   * can still insist on something this roster can actually spell.
+   */
+  const tryThese = affordable.length ? affordable : DRAFT_ORDER;
+  let chosen = tryThese[tryThese.length - 1];
+  for (const p of tryThese) {
+    if (!Array.isArray(members) || members.length < 2 || fitsRoster(p, members)) { chosen = p; break; }
+    console.log(`  ${path.basename(p)} (${drafts.get(p).length} words) cannot be written by this roster`);
+  }
   if (placed > 0) {
     state.poemPath = chosen;
     saveState(state);
-    console.log(`  draft locked: ${path.basename(chosen)}, ${drafts.get(chosen).length} words `
-      + `(${budgetH.toFixed(1)}h of writing time left, long draft wants ${needH(POEM_LONG).toFixed(1)}h)`);
+    console.log(`  draft locked: ${path.basename(chosen)}, ${drafts.get(chosen).length} words, `
+      + `${needH(chosen).toFixed(1)}h of turns against ${budgetH.toFixed(1)}h left`);
   }
   return chosen;
 }
@@ -362,37 +400,47 @@ function draftFor(state, placed) {
  * Running it here means the first word we ever post is already writable, rather
  * than discovered to be impossible eleven words in, hours later.
  */
-const fitCache = { key: null, words: [] };
-function wordsFor(poemPath, members) {
+/**
+ * One fit per (draft, roster), remembered -- the selection asks whether a draft
+ * is writable and the poster asks what its words are, and running the fitter
+ * twice for one answer is a subprocess we cannot spare on a four-minute pass.
+ */
+const fitCache = new Map();
+function fitOnce(poemPath, members) {
   const base = drafts.get(poemPath) || [];
-  if (!Array.isArray(members) || members.length < 2) return base;
+  if (!Array.isArray(members) || members.length < 2) return { ok: true, words: base, strict: true };
   const key = `${poemPath}|${rosterKey(members)}`;
-  if (fitCache.key === key) return fitCache.words;
-  fitCache.key = key;
+  const hit = fitCache.get(key);
+  if (hit) return hit;
+
+  const out = path.resolve(process.cwd(), `data/local/sonnet2-fitted-${path.basename(poemPath)}`);
+  const fit = (extra) => execFileSync(process.execPath, [
+    path.resolve(process.cwd(), 'tools/sonnet2-fit.mjs'),
+    `--poem=${poemPath}`, `--members=${members.join(',')}`, `--out=${out}`, ...extra
+  ], { cwd: process.cwd(), encoding: 'utf8', timeout: 120_000 });
+
+  let result;
   try {
-    const out = path.resolve(process.cwd(), 'data/local/sonnet2-fitted.txt');
-    const fit = (extra) => execFileSync(process.execPath, [
-      path.resolve(process.cwd(), 'tools/sonnet2-fit.mjs'),
-      `--poem=${poemPath}`, `--members=${members.join(',')}`, `--out=${out}`, ...extra
-    ], { cwd: process.cwd(), encoding: 'utf8', timeout: 120_000 });
     /**
-     * The strict pass keeps the repair readable; about one roster in forty has
-     * no readable repair at all. Falling back to the base draft there would
-     * post words half the team cannot write, so relax the rule instead.
+     * Strict first, so the repair reads like English. A roster that has no
+     * readable repair is still worth writing badly rather than not at all, but
+     * the selection above should hear about it, so `strict` is reported.
      */
-    try { fit([]); } catch { console.log('  no readable fit for this roster — repairing loosely'); fit(['--loose']); }
-    const text = fs.readFileSync(out, 'utf8').trim();
-    fitCache.words = text.split(/\s+/).filter(Boolean);
-    const changed = fitCache.words.filter((w, i) => w !== base[i]).length;
-    console.log(`  poem fitted to this roster: ${changed} word(s) changed, `
-      + `${fitCache.words.length} to place`);
-  } catch (err) {
-    /** A draft we cannot fit is still worth attempting: the referee decides. */
-    fitCache.words = base;
-    console.log(`  poem could not be fitted to this roster (${String(err.message).slice(0, 80)}) — using the base draft`);
+    let strict = true;
+    try { fit([]); } catch { strict = false; fit(['--loose']); }
+    const words = fs.readFileSync(out, 'utf8').trim().split(/\s+/).filter(Boolean);
+    const changed = words.filter((w, i) => w !== base[i]).length;
+    console.log(`  ${path.basename(poemPath)}: fits this roster, ${changed} word(s) changed, `
+      + `${words.length} to place${strict ? '' : ' (repaired loosely — clumsy but writable)'}`);
+    result = { ok: true, words, strict };
+  } catch {
+    result = { ok: false, words: base, strict: false };
   }
-  return fitCache.words;
+  fitCache.set(key, result);
+  return result;
 }
+const fitsRoster = (poemPath, members) => fitOnce(poemPath, members).ok;
+const wordsFor = (poemPath, members) => fitOnce(poemPath, members).words;
 
 async function pass(state) {
   const hoursLeft = (DEADLINE - Date.now()) / 3_600_000;
@@ -1227,7 +1275,7 @@ async function pass(state) {
          * never reached this branch. It took the live pass down between
          * proposing a roster and inviting anyone to it.
          */
-        const advert = (drafts.get(draftFor(state, 0)) || []).join(' ');
+        const advert = (drafts.get(draftFor(state, members, 0)) || []).join(' ');
         /**
          * An advertisement is the least important thing in this block and it
          * took the whole pass down: a free variable here crashed between
@@ -1399,7 +1447,7 @@ async function pass(state) {
        * the published hash is built from. Nothing here can stop a teammate
        * choosing their own word, but we should not be the last to know.
        */
-      const fitted = wordsFor(draftFor(state, placed), state.rosterMembers);
+      const fitted = wordsFor(draftFor(state, state.rosterMembers, placed), state.rosterMembers);
       const drifted = placedWords.findIndex((w, i) => w.toLowerCase() !== String(fitted[i] || '').toLowerCase());
       if (drifted >= 0) {
         console.log(`  DRIFT at word ${drifted + 1}: the room has "${placedWords[drifted]}", `
