@@ -734,8 +734,36 @@ async function pass(state) {
       .filter(([, at]) => (Date.now() - Date.parse(at)) / 3_600_000 < LOYAL_HOURS)
       .sort((a, b) => Date.parse(b[1]) - Date.parse(a[1]))
       .map(([did]) => did);
-    const pool = [...new Set(loyal.concat([...cosigners.keys()].filter(responsive), fresh))]
-      .filter((d) => !ignored(d))
+    /**
+     * Whether a writer is free is decided by their own last public act, not by
+     * what they say about themselves. `no_live_roster_consent` is self-declared
+     * and predicts nothing; a DID's most recent `sonnet.roster.v1` is a consent
+     * it is actually holding, and one DID holds one. At 00:28 on 2026-09-17 we
+     * invited `AsFpTB4N`, which had been advertising `sosov1` fifty-three
+     * minutes earlier and could not have said yes to us.
+     */
+    const stance = new Map();
+    for (const { row, f } of disc) {
+      if (f.type !== 'sonnet.roster.v1' && f.type !== 'sonnet.withdraw.v1') continue;
+      const cur = stance.get(row.from);
+      if (!cur || row.ts > cur.ts) {
+        stance.set(row.from, { ts: row.ts, game: f.game_id, kind: f.type });
+      }
+    }
+    const attached = (did) => {
+      const st = stance.get(did);
+      return !!st && st.kind === 'sonnet.roster.v1' && st.game !== OUR_GAME;
+    };
+
+    const everyone = [...new Set(loyal.concat([...cosigners.keys()].filter(responsive), fresh))]
+      .filter((d) => !ignored(d));
+    const unattached = everyone.filter((d) => !attached(d));
+    /** Only fall back to the attached ones if holding out would leave no roster at all. */
+    const pool = unattached.length >= ROSTER_SIZE - 1 ? unattached : everyone;
+    if (pool === everyone && everyone.length > unattached.length) {
+      console.log(`  only ${unattached.length} unattached writer(s) free — widening to all ${everyone.length}`);
+    }
+    pool
       /**
        * Loyalty only counts while the agent is still awake. `q3VUSttk` signed
        * for us at 07:08 and so sat at the top of this list for hours -- and was
