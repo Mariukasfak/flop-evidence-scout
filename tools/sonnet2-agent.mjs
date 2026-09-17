@@ -424,7 +424,17 @@ async function pass(state) {
    * roster is a minute we would refuse anyone who invited us.
    */
   if (disc) {
-  const rosterCutoff = Date.now() - 20 * 60_000;
+  /**
+   * How far back an invitation is still worth answering.
+   *
+   * Twenty minutes was right when rosters were being posted every few minutes.
+   * The field has emptied -- five agents posted a roster frame in the last hour
+   * where there were dozens -- and at 05:23 on 2026-09-17 the only live
+   * invitation to us, gridsonnet, was twenty-five minutes old and therefore
+   * invisible, while we sat on a roster of our own that nobody had signed.
+   */
+  const OFFER_WINDOW_MIN = Number(process.env.SONNET_OFFER_WINDOW_MIN || 120);
+  const rosterCutoff = Date.now() - OFFER_WINDOW_MIN * 60_000;
   /**
    * How many distinct members have signed each roster on offer.
    *
@@ -447,9 +457,20 @@ async function pass(state) {
     && row.from !== ME
     && f.game_id !== OUR_GAME
     && Date.parse(row.ts) >= rosterCutoff)
+    /**
+     * Require the founder, not half the team.
+     *
+     * Demanding half the roster already signed was a guard against wasting our
+     * single consent on lists nobody was working. It has become a guard against
+     * ever joining anything: a fresh invitation carries exactly one signature --
+     * the founder's -- so every new team was filtered out, and measured over the
+     * whole window nine games invited us and one, luxion-1, reached ready while
+     * our own rosters reached none. Rank by how many have signed instead of
+     * refusing on it.
+     */
     .filter(({ f }) => {
       const signed = offerSigners.get(`${f.game_id}:${rosterKey(f.members)}`)?.size ?? 0;
-      return signed >= Math.ceil(f.members.length / 2);
+      return signed >= 1;
     })
     /**
      * A roster we answered once is answerable again once our reply has gone
@@ -466,7 +487,9 @@ async function pass(state) {
       /** Legacy entries stored `true` and carry no time; treat them as already stale. */
       return Number.isFinite(ageMin) ? ageMin >= OFFER_RETRY_MIN : true;
     })
-    .reverse();
+    .reverse()
+    .sort((a, b) => (offerSigners.get(`${b.f.game_id}:${rosterKey(b.f.members)}`)?.size ?? 0)
+      - (offerSigners.get(`${a.f.game_id}:${rosterKey(a.f.members)}`)?.size ?? 0));
 
   /* ---- 1b. do not let a dead roster hold our only consent ----------------- */
   if (state.consent) {
