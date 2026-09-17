@@ -791,6 +791,25 @@ async function pass(state) {
         ? []
         : state.rosterMembers.filter((m) => m !== ME && !ourSigners.has(m));
       const sinceInvite = state.invitedAt ? (Date.now() - Date.parse(state.invitedAt)) / 60_000 : Infinity;
+      /**
+       * Never drop a seat we cannot refill.
+       *
+       * Both release rules below assume somebody better is waiting, and by
+       * 12:33 on 2026-09-17 nobody was: the pool had fallen to three names, the
+       * rebuild returned the identical roster, and all we had done was reset
+       * our own clock. That is the zuobai churn again in a different place --
+       * withdrawing from the only thing on offer.
+       *
+       * So count the writers that could actually take the seat: awake, not
+       * already on this roster, and not benched. If there are none, holding and
+       * nudging is strictly better than releasing.
+       */
+      const replacements = disc
+        ? [...new Set(disc.map(({ row }) => row.from))].filter((d) => d !== ME
+            && !state.rosterMembers.includes(d)
+            && !(state.unregistered || {})[d]
+            && spokeMin(d) <= LOYAL_ACTIVE_MIN).length
+        : 0;
       console.log(`  holding ${OUR_GAME}: ${ourSigners.size + 1}/${state.rosterMembers.length} signed, `
         + `${missing.length} seat(s) open (${heldMin.toFixed(0)}/${holdMinutesFor(ourSigners.size)} min)`);
 
@@ -809,7 +828,9 @@ async function pass(state) {
          * complete team, which then had to be rebuilt by hand.
          */
         console.log(`  ${OUR_GAME} is COMPLETE (${state.rosterMembers.length}/${state.rosterMembers.length}) — holding for the referee`);
-      } else if (disc && missing.length && heldMin >= AWAKE_REFUSAL_MIN * (1 + ourSigners.size)
+
+      } else if (disc && replacements > 0 && missing.length
+                 && heldMin >= AWAKE_REFUSAL_MIN * (1 + ourSigners.size)
                  && missing.some((m) => spokeMin(m) <= LOYAL_ACTIVE_MIN)) {
         /**
          * An awake seat that will not sign has refused, whatever it intends.
@@ -843,7 +864,7 @@ async function pass(state) {
          * twenty minutes of waiting for the rest.
          */
         if (ok) { state.consent = null; state.consentAt = null; state.rosterAt = null; }
-      } else if (disc && missing.length && heldMin >= SILENT_SEAT_MIN
+      } else if (disc && replacements > 0 && missing.length && heldMin >= SILENT_SEAT_MIN
                  && missing.every((m) => spokeMin(m) >= SILENT_SEAT_MIN)) {
         /**
          * `disc &&` is not decoration. On a pass where discovery could not be
@@ -911,6 +932,10 @@ async function pass(state) {
         if (ok) { state.consent = null; state.consentAt = null; state.rosterAt = null; }
       } else
       if (sinceInvite >= REINVITE_MIN && missing.length) {
+        if (disc && replacements === 0) {
+          console.log(`  nobody awake to replace these ${missing.length} seat(s) — `
+            + 'nudging rather than resetting our own clock');
+        }
         state.invitedAt = new Date().toISOString();
         for (const m of missing) {
           await post(DISCOVERY, {
