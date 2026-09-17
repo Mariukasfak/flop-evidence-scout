@@ -143,8 +143,18 @@ const REAPPLY_AFTER_HOURS = 2;
 const COSIGNER_ACTIVE_MIN = 60;
 /** How long our answer to a given roster stands before that roster is worth answering again. */
 const OFFER_RETRY_MIN = 30;
-/** How often to nudge the seats still missing from a part-signed roster of ours. */
-const REINVITE_MIN = 4;
+/**
+ * How often to nudge the seats still missing from a part-signed roster of ours.
+ *
+ * Four minutes was set when the cost of a message was nothing. Measured at
+ * 15:05Z on 2026-09-17: this agent posts about 85 signed frames an hour, and
+ * the referee issues 49-81 receipts an hour in total. We are not waiting behind
+ * somebody else's queue -- we are most of it. A fifth copy of an invitation
+ * does not persuade anyone who ignored the first four; it just moves our own
+ * roster further back in the line. It also flatly contradicts what the
+ * invitation now promises, which is that we will leave a held seat alone.
+ */
+const REINVITE_MIN = Number(process.env.SONNET_REINVITE_MIN || 20);
 /**
  * How long a part-signed roster is worth holding before the empty seat is the
  * problem rather than the wait. Two agents counter-signed ours inside twenty
@@ -1745,9 +1755,23 @@ async function pass(state) {
    * first and leave the canvassing for a pass where nothing is at stake.
    */
   const closingOurOwn = state.consent === OUR_GAME;
+  /**
+   * While our own roster is open, post none at all.
+   *
+   * The note above already recorded that 200+ applications never once got us
+   * drafted. What it could not know is the price: at roughly one per pass and a
+   * pass every forty seconds, canvassing alone is most of the 85 frames an hour
+   * we put into the referee's intake -- against the 49-81 an hour it clears.
+   * The eighty-minute wait for our own seal is partly a queue of our own
+   * applications sitting in front of it. A move with no measured upside and a
+   * measured cost to the one thing we need is not a hedge.
+   */
+  if (closingOurOwn) {
+    console.log('  not canvassing while our own roster is open — it is our own queue we wait behind');
+    games.clear();
+  }
   let applications = 0;
   for (const g of games) {
-    if (closingOurOwn && applications >= 1) break;
     /**
      * Re-apply to a team we have already written to once its application has
      * gone stale.
