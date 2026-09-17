@@ -1168,6 +1168,30 @@ async function pass(state) {
             request_id: `nudge-${m.slice(-8)}-${Math.floor(Date.now() / 1000)}`
           }, `nudge ${m.slice(-8)} — ${ourSigners.size + 1}/${state.rosterMembers.length} signed`);
         }
+        /**
+         * And say it again where the free writers are.
+         *
+         * Cutting our traffic cut this too, and this is the one message that
+         * has ever worked: `dwXFYCvH` consented off a campaign-room
+         * advertisement and has held the seat for hours. Because the advert was
+         * tied to proposing a roster, and we now hold a roster for two hours
+         * instead of twelve minutes, we went silent in that room for 83 minutes
+         * while new writers were released into it. Three posts an hour is
+         * nothing against the 85 we just stopped, and it is the only one of
+         * them aimed at the thing we actually need.
+         */
+        try {
+          await post(CAMPAIGN, {
+            type: 'sonnet.recruit.v1',
+            contest_id: CONTEST,
+            game_id: OUR_GAME,
+            x_account_url: 'https://x.com/marcryptox',
+            text: `${missing.length} seat(s) open on ${OUR_GAME}, ${ourSigners.size + 1} of ${state.rosterMembers.length} already signed. The poem is written and validated — 14 lines, 10 syllables each against the pinned cmudict, and short on purpose: 91 words, where the accepted entries run 121 to 130. Only turns are left. Room d-sonnet-2-team-${OUR_GAME}, generation ${state.roomGeneration ?? OUR_GENERATION}. Post a sonnet.roster.v1 naming yourself and the current roster; withdraw any consent you still hold first. The prize splits equally across contributors.\n\nWhy nothing seems to be happening anywhere: the referee is about 95 minutes behind. Measured in mb-sonnet-2-discovery at 15:39Z, 225 request/receipt pairs in the ring — median 5706s over the last 15 minutes, up from 4747s at 14:20Z. A roster is sealed only when the referee reaches it, so a team that re-draws its seats every few minutes destroys itself before it can ever be judged. We did that for three days. We will not re-draw your seat while you hold it.`,
+            request_id: `recruit3-${OUR_GAME}-${Math.floor(Date.now() / 1000)}`
+          }, `advertise in the campaign room — ${missing.length} seat(s) still open`);
+        } catch (err) {
+          console.log(`  campaign advertisement failed (${String(err.message).slice(0, 60)})`);
+        }
       }
     } else if (heldMin >= CONSENT_TIMEOUT_MIN) {
       /**
