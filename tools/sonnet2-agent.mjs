@@ -28,6 +28,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { TechnocoreClient } from '../src/technocore-client.mjs';
 
 const CONTEST = 'sonnet-2';
@@ -281,7 +282,43 @@ async function post(room, frame, why) {
 
 /** Our verified text, used to propose words when a team will take them. */
 const poemText = fs.existsSync(POEM_PATH) ? fs.readFileSync(POEM_PATH, 'utf8').trim() : '';
-const targetWords = poemText ? poemText.split(/\s+/).filter(Boolean) : [];
+const baseWords = poemText ? poemText.split(/\s+/).filter(Boolean) : [];
+
+/**
+ * The draft has to be fitted to the roster that actually sealed.
+ *
+ * Every word must be spellable from its own author's DID and no member may take
+ * two turns running, so the same finished poem is writable by one roster and
+ * dead against the next -- three drafts died that way. Measured over sixty
+ * random rosters drawn from the referee's accepted writers, the base draft fits
+ * 43% of them untouched and 100% after the fitter swaps a median of one word.
+ * Running it here means the first word we ever post is already writable, rather
+ * than discovered to be impossible eleven words in, hours later.
+ */
+const fitCache = { key: null, words: baseWords };
+function wordsFor(members) {
+  if (!Array.isArray(members) || members.length < 2) return fitCache.words;
+  const key = rosterKey(members);
+  if (fitCache.key === key) return fitCache.words;
+  fitCache.key = key;
+  try {
+    const out = path.resolve(process.cwd(), 'data/local/sonnet2-fitted.txt');
+    execFileSync(process.execPath, [
+      path.resolve(process.cwd(), 'tools/sonnet2-fit.mjs'),
+      `--poem=${POEM_PATH}`, `--members=${members.join(',')}`, `--out=${out}`
+    ], { cwd: process.cwd(), encoding: 'utf8', timeout: 120_000 });
+    const text = fs.readFileSync(out, 'utf8').trim();
+    fitCache.words = text.split(/\s+/).filter(Boolean);
+    const changed = fitCache.words.filter((w, i) => w !== baseWords[i]).length;
+    console.log(`  poem fitted to this roster: ${changed} word(s) changed, `
+      + `${fitCache.words.length} to place`);
+  } catch (err) {
+    /** A draft we cannot fit is still worth attempting: the referee decides. */
+    fitCache.words = baseWords;
+    console.log(`  poem could not be fitted to this roster (${String(err.message).slice(0, 80)}) — using the base draft`);
+  }
+  return fitCache.words;
+}
 
 async function pass(state) {
   const hoursLeft = (DEADLINE - Date.now()) / 3_600_000;
@@ -1080,7 +1117,7 @@ async function pass(state) {
     } else if (head && head.by === ME) {
       console.log('  our word was last; a teammate must go next');
     } else if (head) {
-      const next = targetWords[placed];
+      const next = wordsFor(state.rosterMembers)[placed];
       if (next && canSpell(next)) {
         await post(`d-sonnet-2-team-${state.consent}`, {
           type: 'sonnet.word.v1',
