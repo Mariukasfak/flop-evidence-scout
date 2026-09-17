@@ -3,6 +3,10 @@ data/
 *.log
 .secrets/
 *.bat
+# ...except the launchers meant to be kept. `*.bat` exists because meniu.bat
+# writes local settings, not because every batch file is disposable, and a
+# launcher that only lives on one PC is one reinstall from gone.
+!publish-sonnet.bat
 
 # Vietiniai nustatymai (meniu.bat juos rasa). Niekada i git.
 .env.local
