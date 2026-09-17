@@ -129,6 +129,12 @@ const holdMinutesFor = (signed) => (signed >= 2 ? 480 : signed === 1 ? 120 : PAR
 const STANDDOWN_AFTER_MIN = 4;
 /** How long we remember that a named agent never answered. */
 const UNRESPONSIVE_HOURS = 0.5;
+/**
+ * How long an empty seat may stay silent in discovery before it is not worth
+ * holding the roster for. Long holds protect signatures; they were never meant
+ * to wait out a sleeper, and a release keeps the signers now.
+ */
+const SILENT_SEAT_MIN = Number(process.env.SONNET_SILENT_SEAT_MIN || 45);
 /** How long an agent that signed one of our rosters stays our first choice. */
 const LOYAL_HOURS = 6;
 /** ...but a past signature only outranks freshness while the agent is still signing. */
@@ -487,6 +493,16 @@ async function pass(state) {
      * 08:57 and 12:22 on 2026-09-16 and the loop reported "COMPLETE (4/4)" for
      * eight hours while it held nothing but its own signature.
      */
+    /** When each DID last said anything at all in discovery, for seat liveness. */
+    const spokeAt = new Map();
+    for (const { row } of (disc || [])) {
+      const prev = spokeAt.get(row.from);
+      if (!prev || row.ts > prev) spokeAt.set(row.from, row.ts);
+    }
+    const spokeMin = (did) => (spokeAt.has(did)
+      ? (Date.now() - Date.parse(spokeAt.get(did))) / 60_000
+      : Infinity);
+
     const departed = new Set();
     if (state.consent === OUR_GAME && Array.isArray(state.rosterMembers)) {
       for (const { row, f } of disc) {
@@ -561,6 +577,30 @@ async function pass(state) {
          * complete team, which then had to be rebuilt by hand.
          */
         console.log(`  ${OUR_GAME} is COMPLETE (${state.rosterMembers.length}/${state.rosterMembers.length}) — holding for the referee`);
+      } else if (disc && missing.length && heldMin >= SILENT_SEAT_MIN
+                 && missing.every((m) => spokeMin(m) >= SILENT_SEAT_MIN)) {
+        /**
+         * `disc &&` is not decoration. On a pass where discovery could not be
+         * read, `spokeAt` is empty and every seat looks silent -- so without the
+         * guard a failed read would demolish a 3-of-4 roster, which is exactly
+         * the class of bug that cost a complete team on 2026-09-15.
+         */
+        /**
+         * The long hold exists to protect signatures, not to wait out a sleeper.
+         * Since a release keeps whoever signed and re-draws only the empty seat,
+         * waiting eight hours on a member that has said nothing for the last
+         * forty-five minutes costs hours and saves nothing. Agents that are
+         * awake answer in ten to twenty-five seconds.
+         */
+        state.keepNext = [...ourSigners];
+        const ok = await post(DISCOVERY, {
+          type: 'sonnet.withdraw.v1',
+          contest_id: CONTEST,
+          game_id: OUR_GAME,
+          request_id: `rebuild-${OUR_GAME}-${Math.floor(Date.now() / 1000)}`
+        }, `release ${OUR_GAME} — ${missing.length} seat(s) silent in discovery for `
+          + `${Math.min(...missing.map(spokeMin)).toFixed(0)}+ min, keeping ${ourSigners.size} signer(s)`);
+        if (ok) { state.consent = null; state.consentAt = null; state.rosterAt = null; }
       } else if (missing.some((m) => (state.unregistered || {})[m])) {
         /**
          * An empty seat held by someone the referee has already called
