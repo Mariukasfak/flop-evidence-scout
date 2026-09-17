@@ -561,6 +561,26 @@ async function pass(state) {
          * complete team, which then had to be rebuilt by hand.
          */
         console.log(`  ${OUR_GAME} is COMPLETE (${state.rosterMembers.length}/${state.rosterMembers.length}) — holding for the referee`);
+      } else if (missing.some((m) => (state.unregistered || {})[m])) {
+        /**
+         * An empty seat held by someone the referee has already called
+         * unregistered cannot ever be filled: that verdict is permanent, so the
+         * roster is dead however many signatures it carries. At 02:27 on
+         * 2026-09-17 we benched AsFpTB4N as unregistered and went on nudging it
+         * for the last seat of a 3-of-4 roster with an eight-hour hold in front
+         * of it. Release now and keep the signers instead of waiting out a timer
+         * for an answer that is not coming.
+         */
+        const dead = missing.filter((m) => (state.unregistered || {})[m]);
+        state.keepNext = [...ourSigners];
+        const ok = await post(DISCOVERY, {
+          type: 'sonnet.withdraw.v1',
+          contest_id: CONTEST,
+          game_id: OUR_GAME,
+          request_id: `rebuild-${OUR_GAME}-${Math.floor(Date.now() / 1000)}`
+        }, `release ${OUR_GAME} — ${dead.length} seat(s) benched as unregistered `
+          + `(${dead.map((m) => m.slice(-8)).join(' ')}), keeping ${ourSigners.size} signer(s)`);
+        if (ok) { state.consent = null; state.consentAt = null; state.rosterAt = null; }
       } else if (heldMin >= holdMinutesFor(ourSigners.size)) {
         /**
          * Releasing costs every signature we hold, because consent attaches to
@@ -756,6 +776,34 @@ async function pass(state) {
       return !!st && st.kind === 'sonnet.roster.v1' && st.game !== OUR_GAME;
     };
 
+    /**
+     * Who the referee has already accepted on somebody's roster.
+     *
+     * `roster: unregistered` is only learnable by being rejected for it, hours
+     * later, and it costs a whole roster attempt each time -- three of ours went
+     * that way. But an *accepted* roster receipt proves every member on that
+     * list was registered, and those receipts are sitting in the same room we
+     * already read. That turns registration from a guess into a fact for anyone
+     * who has ever been on an accepted list.
+     */
+    const rosterById = new Map();
+    for (const { f } of disc) {
+      if (f.type === 'sonnet.roster.v1' && f.request_id && Array.isArray(f.members)) {
+        rosterById.set(f.request_id, f.members);
+      }
+    }
+    /** Receipts are the only frames the referee signs, so they identify it. */
+    const refDid = disc.find(({ f }) => String(f.type || '').startsWith('sonnet.receipt'))?.row.from;
+    const proven = new Set();
+    for (const { row, f } of disc) {
+      if (!refDid || row.from !== refDid) continue;
+      const items = f.type === 'sonnet.receipts.v1' ? (f.receipts || []) : [f];
+      for (const it of items) {
+        if (it.status !== 'accepted') continue;
+        for (const m of rosterById.get(it.request_id) || []) proven.add(m);
+      }
+    }
+
     const everyone = [...new Set(loyal.concat([...cosigners.keys()].filter(responsive), fresh))]
       .filter((d) => !ignored(d));
     const unattached = everyone.filter((d) => !attached(d));
@@ -772,7 +820,9 @@ async function pass(state) {
        * earlier, while the only two agents co-signing in the last ten minutes
        * were not on our roster at all.
        */
-      .sort((a, b) => ((loyal.includes(b) && lastSeen(b) <= LOYAL_ACTIVE_MIN)
+      /** Proven-registered first: an unregistered seat wastes the whole attempt. */
+      .sort((a, b) => (proven.has(b) - proven.has(a))
+        || ((loyal.includes(b) && lastSeen(b) <= LOYAL_ACTIVE_MIN)
           - (loyal.includes(a) && lastSeen(a) <= LOYAL_ACTIVE_MIN))
         || (lastSeen(a) - lastSeen(b))
         || (hasO(b) - hasO(a))
@@ -812,7 +862,9 @@ async function pass(state) {
         room_generation: gen,
         members,
         request_id: rosterRequestId
-      }, `propose our own roster of ${members.length} (${pool.filter(hasO).length} with an o)`);
+      }, `propose our own roster of ${members.length} `
+        + `(${members.filter((m) => m !== ME && proven.has(m)).length} referee-proven, `
+        + `${pool.filter(hasO).length} with an o)`);
       state.rosterAt = new Date().toISOString();
       /** Naming ourselves on a roster *is* our one live consent. */
       if (ok) {
