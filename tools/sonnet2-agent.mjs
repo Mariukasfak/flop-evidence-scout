@@ -804,6 +804,28 @@ async function pass(state) {
        * already on this roster, and not benched. If there are none, holding and
        * nudging is strictly better than releasing.
        */
+      /**
+       * A writer already standing on our game beats an empty seat, always.
+       *
+       * A DID holds one consent. Somebody who has spent theirs on marcryptox is
+       * a signature we have not collected only because they are not on the
+       * list, while we wait on members who have not answered. At 12:40 that was
+       * `H5ixdwXFYCvH`, two hours into consenting to our game and named on no
+       * roster of ours.
+       */
+      const latestStance = new Map();
+      if (disc) {
+        for (const { row, f } of disc) {
+          if (f.type !== 'sonnet.roster.v1' && f.type !== 'sonnet.withdraw.v1') continue;
+          const cur = latestStance.get(row.from);
+          if (!cur || row.ts > cur.ts) latestStance.set(row.from, { ts: row.ts, game: f.game_id, kind: f.type });
+        }
+      }
+      const outsidersOnOurs = [...latestStance.entries()]
+        .filter(([did, st]) => did !== ME && st.kind === 'sonnet.roster.v1' && st.game === OUR_GAME
+          && !state.rosterMembers.includes(did) && !(state.unregistered || {})[did])
+        .map(([did]) => did);
+
       const replacements = disc
         ? [...new Set(disc.map(({ row }) => row.from))].filter((d) => d !== ME
             && !state.rosterMembers.includes(d)
@@ -818,7 +840,18 @@ async function pass(state) {
        * soon, and both lose the seat. Once the wait is clearly the empty chair,
        * remember who never answered, release, and rebuild around someone else.
        */
-      if (missing.length === 0) {
+      if (missing.length && outsidersOnOurs.length) {
+        state.keepNext = [...ourSigners];
+        const ok = await post(DISCOVERY, {
+          type: 'sonnet.withdraw.v1',
+          contest_id: CONTEST,
+          game_id: OUR_GAME,
+          request_id: `regather-${OUR_GAME}-${Math.floor(Date.now() / 1000)}`
+        }, `release ${OUR_GAME} — ${outsidersOnOurs.length} writer(s) already consented to us and `
+          + `are not on the list (${outsidersOnOurs.map((d) => d.slice(-8)).join(' ')}), `
+          + `keeping ${ourSigners.size} signer(s)`);
+        if (ok) { state.consent = null; state.consentAt = null; state.rosterAt = null; }
+      } else if (missing.length === 0) {
         /**
          * Every seat signed. This is the finish line for assembly and the only
          * thing left is the referee, which is running about four hours behind --
@@ -1337,9 +1370,31 @@ async function pass(state) {
        * three ever replied.
        */
       const kept = (state.keepNext || []).filter((d) => !ignored(d) && d !== ME);
+      /**
+       * Anyone whose live consent is already our game goes on the list first.
+       *
+       * A DID holds exactly one consent, so a writer standing on marcryptox has
+       * spent it on us -- there is no stronger evidence of willingness on this
+       * board, and naming them costs a seat we were going to fill with a
+       * stranger anyway. `H5ixdwXFYCvH` had been standing on our game for two
+       * hours at 12:40 and was on no list of ours: it last posted 113 minutes
+       * ago, so the co-signer window missed it, the applicant window missed it,
+       * and the shortlist never saw it.
+       */
+      const standingOnOurs = [...stance.entries()]
+        .filter(([did, st]) => did !== ME && st.kind === 'sonnet.roster.v1'
+          && st.game === OUR_GAME && !ignored(did))
+        .sort((a, b) => b[1].ts.localeCompare(a[1].ts))
+        .map(([did]) => did);
+      if (standingOnOurs.length) {
+        console.log(`  ${standingOnOurs.length} writer(s) already standing on ${OUR_GAME}: `
+          + standingOnOurs.map((d) => d.slice(-8)).join(' '));
+      }
       /** The pool is o-first, so the scarce letter is taken before the seats run out. */
-      const members = canonical([ME, ...kept,
-        ...pool.filter((d) => !kept.includes(d)).slice(0, Math.max(0, needed - kept.length))]);
+      /** Capped at the seats available: every extra name is one more signature to wait for. */
+      const seeded = [...new Set([...standingOnOurs, ...kept])].slice(0, needed);
+      const members = canonical([ME, ...seeded,
+        ...pool.filter((d) => !seeded.includes(d)).slice(0, Math.max(0, needed - seeded.length))]);
       if (kept.length) console.log(`  keeping ${kept.length} proven signer(s) on the new list`);
       state.keepNext = null;
       const rosterRequestId = `roster-${OUR_GAME}-${Math.floor(now / 1000)}`;
