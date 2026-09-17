@@ -446,6 +446,7 @@ function fitOnce(poemPath, members) {
 const fitsRoster = (poemPath, members) => fitOnce(poemPath, members).ok;
 const wordsFor = (poemPath, members) => fitOnce(poemPath, members).words;
 
+let passNo = 0;
 async function pass(state) {
   const hoursLeft = (DEADLINE - Date.now()) / 3_600_000;
   console.log(`\n[agent] ${new Date().toISOString().slice(11, 19)}Z  ${hoursLeft.toFixed(1)}h left  consent=${state.consent || 'none'}`);
@@ -461,7 +462,25 @@ async function pass(state) {
    * read now suspends only the roster and consent decisions, which are the ones
    * that need it; the poem is checked either way.
    */
-  const discRows = await ex(DISCOVERY);
+  /**
+   * Once the poem is running, our own turn is the urgent thing, not the field.
+   *
+   * Discovery is seven megabytes and takes eighty seconds on a good pass and
+   * four minutes on a bad one; the team room is a thousandth of that and
+   * answers in under a second. Reading discovery first means we notice our own
+   * turn one to four minutes late, every time -- across the forty-odd turns a
+   * roster of four gives us, that is an hour of the deadline spent waiting on a
+   * read we did not need.
+   *
+   * So while a poem of ours is live, discovery is read only every fourth pass.
+   * Skipping it is already a well-worn path: a failed read suspends the roster
+   * decisions and checks the poem anyway, which is exactly the trade wanted
+   * here, and the roster is settled by then in any case.
+   */
+  passNo++;
+  const skipDiscovery = state.poemLive && (passNo % 4 !== 0);
+  if (skipDiscovery) console.log('  poem is live — skipping discovery this pass to answer our turn faster');
+  const discRows = skipDiscovery ? null : await ex(DISCOVERY);
   const disc = discRows === null ? null : parsed(discRows);
   if (!disc) console.log('  discovery unreadable — roster decisions suspended, poem still checked');
 
@@ -1569,6 +1588,8 @@ async function pass(state) {
       if (f.type !== 'sonnet.receipt.v1' || f.status !== 'accepted') continue;
       if (f.roster_ready === true) {
         rosterReady = true;
+        /** From here the team room is what matters; see the note on skipDiscovery. */
+        state.poemLive = true;
         /**
          * The opening `previous_state_hash` is this receipt's, specifically --
          * verified against galax2u, jinken, echo-2 and pelmora, each of which
