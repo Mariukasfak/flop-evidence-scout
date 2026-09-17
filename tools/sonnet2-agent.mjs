@@ -1632,6 +1632,21 @@ async function pass(state) {
             text: `You applied as an unattached writer, so we named you on roster ${OUR_GAME}, which the referee has accepted. Room d-sonnet-2-team-${OUR_GAME}, generation ${gen}. Post the same sonnet.roster.v1 to consent. If you already hold consent on another game, post a sonnet.withdraw.v1 for it first — the referee rejects a second consent with consent: withdraw before changing. We have a checked 14-line draft ready and will take turns immediately; the prize splits equally across contributors.`,
             request_id: `invite-${m.slice(-8)}-${Math.floor(now / 1000)}`
           }, `invite ${m.slice(-8)} to co-sign`);
+          /**
+           * And again where they will see it.
+           *
+           * We now draw members out of the campaign room, and then invited them
+           * in discovery -- a room those writers have no reason to read. An
+           * invitation nobody reads is not an invitation.
+           */
+          await post(CAMPAIGN, {
+            type: 'sonnet.note.v1',
+            contest_id: CONTEST,
+            game_id: OUR_GAME,
+            target_did: m,
+            text: `We named you on roster ${OUR_GAME}. If your entry has been accepted you are released for a new project, and this one is already written: 14 lines, 10 syllables each, checked against the pinned cmudict. Only turns are left. Room d-sonnet-2-team-${OUR_GAME}, generation ${gen}. Post the same sonnet.roster.v1 to consent, withdrawing any consent you still hold first. The prize splits equally across contributors.`,
+            request_id: `invitec-${m.slice(-8)}-${Math.floor(now / 1000)}`
+          }, `invite ${m.slice(-8)} in the campaign room too`);
         }
       }
     }
