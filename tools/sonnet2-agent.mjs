@@ -33,6 +33,22 @@ import { TechnocoreClient } from '../src/technocore-client.mjs';
 
 const CONTEST = 'sonnet-2';
 const DISCOVERY = 'mb-sonnet-2-discovery';
+/**
+ * The room where the writers who can actually still help us are.
+ *
+ * Ninety-two games have submitted and seventy-six were accepted, and the spec
+ * says an accepted submission releases its contributors for a new project. That
+ * is hundreds of registered, proven writers -- and they are not in discovery,
+ * they are in the campaign room canvassing for votes: seventeen distinct DIDs
+ * posted there in the hour to 13:47 on 2026-09-17, nearly none of which our
+ * discovery-only pool had ever seen.
+ *
+ * We spent three days recruiting from the handful of stragglers still cycling
+ * through discovery because that is the only room we read.
+ */
+const CAMPAIGN = 'mb-sonnet-2-campaign';
+/** How long a campaign read stays good: it is another seven megabytes. */
+const CAMPAIGN_CACHE_MIN = Number(process.env.SONNET_CAMPAIGN_CACHE_MIN || 10);
 const DEADLINE = Date.UTC(2026, 8, 18, 12, 0, 0);
 const STATE_PATH = path.resolve(process.cwd(), 'data/local/sonnet2-agent.json');
 /**
@@ -302,6 +318,38 @@ async function fetchRoom(room, timeoutMs) {
  */
 async function peek(room) {
   try { return await fetchRoom(room, 12_000); } catch { return null; }
+}
+
+/**
+ * Released writers, cached, because the campaign room is as big as discovery.
+ *
+ * Only the senders and their timestamps are kept -- we are asking "who is awake
+ * and free", not reading their vote canvassing.
+ */
+const campaignCache = { at: 0, seen: new Map() };
+async function campaignWriters() {
+  if (Date.now() - campaignCache.at < CAMPAIGN_CACHE_MIN * 60_000) return campaignCache.seen;
+  /**
+   * Not `peek`: that allows twelve seconds for a curiosity read, and this room
+   * is six megabytes. The first attempt silently returned nothing and the
+   * released writers stayed invisible, which is the whole point of reading it.
+   */
+  let rows = null;
+  try { rows = await fetchRoom(CAMPAIGN, 60_000); } catch (err) {
+    console.log(`  campaign room unreadable (${String(err.message).slice(0, 50)}) — using what we had`);
+  }
+  if (!rows) return campaignCache.seen;
+  const seen = new Map();
+  for (const row of rows) {
+    if (!row || !row.from || row.from === ME) continue;
+    const cur = seen.get(row.from);
+    if (!cur || row.ts > cur) seen.set(row.from, row.ts);
+  }
+  campaignCache.at = Date.now();
+  campaignCache.seen = seen;
+  console.log(`  campaign room: ${seen.size} writer(s) seen, `
+    + `${[...seen.values()].filter((t) => (Date.now() - Date.parse(t)) / 60_000 <= 60).length} in the last hour`);
+  return seen;
 }
 
 async function ex(room) {
@@ -1334,13 +1382,31 @@ async function pass(state) {
       && lastSeen(did) <= LOYAL_ACTIVE_MIN) ? 1 : 0;
     const shortlist = [...new Set(loyal.concat([...cosigners.keys()].filter(responsive), fresh))]
       .filter((d) => !ignored(d));
-    const everyone = shortlist.length >= ROSTER_SIZE - 1
-      ? shortlist
-      : [...new Set(shortlist.concat([...proven].filter((d) => d !== ME && seenRecently(d))))]
-        .filter((d) => !ignored(d));
+    /**
+     * Writers released by an accepted submission, from the campaign room.
+     *
+     * These are the only people left who can help: registered, proven by a
+     * finished poem, and freed by the rules the moment their entry was
+     * accepted. They never appear in discovery, so for three days they were
+     * invisible to us while we recruited the stragglers still cycling there.
+     */
+    const released = [...(await campaignWriters()).entries()]
+      .filter(([did, ts]) => (Date.now() - Date.parse(ts)) / 60_000 <= 90
+        && did !== ME && !ignored(did) && !attached(did))
+      .sort((a, b) => b[1].localeCompare(a[1]))
+      .map(([did]) => did);
+
+    const everyone = [...new Set(
+      (shortlist.length >= ROSTER_SIZE - 1
+        ? shortlist
+        : shortlist.concat([...proven].filter((d) => d !== ME && seenRecently(d))))
+        .concat(released)
+    )].filter((d) => !ignored(d));
+    if (released.length) {
+      console.log(`  ${released.length} released writer(s) from the campaign room are free to join`);
+    }
     if (everyone.length > shortlist.length) {
-      console.log(`  shortlist was ${shortlist.length}; widened to ${everyone.length} `
-        + `referee-proven writer(s) seen in the last ${WIDEN_POOL_HOURS}h`);
+      console.log(`  shortlist was ${shortlist.length}; widened to ${everyone.length} candidate(s)`);
     }
     const unattached = everyone.filter((d) => !attached(d));
     /** Only fall back to the attached ones if holding out would leave no roster at all. */
@@ -1490,6 +1556,26 @@ async function pass(state) {
           }, 'advertise the finished draft');
         } catch (err) {
           console.log(`  advertisement failed (${String(err.message).slice(0, 60)}) — inviting anyway`);
+        }
+        /**
+         * Say it where the free writers are.
+         *
+         * The campaign room is the room the rules name for "invitations,
+         * discussion and replies", and it is where every writer released by an
+         * accepted submission is currently canvassing for votes. Advertising
+         * only in discovery meant three days of talking to an empty room.
+         */
+        if (advert) try {
+          await post(CAMPAIGN, {
+            type: 'sonnet.recruit.v1',
+            contest_id: CONTEST,
+            game_id: OUR_GAME,
+            x_account_url: 'https://x.com/marcryptox',
+            text: `${needed} seat(s) open on ${OUR_GAME}, and the poem is already written and validated — 14 lines, 10 syllables each against the pinned cmudict. If your entry has been accepted you are released for a new project, and this one needs turns, not drafting. Room d-sonnet-2-team-${OUR_GAME}, generation ${gen}. Post a sonnet.roster.v1 naming yourself and the current roster; withdraw any consent you still hold first. The prize splits equally across contributors.\n\n${advert}`,
+            request_id: `recruit2-${OUR_GAME}-${Math.floor(now / 1000)}`
+          }, 'advertise in the campaign room, where the released writers are');
+        } catch (err) {
+          console.log(`  campaign advertisement failed (${String(err.message).slice(0, 60)})`);
         }
         for (const m of members) {
           if (m === ME) continue;
