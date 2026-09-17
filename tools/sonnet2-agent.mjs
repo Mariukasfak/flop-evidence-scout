@@ -1038,7 +1038,7 @@ async function pass(state) {
           + 'a re-draw costs more than the empty seat');
 
       } else if (missing.length && PREFER_DIDS.some((d) => d !== ME && !state.rosterMembers.includes(d))
-                 && heldMin >= SILENT_ANSWER_MIN) {
+                 && heldMin >= Math.max(SILENT_ANSWER_MIN, REFEREE_LAG_MIN)) {
         /**
          * Trade a verdict we already know for one that could be yes.
          *
@@ -1066,9 +1066,25 @@ async function pass(state) {
           + `keeping ${ourSigners.size} signer(s)`);
         if (ok) { state.consent = null; state.consentAt = null; state.rosterAt = null; }
 
-      } else if (disc && gone.length && replacements >= gone.length) {
+      } else if (disc && gone.length && replacements >= gone.length
+                 && heldMin >= REFEREE_LAG_MIN) {
         /**
-         * Replace the seats that have left, on their own evidence.
+         * Replace the seats that have left, on their own evidence -- but not
+         * before the referee has had one full queue length to judge the roster
+         * they left.
+         *
+         * Evidence of departure was the right trigger; no time floor was the
+         * wrong price. Between 16:29 and 16:39 this branch fired eight more
+         * times: zuobai re-proposes constantly, its regulars re-sign it, we
+         * read every re-sign as a departure, and each one bought a fresh
+         * ninety-minute wait. The guard added at three of four did not help,
+         * because the oscillation passes through two of four on its way down.
+         *
+         * Three separate rules have made this same mistake in one day, so it
+         * is stated plainly here: nothing may cancel a roster before the
+         * slowest authority in the loop has had its chance at it. A seat that
+         * left is still worth replacing -- after the verdict, not instead of
+         * one.
          *
          * Only stances taken *after* we proposed count: a candidate's last word
          * before we named them is always some other game, so counting those
