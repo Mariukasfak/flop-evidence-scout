@@ -73,18 +73,23 @@ if (fs.existsSync(listPath)) {
   words.forEach((w, i) => { if (!commonOrder.has(w)) commonOrder.set(w, i); });
 }
 
-const bare = (t) => (t.match(/^([A-Za-z']+)/) || [, ''])[1].toLowerCase();
 const raw = fs.readFileSync(poemPath, 'utf8').replace(/\r\n/g, '\n').replace(/\n+$/, '');
 const blocks = raw.split('\n\n');
 const lines = blocks.flatMap((b) => b.split('\n')).filter((l) => l.trim());
 if (lines.length !== 14) fail(`expected 14 lines, got ${lines.length}`);
 
-/** Keep punctuation and capitalisation attached to the slot, not to the word. */
+/**
+ * Split each token into leading punctuation, the word, and trailing punctuation.
+ *
+ * Done by index this went wrong on the first capitalised word it met: looking
+ * for the lowercased first letter inside "She" finds the *second* `s`, so the
+ * lead became "Sh" and the line rebuilt as "ShShe". Match the three parts
+ * directly instead.
+ */
 const slots = lines.map((line) => line.split(' ').map((tok) => {
-  const w = bare(tok);
-  const lead = tok.slice(0, tok.indexOf(w[0] ?? tok[0]));
-  const tail = tok.slice((lead + w).length);
-  return { w, lead, tail, caps: /^[A-Z]/.test(tok.replace(/^\W+/, '')) };
+  const m = tok.match(/^([^A-Za-z']*)([A-Za-z']+)(.*)$/);
+  if (!m) return { w: '', lead: tok, tail: '', caps: false };
+  return { w: m[2].toLowerCase(), lead: m[1], tail: m[3], caps: /^[A-Z]/.test(m[2]) };
 }));
 
 const candidatesFor = (word, needRhyme) => {
@@ -104,7 +109,21 @@ const candidatesFor = (word, needRhyme) => {
   return out.sort((a, b) => (b.w.length - a.w.length) || (a.rank - b.rank));
 };
 
+/**
+ * Swapping a content word costs an image; swapping a function word costs the
+ * sentence. Replacing "of" with the widest-writable one-syllable word produced
+ * "engine a my mind", which is still a valid sonnet to the referee and no
+ * longer English. These are named so the swap can be judged, and a human asked
+ * to rewrite the line instead.
+ */
+const FUNCTION_WORDS = new Set(['a', 'an', 'and', 'as', 'at', 'be', 'been', 'but', 'by',
+  'for', 'from', 'he', 'her', 'him', 'his', 'i', 'if', 'in', 'is', 'it', 'its', 'me', 'my',
+  'no', 'nor', 'not', 'of', 'on', 'or', 'our', 'she', 'so', 'than', 'that', 'the', 'their',
+  'them', 'then', 'there', 'they', 'this', 'to', 'us', 'was', 'we', 'were', 'what', 'when',
+  'where', 'which', 'who', 'why', 'will', 'with', 'you', 'your']);
+
 let swaps = 0;
+const grammarRisk = [];
 const problems = [];
 for (const [li, slot] of slots.entries()) {
   for (const [wi, s] of slot.entries()) {
@@ -116,6 +135,7 @@ for (const [li, slot] of slots.entries()) {
     s.was = s.w;
     s.w = pick.cand;
     swaps++;
+    if (FUNCTION_WORDS.has(s.was)) grammarRisk.push(`line ${li + 1}: "${s.was}" -> "${s.w}"`);
   }
 }
 
@@ -175,6 +195,10 @@ for (const [li, slot] of slots.entries()) {
   }
 }
 console.log(`substitutions: ${swaps}`);
+if (grammarRisk.length) {
+  console.log(`  GRAMMAR RISK — ${grammarRisk.length} function word(s) swapped; rewrite these lines by hand:`);
+  for (const g of grammarRisk) console.log(`    ${g}`);
+}
 if (assignment.length) {
   const used = new Set(assignment);
   console.log(`turns: legal for all ${flat.length} words; `
