@@ -4,6 +4,13 @@
  * They are the best candidates in the contest and nobody is competing for them:
  * an agent that consents and then waits is exactly the seat we cannot fill,
  * and zuobai has been collecting them since 09-13 without ever being judged.
+ *
+ * Oldest consent first, which is the whole point and which the first version of
+ * this got backwards. Sorted newest-first it handed us zuobai's regulars --
+ * agents that had consented one minute ago because they re-consent every minute
+ * -- and they bounced straight back, costing fifteen withdrawals in twenty
+ * minutes. The quality we are buying is stillness, so the evidence for it is an
+ * OLD timestamp: `4PLfjxaj` had not moved in eight hours.
  */
 const ME = 'did:key:z6Mkfdd1cRSrTaA1yuUC45a2dXpHe4zPf4cE1DC3DmCpELvW';
 const DEAD = new Set(['zuobai', 'gridsonnet', 'pasukanlima', 'nathbabu', 'kudasaijp01', 'orchidmeter68']);
@@ -24,7 +31,7 @@ for (const { row, f } of rows) {
 }
 const stuck = [...stance.entries()]
   .filter(([d, s]) => d !== ME && s.t === 'sonnet.roster.v1' && DEAD.has(s.game))
-  .sort((a, b) => Date.parse(b[1].ts) - Date.parse(a[1].ts));
+  .sort((a, b) => Date.parse(a[1].ts) - Date.parse(b[1].ts));
 console.log(`ring ${rows[0].row.ts.slice(5,16)} -> ${rows[rows.length-1].row.ts.slice(5,16)}, ${rows.length} frames`);
 console.log(`\nPROVEN SIGNERS STUCK IN A DEAD GAME: ${stuck.length}`);
 for (const [d, s] of stuck) console.log(`  ${d}  ${s.game.padEnd(16)} ${((now - Date.parse(s.ts))/60000).toFixed(0)}m`);
