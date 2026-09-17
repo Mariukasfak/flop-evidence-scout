@@ -1045,6 +1045,17 @@ async function pass(state) {
         state.consent = f.game_id;
         state.consentAt = new Date().toISOString();
         state.consentRequestId = requestId;
+        /**
+         * Remember whose team this is.
+         *
+         * `rosterMembers` is only ever written when we found our own roster,
+         * and every other reader guards on `consent === OUR_GAME` -- except the
+         * one that matters, which fits the poem to the roster before posting a
+         * word. On somebody else's team that would have fitted our draft to our
+         * own stale member list and posted words their actual team cannot
+         * spell, in their room, on the one path that has never run.
+         */
+        state.consentMembers = f.members;
       }
       break;   // one consent, one attempt per pass, whether or not it landed
     }
@@ -1323,6 +1334,7 @@ async function pass(state) {
         state.consentAt = new Date().toISOString();
         state.consentRequestId = rosterRequestId;
         state.rosterMembers = members;
+        state.consentMembers = members;
         /** Keep a short history so a late verdict can be attributed to a list. */
         state.rosterHistory = state.rosterHistory || {};
         state.rosterHistory[rosterRequestId] = members;
@@ -1524,7 +1536,11 @@ async function pass(state) {
        * the published hash is built from. Nothing here can stop a teammate
        * choosing their own word, but we should not be the last to know.
        */
-      const fitted = wordsFor(draftFor(state, state.rosterMembers, placed), state.rosterMembers);
+      /** Whoever's team this is, fit the poem to the people actually on it. */
+      const teamMembers = state.consent === OUR_GAME
+        ? (state.rosterMembers || state.consentMembers)
+        : (state.consentMembers || state.rosterMembers);
+      const fitted = wordsFor(draftFor(state, teamMembers, placed), teamMembers);
       const drifted = placedWords.findIndex((w, i) => w.toLowerCase() !== String(fitted[i] || '').toLowerCase());
       if (drifted >= 0) {
         console.log(`  DRIFT at word ${drifted + 1}: the room has "${placedWords[drifted]}", `
