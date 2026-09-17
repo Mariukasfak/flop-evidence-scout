@@ -921,7 +921,15 @@ async function pass(state) {
       const latestStance = new Map();
       if (disc) {
         for (const { row, f } of disc) {
-          if (f.type !== 'sonnet.roster.v1' && f.type !== 'sonnet.withdraw.v1') continue;
+          /**
+           * Applications count as a stance, because they are how a member
+           * announces they have gone elsewhere. At 14:33 our roster read 2 of
+           * 4 while `Dq3VUSttk` was applying to zuobai and `Lv3AsFpTB4N` to
+           * kudasaijp01 -- both had left, and with only roster and withdraw
+           * frames tracked we could not see it and held an empty list.
+           */
+          if (f.type !== 'sonnet.roster.v1' && f.type !== 'sonnet.withdraw.v1'
+              && f.type !== 'sonnet.application.v1') continue;
           const cur = latestStance.get(row.from);
           if (!cur || row.ts > cur.ts) latestStance.set(row.from, { ts: row.ts, game: f.game_id, kind: f.type });
         }
@@ -930,6 +938,22 @@ async function pass(state) {
         .filter(([did, st]) => did !== ME && st.kind === 'sonnet.roster.v1' && st.game === OUR_GAME
           && !state.rosterMembers.includes(did) && !(state.unregistered || {})[did])
         .map(([did]) => did);
+
+      /**
+       * A seat whose occupant has publicly gone somewhere else is not slow, it
+       * is empty -- and that is evidence, not a clock.
+       *
+       * The timers above now clear the referee's eighty-minute queue, which is
+       * right for a seat that has simply not answered yet. It is wrong for a
+       * seat we can watch leave: holding two hours for `Dq3VUSttk` while it
+       * applies to zuobai spends the whole remaining contest waiting for
+       * somebody who is not coming. So re-draw on their own stance instead.
+       */
+      const gone = missing.filter((m) => {
+        const st = latestStance.get(m);
+        return st && st.game && st.game !== OUR_GAME
+          && state.consentAt && Date.parse(st.ts) > Date.parse(state.consentAt);
+      });
 
       const replacements = disc
         ? [...new Set(disc.map(({ row }) => row.from))].filter((d) => d !== ME
@@ -966,6 +990,29 @@ async function pass(state) {
          * complete team, which then had to be rebuilt by hand.
          */
         console.log(`  ${OUR_GAME} is COMPLETE (${state.rosterMembers.length}/${state.rosterMembers.length}) — holding for the referee`);
+
+      } else if (disc && gone.length && replacements >= gone.length) {
+        /**
+         * Replace the seats that have left, on their own evidence.
+         *
+         * Only stances taken *after* we proposed count: a candidate's last word
+         * before we named them is always some other game, so counting those
+         * would re-draw every roster the instant it was posted.
+         */
+        state.keepNext = [...ourSigners];
+        for (const m of gone) {
+          state.tried = state.tried || {};
+          state.tried[m] = new Date().toISOString();
+        }
+        const ok = await post(DISCOVERY, {
+          type: 'sonnet.withdraw.v1',
+          contest_id: CONTEST,
+          game_id: OUR_GAME,
+          request_id: `departed-${OUR_GAME}-${Math.floor(Date.now() / 1000)}`
+        }, `re-draw ${gone.length} seat(s) that left for another game `
+          + `(${gone.map((d) => `${d.slice(-8)}→${latestStance.get(d).game}`).join(' ')}), `
+          + `keeping ${ourSigners.size} signer(s)`);
+        if (ok) { state.consent = null; state.consentAt = null; state.rosterAt = null; }
 
       } else if (disc && missing.length && replacements >= DEEP_POOL
                  && heldMin >= FAST_CYCLE_MIN) {
