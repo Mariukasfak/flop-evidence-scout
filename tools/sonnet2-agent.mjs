@@ -1430,8 +1430,9 @@ async function pass(state) {
         room_generation: gen,
         members,
         request_id: rosterRequestId
-      }, `propose our own roster of ${members.length} `
-        + `(${members.filter((m) => m !== ME && proven.has(m)).length} referee-proven, `
+      }, `propose our own roster of ${members.map((m) => m.slice(-8)).join(' ')} `
+        + `(seeded ${seeded.map((m) => m.slice(-8)).join(' ') || 'none'}; `
+        + `${members.filter((m) => m !== ME && proven.has(m)).length} referee-proven, `
         + `${pool.filter(hasO).length} with an o)`);
       state.rosterAt = new Date().toISOString();
       /** Naming ourselves on a roster *is* our one live consent. */
