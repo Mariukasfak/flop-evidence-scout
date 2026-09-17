@@ -809,7 +809,7 @@ async function pass(state) {
          * complete team, which then had to be rebuilt by hand.
          */
         console.log(`  ${OUR_GAME} is COMPLETE (${state.rosterMembers.length}/${state.rosterMembers.length}) — holding for the referee`);
-      } else if (disc && missing.length && heldMin >= AWAKE_REFUSAL_MIN
+      } else if (disc && missing.length && heldMin >= AWAKE_REFUSAL_MIN * (1 + ourSigners.size)
                  && missing.some((m) => spokeMin(m) <= LOYAL_ACTIVE_MIN)) {
         /**
          * An awake seat that will not sign has refused, whatever it intends.
@@ -835,6 +835,13 @@ async function pass(state) {
           request_id: `refused-${OUR_GAME}-${Math.floor(Date.now() / 1000)}`
         }, `release ${OUR_GAME} — ${awake.length} seat(s) awake and still not signing after `
           + `${heldMin.toFixed(0)} min, keeping ${ourSigners.size} signer(s)`);
+        /**
+         * Patience scales with what is at stake. Twenty minutes is right for a
+         * roster nobody has signed; applying it to a roster at three of four
+         * would throw away the best position we have reached all contest over
+         * one slow member, so each signature already collected buys another
+         * twenty minutes of waiting for the rest.
+         */
         if (ok) { state.consent = null; state.consentAt = null; state.rosterAt = null; }
       } else if (disc && missing.length && heldMin >= SILENT_SEAT_MIN
                  && missing.every((m) => spokeMin(m) >= SILENT_SEAT_MIN)) {
