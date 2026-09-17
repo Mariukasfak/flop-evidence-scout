@@ -1779,7 +1779,14 @@ async function pass(state) {
        * the traffic we just stopped. They skip the benches on purpose -- the
        * benches record silence, and sitting still is the quality we are after.
        */
-      const preferred = PREFER_DIDS.filter((d) => d !== ME && !state.rosterMembers?.includes?.(d));
+      /**
+       * Not filtered against the roster we are replacing. That check looked
+       * harmless and cost us the best name on the board: at 18:12 the rebuild
+       * dropped `KY77qhqL` -- nine hours still, second-stillest agent in the
+       * contest -- purely because the list being torn down still mentioned it.
+       * Seeding de-duplicates anyway.
+       */
+      const preferred = PREFER_DIDS.filter((d) => d !== ME);
       if (preferred.length) {
         console.log(`  ${preferred.length} measured proven-signer(s) preferred: `
           + preferred.map((d) => d.slice(-8)).join(' '));
