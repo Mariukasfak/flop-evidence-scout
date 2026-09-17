@@ -32,6 +32,14 @@ if (!poemPath) fail('--poem=<file> is required');
 const members = String(flag('members', '')).split(',').map((m) => m.trim()).filter(Boolean);
 if (members.length < 2) fail('--members=did,did,... is required');
 const outPath = flag('out');
+/**
+ * Keeping a content word a content word makes the repair read like English, and
+ * it cost one roster in forty on the 102-word draft: the substitute pool got
+ * narrow enough that no legal turn sequence survived. So the caller retries
+ * with the class rule off, because a poem with a clumsy line still scores and
+ * an unwritable one does not.
+ */
+const LOOSE = argv.includes('--loose');
 
 const VOWELS = new Set(['AA', 'AE', 'AH', 'AO', 'AW', 'AY', 'EH', 'ER', 'EY',
   'IH', 'IY', 'OW', 'OY', 'UH', 'UW']);
@@ -39,6 +47,7 @@ const VOWELS = new Set(['AA', 'AE', 'AH', 'AO', 'AW', 'AY', 'EH', 'ER', 'EY',
 /** MAX pronunciation, because that is what the official validator charges. */
 const syll = new Map();
 const rhyme = new Map();
+const startsVowel = new Map();
 for (const line of fs.readFileSync(dictPath, 'utf8').split('\n')) {
   const fields = line.split('#')[0].trim().split(/\s+/);
   if (!fields[0] || fields[0].startsWith(';;;')) continue;
@@ -48,6 +57,7 @@ for (const line of fs.readFileSync(dictPath, 'utf8').split('\n')) {
   const n = phones.filter((p) => VOWELS.has(p.slice(0, -1)) && /[012]$/.test(p)).length;
   if (!n) continue;
   syll.set(word, Math.max(syll.get(word) || 0, n));
+  if (!startsVowel.has(word)) startsVowel.set(word, VOWELS.has(phones[0].replace(/[012]$/, '')));
   let last = -1;
   for (let i = phones.length - 1; i >= 0; i--) if (/[12]$/.test(phones[i])) { last = i; break; }
   if (last < 0) for (let i = phones.length - 1; i >= 0; i--) if (/[012]$/.test(phones[i])) { last = i; break; }
@@ -92,7 +102,44 @@ const slots = lines.map((line) => line.split(' ').map((tok) => {
   return { w: m[2].toLowerCase(), lead: m[1], tail: m[3], caps: /^[A-Z]/.test(m[2]) };
 }));
 
+/**
+ * Swapping a content word costs an image; swapping a function word costs the
+ * sentence. Replacing "of" with the widest-writable one-syllable word produced
+ * "engine a my mind", which is still a valid sonnet to the referee and no
+ * longer English. These are named so the swap can be judged, and a human asked
+ * to rewrite the line instead.
+ */
+const FUNCTION_WORDS = new Set(['a', 'am', 'an', 'and', 'are', 'as', 'at', 'be', 'been',
+  'being', 'but', 'by', 'can', 'could', 'did', 'do', 'does', 'for', 'from', 'had', 'has',
+  'have', 'he', 'her', 'him', 'his', 'i', 'if', 'in', 'into', 'is', 'it', 'its', 'may',
+  'me', 'might', 'must', 'my', 'no', 'nor', 'not', 'of', 'on', 'or', 'our', 'shall',
+  'she', 'should', 'so', 'than', 'that', 'the', 'their', 'them', 'then', 'there', 'these',
+  'they', 'this', 'those', 'to', 'us', 'was', 'we', 'were', 'what', 'when', 'where',
+  'which', 'who', 'why', 'will', 'with', 'would', 'you', 'your',
+  /**
+   * Prepositions belong here too. Without them the repair replaced "evening"
+   * with "after" and produced "An after river": the grammar warning stayed
+   * silent because only the pronouns and articles were listed.
+   */
+  'about', 'above', 'across', 'after', 'again', 'against', 'along', 'among',
+  'around', 'before', 'behind', 'below', 'beneath', 'beside', 'between',
+  'beyond', 'during', 'inside', 'near', 'off', 'onto', 'out', 'outside',
+  'over', 'past', 'since', 'through', 'toward', 'under', 'until', 'upon',
+  'while', 'within', 'without']);
+
+/**
+ * Don't answer every question with the same word.
+ *
+ * Preferring the draft's own vocabulary sounded right and was not: "sister" is
+ * two syllables and writable by everyone, so it won every two-syllable slot at
+ * once and the repair came back "I sister sleep. I keep a sister day". A word
+ * already spent is pushed down the list instead, so a roster that needs twelve
+ * substitutions gets twelve different ones.
+ */
+const spent = new Map();
+
 const candidatesFor = (word, needRhyme) => {
+  const isFunction = FUNCTION_WORDS.has(word);
   const n = syll.get(word);
   const r = rhyme.get(word);
   const out = [];
@@ -103,24 +150,42 @@ const candidatesFor = (word, needRhyme) => {
     if (!w.length) continue;
     const rank = commonOrder.has(cand) ? commonOrder.get(cand) : Infinity;
     if (rank === Infinity) continue;             // vocabulary a reader recognises
-    out.push({ cand, w, rank });
+    /**
+     * A content word may only become another content word. Left free, the
+     * search takes the widest-writable word of the right length, and those are
+     * overwhelmingly the short grammatical ones: repairing the 102-word draft
+     * turned "An evening river" into "An am river", which scans, passes the
+     * validator, and is not English.
+     */
+    if (!LOOSE && isFunction !== FUNCTION_WORDS.has(cand)) continue;
+    out.push({ cand, w, rank, used: spent.get(cand) || 0 });
   }
   /** Widest choice of writers first -- those are the words that keep turns legal. */
-  return out.sort((a, b) => (b.w.length - a.w.length) || (a.rank - b.rank));
+  return out.sort((a, b) => (a.used - b.used) || (b.w.length - a.w.length) || (a.rank - b.rank));
 };
 
 /**
- * Swapping a content word costs an image; swapping a function word costs the
- * sentence. Replacing "of" with the widest-writable one-syllable word produced
- * "engine a my mind", which is still a valid sonnet to the referee and no
- * longer English. These are named so the swap can be judged, and a human asked
- * to rewrite the line instead.
+ * Keep "a" and "an" agreeing with whatever now follows them.
+ *
+ * A swap one slot to the right changes the sound the article sits in front of:
+ * repairing the short draft turned "An evening river" into "An sister river".
+ * Both forms are one syllable, so this costs the meter nothing and is the one
+ * grammatical error the fitter can always fix by itself.
  */
-const FUNCTION_WORDS = new Set(['a', 'an', 'and', 'as', 'at', 'be', 'been', 'but', 'by',
-  'for', 'from', 'he', 'her', 'him', 'his', 'i', 'if', 'in', 'is', 'it', 'its', 'me', 'my',
-  'no', 'nor', 'not', 'of', 'on', 'or', 'our', 'she', 'so', 'than', 'that', 'the', 'their',
-  'them', 'then', 'there', 'they', 'this', 'to', 'us', 'was', 'we', 'were', 'what', 'when',
-  'where', 'which', 'who', 'why', 'will', 'with', 'you', 'your']);
+const fixArticles = (flatSlots) => {
+  let fixed = 0;
+  for (let i = 0; i < flatSlots.length - 1; i++) {
+    const a = flatSlots[i];
+    if (a.w !== 'a' && a.w !== 'an') continue;
+    /** An article at the end of its line governs a word we are not tracking here. */
+    if (a.tail && /[.,;:!?]/.test(a.tail)) continue;
+    const want = startsVowel.get(flatSlots[i + 1].w) ? 'an' : 'a';
+    if (a.w === want || !writersOf(want).length) continue;
+    a.w = want;
+    fixed++;
+  }
+  return fixed;
+};
 
 let swaps = 0;
 const grammarRisk = [];
@@ -134,6 +199,7 @@ for (const [li, slot] of slots.entries()) {
     if (!pick) { problems.push(`line ${li + 1}: nothing can replace "${s.w}"`); continue; }
     s.was = s.w;
     s.w = pick.cand;
+    spent.set(pick.cand, (spent.get(pick.cand) || 0) + 1);
     swaps++;
     if (FUNCTION_WORDS.has(s.was)) grammarRisk.push(`line ${li + 1}: "${s.was}" -> "${s.w}"`);
   }
@@ -186,12 +252,21 @@ for (let attempt = 0; result.failedAt >= 0 && attempt < 40; attempt++) {
     if (j < 0) continue;
     const s = flat[j];
     const isLast = slots.some((slot) => slot[slot.length - 1] === s);
-    const better = candidatesFor(s.w, isLast).find((c) => c.w.length > writersOf(s.w).length);
+    /**
+     * Readability ordering is wrong here. The spelling swap wants the word that
+     * reads best; this wants the word the most members can write, and taking
+     * the first *readable* wider word instead cost two rosters in sixty that
+     * the old ordering could still fit. Width first, readability to break ties.
+     */
+    const better = [...candidatesFor(s.w, isLast)]
+      .sort((a, b) => (b.w.length - a.w.length) || (a.used - b.used) || (a.rank - b.rank))
+      .find((c) => c.w.length > writersOf(s.w).length);
     if (!better) continue;
     turnSwaps.push(`"${s.w}" -> "${better.cand}" (writers ${writersOf(s.w).length} -> ${better.w.length})`);
     if (!s.was) s.was = s.w;
     if (FUNCTION_WORDS.has(s.w)) grammarRisk.push(`turn repair: "${s.w}" -> "${better.cand}"`);
     s.w = better.cand;
+    spent.set(better.cand, (spent.get(better.cand) || 0) + 1);
     swaps++;
     repaired = true;
     break;
@@ -199,6 +274,26 @@ for (let attempt = 0; result.failedAt >= 0 && attempt < 40; attempt++) {
   if (!repaired) break;
   result = sweep();
 }
+/**
+ * Correct the articles last, and only where it is free.
+ *
+ * "a" and "an" are spelled from different letters, so swapping one for the
+ * other changes which members may take that turn -- done before the sweep it
+ * quietly cost two rosters in sixty that were otherwise writable. Grammar is
+ * worth less than a poem that can be written at all, so the correction is
+ * applied, re-proved, and rolled back if the turn order did not survive it.
+ */
+let articlesFixed = 0;
+if (result.failedAt < 0) {
+  const before = flat.map((sl) => sl.w);
+  articlesFixed = fixArticles(flat);
+  if (articlesFixed) {
+    const after = sweep();
+    if (after.failedAt < 0) result = after;
+    else { flat.forEach((sl, i) => { sl.w = before[i]; }); articlesFixed = -1; }
+  }
+}
+
 if (result.failedAt >= 0) {
   const i = result.failedAt;
   problems.push(`turns: no legal writer for word ${i + 1} ("${flat[i].w}") after "${flat[i - 1].w}"`);
@@ -231,6 +326,21 @@ for (const [li, slot] of slots.entries()) {
   }
 }
 console.log(`substitutions: ${swaps}`);
+if (articlesFixed > 0) console.log(`  articles corrected: ${articlesFixed}`);
+if (articlesFixed < 0) console.log('  ARTICLE MISMATCH — correcting a/an would break the turn order; left as is');
+/**
+ * Say when the repair has stopped being a repair.
+ *
+ * This tool knows letters and syllables, not grammar: it will happily produce
+ * "A started river" because "started" is two syllables and everyone can spell
+ * it. One or two swaps leave a poem; a dozen leave a valid form full of wrong
+ * word classes. The referee scores the form either way, so the poem is still
+ * written out -- but a human with time left should rewrite these lines.
+ */
+if (swaps >= 6) {
+  console.log(`  DEGRADED — ${swaps} blind substitutions. Valid, but the English has suffered;`);
+  console.log('  rewrite by hand if the clock allows, or wait for a friendlier roster.');
+}
 if (grammarRisk.length) {
   console.log(`  GRAMMAR RISK — ${grammarRisk.length} function word(s) swapped; rewrite these lines by hand:`);
   for (const g of grammarRisk) console.log(`    ${g}`);
