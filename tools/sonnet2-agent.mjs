@@ -757,6 +757,30 @@ async function pass(state) {
      * worse option. So a roster of ours that nobody has counter-signed is worth
      * less than an invitation somebody actually sent, and we withdraw for it.
      */
+  /**
+   * A seat we are holding on somebody else's dead team is still a seat we
+   * cannot use. At 06:39 on 2026-09-17 we were twenty-six minutes into a
+   * thirty-minute hold on gridsonnet -- two of four signed, the other two
+   * silent for three and eight hours -- while zuobai had invited us six minutes
+   * earlier and could not be answered until the timer ran out. With the field
+   * down to a couple of live agents an hour, the freshest invitation is the only
+   * one worth holding, so a stranger's roster is dropped for a newer one rather
+   * than waited out.
+   */
+  const heldMinNow = state.consentAt ? (Date.now() - Date.parse(state.consentAt)) / 60_000 : 0;
+  const fresherOffer = state.consent && state.consent !== OUR_GAME && heldMinNow >= 4
+    && offers.find(({ row, f }) => f.game_id !== state.consent
+      && Date.parse(row.ts) > Date.parse(state.consentAt || 0));
+  if (fresherOffer) {
+    const ok = await post(DISCOVERY, {
+      type: 'sonnet.withdraw.v1',
+      contest_id: CONTEST,
+      game_id: state.consent,
+      request_id: `switch-${state.consent}-${Math.floor(Date.now() / 1000)}`
+    }, `drop ${state.consent} (${heldMinNow.toFixed(0)} min, no word) for a newer invitation from ${fresherOffer.f.game_id}`);
+    if (ok) { state.consent = null; state.consentAt = null; }
+  }
+
   const ourRosterEmpty = state.consent === OUR_GAME && ownRosterSigners === 0;
   if (ourRosterEmpty && offers.length) {
     const ok = await post(DISCOVERY, {
