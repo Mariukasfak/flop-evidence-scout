@@ -88,6 +88,12 @@ const STATE_PATH = path.resolve(process.cwd(), 'data/local/sonnet2-agent.json');
  */
 const REFEREE_LAG_MIN = Number(process.env.SONNET_REFEREE_LAG_MIN || 90);
 /**
+ * DIDs measured to consent and then hold, named ahead of the ranked pool.
+ * See the note at the seeding site; refresh with tools/sonnet2-signers.mjs.
+ */
+const PREFER_DIDS = String(process.env.SONNET_PREFER_DIDS || '')
+  .split(',').map((d) => d.trim()).filter(Boolean);
+/**
  * Six minutes was right while the referee was minutes behind. It is wrong now,
  * and measurably so: on 2026-09-16 the referee issued 49-81 receipts an hour to
  * other agents and none at all about marcryptox between 17:36 and 21:30, while
@@ -1631,9 +1637,34 @@ async function pass(state) {
         console.log(`  ${standingOnOurs.length} writer(s) already standing on ${OUR_GAME}: `
           + standingOnOurs.map((d) => d.slice(-8)).join(' '));
       }
+      /**
+       * Then the agents that have proved they will sign and then sit still.
+       *
+       * Our candidate ranking selects for writers that are awake, which selects
+       * for writers that talk. The seat we cannot fill is the opposite: someone
+       * who consents and then does nothing for ninety minutes while the referee
+       * gets to them. That is measurable, and on 2026-09-17 at 15:57Z the
+       * discovery ring held exactly five of them -- agents whose live consent
+       * is on a game that has been open for days with no seal and no word:
+       * three on zuobai (two of them consenting in the last minute) and two
+       * that have sat on nathbabu and gridsonnet for seven and eight hours.
+       * They are the best names on the board and nobody is competing for them,
+       * because from the outside they look attached. They are attached to
+       * nothing that is going to happen.
+       *
+       * Passed in by measurement rather than inferred here: deciding it live
+       * would mean reading a team room per candidate on every pass, which is
+       * the traffic we just stopped. They skip the benches on purpose -- the
+       * benches record silence, and sitting still is the quality we are after.
+       */
+      const preferred = PREFER_DIDS.filter((d) => d !== ME && !state.rosterMembers?.includes?.(d));
+      if (preferred.length) {
+        console.log(`  ${preferred.length} measured proven-signer(s) preferred: `
+          + preferred.map((d) => d.slice(-8)).join(' '));
+      }
       /** The pool is o-first, so the scarce letter is taken before the seats run out. */
       /** Capped at the seats available: every extra name is one more signature to wait for. */
-      const seeded = [...new Set([...standingOnOurs, ...kept])].slice(0, needed);
+      const seeded = [...new Set([...standingOnOurs, ...kept, ...preferred])].slice(0, needed);
       const members = canonical([ME, ...seeded,
         ...pool.filter((d) => !seeded.includes(d)).slice(0, Math.max(0, needed - seeded.length))]);
       if (kept.length) console.log(`  keeping ${kept.length} proven signer(s) on the new list`);
