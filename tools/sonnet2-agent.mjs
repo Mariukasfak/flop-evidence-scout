@@ -1011,7 +1011,8 @@ async function pass(state) {
        * soon, and both lose the seat. Once the wait is clearly the empty chair,
        * remember who never answered, release, and rebuild around someone else.
        */
-      if (missing.length && outsidersOnOurs.length && ourSigners.size < 2) {
+      if (missing.length && outsidersOnOurs.length && ourSigners.size < 2
+          && heldMin >= REFEREE_LAG_MIN) {
         state.keepNext = [...ourSigners];
         const ok = await post(DISCOVERY, {
           type: 'sonnet.withdraw.v1',
@@ -1033,6 +1034,7 @@ async function pass(state) {
          */
         console.log(`  ${OUR_GAME} is COMPLETE (${state.rosterMembers.length}/${state.rosterMembers.length}) — holding for the referee`);
 
+      /* FLOOR-EXEMPT: the verdict being waited on is already a refusal. */
       } else if (CONTRACT_AT > 0 && missing.length
                  && ourSigners.size + 1 >= CONTRACT_AT
                  && state.rosterMembers.length > CONTRACT_AT) {
@@ -1232,6 +1234,7 @@ async function pass(state) {
         }, `release ${OUR_GAME} — ${missing.length} seat(s) silent in discovery for `
           + `${Math.min(...missing.map(spokeMin)).toFixed(0)}+ min, keeping ${ourSigners.size} signer(s)`);
         if (ok) { state.consent = null; state.consentAt = null; state.rosterAt = null; }
+      /* FLOOR-EXEMPT: a roster naming an unregistrable DID can never seal. */
       } else if (missing.some((m) => (state.unregistered || {})[m])) {
         /**
          * An empty seat held by someone the referee has already called
@@ -1335,6 +1338,7 @@ async function pass(state) {
       state.strikes[state.consent] = (state.strikes[state.consent] || 0) + 1;
       const strikes = state.strikes[state.consent];
       const elsewhere = offers.some(({ f }) => f.game_id !== state.consent);
+      /* FLOOR-EXEMPT: the enclosing branch is gated on CONSENT_TIMEOUT_MIN. */
       if (!elsewhere && state.consent !== OUR_GAME && strikes < 2) {
         console.log(`  ${state.consent} has run out its ${CONSENT_TIMEOUT_MIN} min `
           + `(strike ${strikes}) but no other game is offering — holding rather than `
@@ -1389,9 +1393,16 @@ async function pass(state) {
    * than waited out.
    */
   const heldMinNow = state.consentAt ? (Date.now() - Date.parse(state.consentAt)) / 60_000 : 0;
-  const fresherOffer = state.consent && state.consent !== OUR_GAME && heldMinNow >= 4
+  /**
+   * Four minutes was measured against how fast a stranger's roster fills, and
+   * that is not what this spends either -- it spends the queue position of the
+   * roster we already consented to. Same floor as everything else.
+   */
+  const fresherOffer = state.consent && state.consent !== OUR_GAME
+    && heldMinNow >= REFEREE_LAG_MIN
     && offers.find(({ row, f }) => f.game_id !== state.consent
       && Date.parse(row.ts) > Date.parse(state.consentAt || 0));
+  /* FLOOR-EXEMPT: fresherOffer carries the floor. */
   if (fresherOffer) {
     const ok = await post(DISCOVERY, {
       type: 'sonnet.withdraw.v1',
@@ -1403,6 +1414,7 @@ async function pass(state) {
   }
 
   const ourRosterEmpty = state.consent === OUR_GAME && ownRosterSigners === 0;
+  /* FLOOR-EXEMPT: an empty roster has no queue position to protect. */
   if (ourRosterEmpty && offers.length) {
     const ok = await post(DISCOVERY, {
       type: 'sonnet.withdraw.v1',
