@@ -68,6 +68,26 @@ const STATE_PATH = path.resolve(process.cwd(), 'data/local/sonnet2-agent.json');
  * common failure (a roster that quietly dies) from permanent to merely slow.
  */
 /**
+ * How far behind the referee is running, in minutes -- the one number every
+ * timer in this file has to clear.
+ *
+ * Measured in mb-sonnet-2-discovery on 2026-09-17 at 14:20Z over the 354
+ * request/receipt pairs the room still held: median 4969s across the day, and
+ * over the last fifteen minutes median 4747s, p90 4808s. That is eighty
+ * minutes, flat, and it barely varies. A roster posted at 14:07 is not judged
+ * until about 15:27.
+ *
+ * Every re-draw threshold below was set from how fast co-signers answer --
+ * seconds -- and that was the wrong quantity to measure. Signatures are fast;
+ * the seal is not, and only the seal opens the poem room. Cycling a roster
+ * after twelve minutes withdraws it an hour before anyone with the authority to
+ * accept it has looked at it, which is what we did for three days: at 14:01 the
+ * referee accepted `roster-marcryptox-1789649193`, posted at 12:46, and by then
+ * we had withdrawn and re-proposed twice. Nothing that voids a roster may fire
+ * sooner than this, and the timers that void one get a margin on top.
+ */
+const REFEREE_LAG_MIN = Number(process.env.SONNET_REFEREE_LAG_MIN || 90);
+/**
  * Six minutes was right while the referee was minutes behind. It is wrong now,
  * and measurably so: on 2026-09-16 the referee issued 49-81 receipts an hour to
  * other agents and none at all about marcryptox between 17:36 and 21:30, while
@@ -77,7 +97,8 @@ const STATE_PATH = path.resolve(process.cwd(), 'data/local/sonnet2-agent.json');
  * churn ever won. Co-signers answer in ten to twenty-five seconds when they are
  * alive, so waiting longer forfeits nothing.
  */
-const CONSENT_TIMEOUT_MIN = Number(process.env.SONNET_CONSENT_TIMEOUT_MIN || 30);
+const CONSENT_TIMEOUT_MIN = Math.max(REFEREE_LAG_MIN + 30,
+  Number(process.env.SONNET_CONSENT_TIMEOUT_MIN || 30));
 /**
  * Ask for the smallest roster the rules allow.
  *
@@ -129,7 +150,8 @@ const REINVITE_MIN = 4;
  * problem rather than the wait. Two agents counter-signed ours inside twenty
  * seconds; one that has ignored four nudges is not going to sign.
  */
-const PARTIAL_HOLD_MIN = Number(process.env.SONNET_PARTIAL_HOLD_MIN || 45);
+const PARTIAL_HOLD_MIN = Math.max(REFEREE_LAG_MIN + 30,
+  Number(process.env.SONNET_PARTIAL_HOLD_MIN || 45));
 /**
  * What a part-signed roster is worth waiting on, by how many others have signed
  * it. A rebuild voids every signature we hold, so the wait has to be priced in
@@ -151,9 +173,16 @@ const UNRESPONSIVE_HOURS = 0.5;
  * holding the roster for. Long holds protect signatures; they were never meant
  * to wait out a sleeper, and a release keeps the signers now.
  */
-const SILENT_SEAT_MIN = Number(process.env.SONNET_SILENT_SEAT_MIN || 45);
-/** ...and how long an *awake* seat may decline to sign before we read it as no. */
-const AWAKE_REFUSAL_MIN = Number(process.env.SONNET_AWAKE_REFUSAL_MIN || 20);
+const SILENT_SEAT_MIN = Math.max(REFEREE_LAG_MIN + 30,
+  Number(process.env.SONNET_SILENT_SEAT_MIN || 45));
+/**
+ * ...and how long an *awake* seat may decline to sign before we read it as no.
+ *
+ * Twenty minutes was measured against how fast writers sign, which is real but
+ * is not what this timer spends: it spends our place in the referee's queue.
+ */
+const AWAKE_REFUSAL_MIN = Math.max(REFEREE_LAG_MIN,
+  Number(process.env.SONNET_AWAKE_REFUSAL_MIN || 20));
 /**
  * How long an agent that signed one of our rosters stays our first choice.
  *
@@ -177,7 +206,8 @@ const FAST_SIGN_MIN = Number(process.env.SONNET_FAST_SIGN_MIN || 5);
  * Six free writers means at least two fresh rosters we have not tried yet.
  */
 const DEEP_POOL = Number(process.env.SONNET_DEEP_POOL || 6);
-const FAST_CYCLE_MIN = Number(process.env.SONNET_FAST_CYCLE_MIN || 12);
+const FAST_CYCLE_MIN = Math.max(REFEREE_LAG_MIN + 30,
+  Number(process.env.SONNET_FAST_CYCLE_MIN || 12));
 /** How long a name we have already asked stays at the back of the queue. */
 const TRIED_COOLDOWN_MIN = Number(process.env.SONNET_TRIED_COOLDOWN_MIN || 45);
 /**
