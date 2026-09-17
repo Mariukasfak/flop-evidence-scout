@@ -246,6 +246,21 @@ async function fetchRoom(room, timeoutMs) {
  * blind pass eat the whole budget instead. The long retry is what we do when
  * there is nothing to fall back on.
  */
+/**
+ * A cheap look at a room we are only curious about.
+ *
+ * `ex` is built for rooms we must not misread: it retries at 1.5x and falls
+ * back to a recent copy, so one failure costs 80 s + 120 s. The apply loop calls
+ * it once per candidate game just to ask "has this team started writing yet",
+ * and four of those failures is 800 s against a four-minute pass budget -- which
+ * is how, at 09:26 on 2026-09-17, discovery went unread for three passes running
+ * while curl fetched the same room in 0.8 s. A curiosity read gets one short
+ * attempt and no fallback.
+ */
+async function peek(room) {
+  try { return await fetchRoom(room, 12_000); } catch { return null; }
+}
+
 async function ex(room) {
   try {
     const rows = await fetchRoom(room, FETCH_TIMEOUT_MS);
@@ -1142,7 +1157,9 @@ async function pass(state) {
       if (Number.isFinite(ageH) && ageH < REAPPLY_AFTER_HOURS) continue;
     }
     if (applications >= 4) break;           // pace ourselves; this is not a flood
-    const room = await ex(`d-sonnet-2-team-${g}`) || [];
+    const room = await peek(`d-sonnet-2-team-${g}`);
+    /** Unreadable is not evidence either way, so leave the game for the next pass. */
+    if (room === null) continue;
     const started = room.some((r) => String(r.text || '').includes('"sonnet.word.v1"'));
     if (started) { state.applied[g] = 'started'; continue; }
     const ok = await post(DISCOVERY, {
