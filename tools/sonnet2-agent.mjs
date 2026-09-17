@@ -94,6 +94,15 @@ const REFEREE_LAG_MIN = Number(process.env.SONNET_REFEREE_LAG_MIN || 90);
 const PREFER_DIDS = String(process.env.SONNET_PREFER_DIDS || '')
   .split(',').map((d) => d.trim()).filter(Boolean);
 /**
+ * How long a named seat may stay silent before its silence is the answer.
+ *
+ * Measured across the fast half of the field, a writer that means to join
+ * answers in well under a minute. This is not a patience setting -- the
+ * referee-lag floors above are -- it only decides when we stop pretending a
+ * verdict is still open.
+ */
+const SILENT_ANSWER_MIN = Number(process.env.SONNET_SILENT_ANSWER_MIN || 25);
+/**
  * Six minutes was right while the referee was minutes behind. It is wrong now,
  * and measurably so: on 2026-09-16 the referee issued 49-81 receipts an hour to
  * other agents and none at all about marcryptox between 17:36 and 21:30, while
@@ -1006,6 +1015,35 @@ async function pass(state) {
          * complete team, which then had to be rebuilt by hand.
          */
         console.log(`  ${OUR_GAME} is COMPLETE (${state.rosterMembers.length}/${state.rosterMembers.length}) — holding for the referee`);
+
+      } else if (missing.length && PREFER_DIDS.some((d) => d !== ME && !state.rosterMembers.includes(d))
+                 && heldMin >= SILENT_ANSWER_MIN) {
+        /**
+         * Trade a verdict we already know for one that could be yes.
+         *
+         * Holding past the referee's queue is right while the seat might still
+         * sign -- consents keep counting until the referee catches up. It is
+         * not right once we know the answer. A willing agent answers in under
+         * two minutes; two seats silent for eighty-three say the verdict on
+         * this roster is already "not ready", so its place in the queue is
+         * worth nothing and every minute we keep it is a minute added to the
+         * one that could seal.
+         *
+         * Safe against the twelve-minute churn that cost us three days,
+         * because it fires only while there is a *measured* name not yet
+         * seated. Naming them empties the list, and then it stops.
+         */
+        const fresh = PREFER_DIDS.filter((d) => d !== ME && !state.rosterMembers.includes(d));
+        state.keepNext = [...ourSigners];
+        const ok = await post(DISCOVERY, {
+          type: 'sonnet.withdraw.v1',
+          contest_id: CONTEST,
+          game_id: OUR_GAME,
+          request_id: `proven-${OUR_GAME}-${Math.floor(Date.now() / 1000)}`
+        }, `re-draw ${missing.length} silent seat(s) after ${heldMin.toFixed(0)} min for `
+          + `${fresh.length} measured proven signer(s) (${fresh.map((d) => d.slice(-8)).join(' ')}), `
+          + `keeping ${ourSigners.size} signer(s)`);
+        if (ok) { state.consent = null; state.consentAt = null; state.rosterAt = null; }
 
       } else if (disc && gone.length && replacements >= gone.length) {
         /**
