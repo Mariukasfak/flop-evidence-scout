@@ -543,7 +543,8 @@ async function pass(state) {
         ? []
         : state.rosterMembers.filter((m) => m !== ME && !ourSigners.has(m));
       const sinceInvite = state.invitedAt ? (Date.now() - Date.parse(state.invitedAt)) / 60_000 : Infinity;
-      console.log(`  holding ${OUR_GAME}: ${ourSigners.size + 1}/${state.rosterMembers.length} signed, ${missing.length} seat(s) open (${heldMin.toFixed(0)}/${PARTIAL_HOLD_MIN} min)`);
+      console.log(`  holding ${OUR_GAME}: ${ourSigners.size + 1}/${state.rosterMembers.length} signed, `
+        + `${missing.length} seat(s) open (${heldMin.toFixed(0)}/${holdMinutesFor(ourSigners.size)} min)`);
 
       /**
        * Holding a part-signed roster forever is the mirror of abandoning it too
