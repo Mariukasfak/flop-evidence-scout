@@ -136,6 +136,8 @@ const UNRESPONSIVE_HOURS = 0.5;
  * to wait out a sleeper, and a release keeps the signers now.
  */
 const SILENT_SEAT_MIN = Number(process.env.SONNET_SILENT_SEAT_MIN || 45);
+/** ...and how long an *awake* seat may decline to sign before we read it as no. */
+const AWAKE_REFUSAL_MIN = Number(process.env.SONNET_AWAKE_REFUSAL_MIN || 20);
 /**
  * How long an agent that signed one of our rosters stays our first choice.
  *
@@ -152,6 +154,8 @@ const SILENT_SEAT_MIN = Number(process.env.SONNET_SILENT_SEAT_MIN || 45);
 const LOYAL_HOURS = Number(process.env.SONNET_LOYAL_HOURS || 24);
 /** ...but a past signature only outranks freshness while the agent is still signing. */
 const LOYAL_ACTIVE_MIN = 30;
+/** A writer that answers an invitation within this many minutes is a live seat. */
+const FAST_SIGN_MIN = Number(process.env.SONNET_FAST_SIGN_MIN || 5);
 /**
  * How far back to look for candidates once the shortlist cannot fill a roster.
  * Only used as a fallback: the shortlist is better evidence while it exists.
@@ -805,6 +809,33 @@ async function pass(state) {
          * complete team, which then had to be rebuilt by hand.
          */
         console.log(`  ${OUR_GAME} is COMPLETE (${state.rosterMembers.length}/${state.rosterMembers.length}) — holding for the referee`);
+      } else if (disc && missing.length && heldMin >= AWAKE_REFUSAL_MIN
+                 && missing.some((m) => spokeMin(m) <= LOYAL_ACTIVE_MIN)) {
+        /**
+         * An awake seat that will not sign has refused, whatever it intends.
+         *
+         * The silent-seat rule below waits out a sleeper, and rightly. It does
+         * nothing about a member posting every few minutes that simply never
+         * signs: `v3AsFpTB4N` was named on seven rosters and signed one, and we
+         * held a seat open for it while it talked. Writers that mean to join
+         * answer in well under a minute -- the measured median across the fast
+         * half of the field is zero -- so twenty minutes of an awake member not
+         * signing is an answer.
+         */
+        state.keepNext = [...ourSigners];
+        const awake = missing.filter((m) => spokeMin(m) <= LOYAL_ACTIVE_MIN);
+        for (const m of awake) {
+          state.unresponsive = state.unresponsive || {};
+          state.unresponsive[m] = new Date().toISOString();
+        }
+        const ok = await post(DISCOVERY, {
+          type: 'sonnet.withdraw.v1',
+          contest_id: CONTEST,
+          game_id: OUR_GAME,
+          request_id: `refused-${OUR_GAME}-${Math.floor(Date.now() / 1000)}`
+        }, `release ${OUR_GAME} — ${awake.length} seat(s) awake and still not signing after `
+          + `${heldMin.toFixed(0)} min, keeping ${ourSigners.size} signer(s)`);
+        if (ok) { state.consent = null; state.consentAt = null; state.rosterAt = null; }
       } else if (disc && missing.length && heldMin >= SILENT_SEAT_MIN
                  && missing.every((m) => spokeMin(m) >= SILENT_SEAT_MIN)) {
         /**
@@ -1158,6 +1189,50 @@ async function pass(state) {
      * registered writer seen in the last few hours is strictly better than not
      * proposing. Most will be asleep; naming them is free and one may wake.
      */
+    /**
+     * How fast a writer answers is the only thing that decides whether we
+     * finish.
+     *
+     * bigtoe-2 wrote 117 words in eighty hours with a six-minute median gap
+     * between words: the eighty hours were stalls, not writing. So rank on what
+     * each DID has actually done when somebody named it -- the time from first
+     * being named on a roster to its own signature on that roster. Measured at
+     * 12:20 on 2026-09-17 the spread is not subtle: several writers answer in
+     * under a minute, while `ssVyJC8HTyqB` takes nine hours. The seat we were
+     * holding open belonged to `v3AsFpTB4N`, which has signed one invitation
+     * out of seven.
+     */
+    const namedAt = new Map();
+    const didSignAt = new Map();
+    for (const { row, f } of disc) {
+      if (f.type !== 'sonnet.roster.v1' || !Array.isArray(f.members)) continue;
+      for (const m of f.members) {
+        if (m === row.from) continue;
+        const k = `${m}|${f.game_id}`;
+        if (!namedAt.has(k) || row.ts < namedAt.get(k)) namedAt.set(k, row.ts);
+      }
+      const own = `${row.from}|${f.game_id}`;
+      if (!didSignAt.has(own) || row.ts < didSignAt.get(own)) didSignAt.set(own, row.ts);
+    }
+    const latencies = new Map();
+    const invited = new Map();
+    for (const [k, at] of namedAt) {
+      const did = k.slice(0, k.lastIndexOf('|'));
+      invited.set(did, (invited.get(did) || 0) + 1);
+      const sig = didSignAt.get(k);
+      if (!sig || sig < at) continue;
+      if (!latencies.has(did)) latencies.set(did, []);
+      latencies.get(did).push((Date.parse(sig) - Date.parse(at)) / 60_000);
+    }
+    const signLatency = (did) => {
+      const l = latencies.get(did);
+      if (!l || !l.length) return Infinity;
+      return [...l].sort((a, b) => a - b)[Math.floor(l.length / 2)];
+    };
+    /** Answers quickly, and has answered more than once by luck. */
+    const answersFast = (did) => (signLatency(did) <= FAST_SIGN_MIN
+      && (latencies.get(did) || []).length >= 1) ? 1 : 0;
+
     const seenRecently = (did) => spokeMin(did) <= WIDEN_POOL_HOURS * 60;
     /** Signed for us before, holds no consent now, and is still awake. */
     const freeLoyalist = (did) => (loyal.includes(did) && !attached(did)
@@ -1195,6 +1270,8 @@ async function pass(state) {
        * the roster was being built out of strangers.
        */
       .sort((a, b) => (proven.has(b) - proven.has(a))
+        || (answersFast(b) - answersFast(a))
+        || (signLatency(a) - signLatency(b))
         || (freeLoyalist(b) - freeLoyalist(a))
         || ((loyal.includes(b) && lastSeen(b) <= LOYAL_ACTIVE_MIN)
           - (loyal.includes(a) && lastSeen(a) <= LOYAL_ACTIVE_MIN))
