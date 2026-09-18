@@ -1557,7 +1557,21 @@ export async function runScoutDaemon(options = {}) {
         sessions: work.completed ?? 0,
         planned: work.planned ?? 0,
         intervalMs: config.intervalMs,
-        steps
+        steps,
+        /**
+         * The follower measures itself and nobody was reading it.
+         *
+         * `RoomFollower.stats()` has always returned the per-room rate,
+         * interval, reads, gaps and buffer depth, and on 2026-09-18 a search of
+         * the tree found **no caller**. Meanwhile `/r/lobby` logged 239 "the
+         * room outran even the followed cadence" warnings and `/r/technocore`
+         * 159, and there was no way to say which of the module's four limits
+         * was binding — the 3 s floor, the 90 reads/min ceiling, the 45 s idle
+         * cap or the 3,000-message buffer. A warning that cannot be diagnosed
+         * is a warning nobody can act on, so the numbers ride with the cycle
+         * timings that already answer the equivalent question for inference.
+         */
+        follower: typeof roomFollower?.stats === 'function' ? roomFollower.stats() : undefined
       });
 
       await writeHeartbeat('active', scoutResult);
