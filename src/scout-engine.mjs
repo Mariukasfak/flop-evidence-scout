@@ -43,6 +43,14 @@ export const DEFAULT_WATCH_ROOMS = Object.freeze([
   'tclk-offers'
 ]);
 
+/**
+ * Miss more than this share of a followed room and it is worth saying so.
+ *
+ * Five percent, because the follower was built against a measured 96.2% on
+ * `/r/lobby` and delivers 98.5% today, so anything under 95% is a real
+ * regression rather than the ordinary burst a rate estimate cannot anticipate.
+ */
+const FOLLOWER_MISS_WARN = 0.05;
 const CHECKIN_INTERVAL_MS = 2 * 60 * 60 * 1000;
 const SAME_AUTHOR_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 
@@ -260,13 +268,36 @@ export class ScoutEngine {
       const freshFollowed = followed.messages.filter(
         (m) => Number(m.seq || m.id || 0) > cursor && m.from !== this.identity.did
       );
+      /**
+       * Report the share we got, and only complain when it is actually bad.
+       *
+       * This warned on any gap at all, which in a room writing 1,371 records a
+       * minute means warning about two seconds of traffic. It fired 239 times
+       * on `/r/lobby` and 159 on `/r/technocore`, and on 2026-09-18 that noise
+       * had me proposing to redesign room reading in a live daemon. Then the
+       * follower's own stats — measured over seven cycles once they were
+       * finally recorded — said `/r/lobby` was **98.5% delivered**, 139 missed
+       * of ~9,384, nothing dropped and the buffers half empty. Better than the
+       * 96.2% measured when the module was built.
+       *
+       * A gap is normal and bounded; a *falling delivery share* is the thing
+       * worth a human's attention, so that is what this says now.
+       */
       let followedGap = null;
       if (followed.gapRecords > 0) {
-        followedGap = { room, unread: followed.gapRecords, reads: followed.gaps };
-        console.warn(
-          `[Scout] /r/${room}: ${followed.gapRecords} message(s) went unread across `
-          + `${followed.gaps} follower read(s) — the room outran even the followed cadence.`
-        );
+        const got = freshFollowed.length + followed.gapRecords;
+        const delivered = got > 0 ? followed.gapRecords / got : 0;
+        followedGap = {
+          room, unread: followed.gapRecords, reads: followed.gaps,
+          deliveredShare: got > 0 ? 1 - delivered : null
+        };
+        if (delivered > FOLLOWER_MISS_WARN) {
+          console.warn(
+            `[Scout] /r/${room}: ${followed.gapRecords} of ${got} message(s) missed across `
+            + `${followed.gaps} follower read(s) — ${((1 - delivered) * 100).toFixed(1)}% delivered, `
+            + `below the ${((1 - FOLLOWER_MISS_WARN) * 100).toFixed(0)}% this room should hold.`
+          );
+        }
       }
       return { fresh: freshFollowed, maxSeq: Math.max(cursor, followed.cursor), gap: followedGap };
     }
