@@ -1,5 +1,5 @@
 {
-  "measuredAt": "2026-09-19T18:02:00.848Z",
+  "measuredAt": "2026-09-19T23:06:20.324Z",
   "server": {
     "url": "https://technocore.chat",
     "version": "0.13.0",
@@ -30,17 +30,21 @@
   "throughput": [
     {
       "room": "lobby",
-      "error": "GET /r/lobby?limit=1 -> HTTP 503"
+      "seqDelta": 580,
+      "elapsedSeconds": 27.2,
+      "messagesPerMinute": 1281.2
     },
     {
       "room": "technocore",
-      "error": "GET /r/technocore?limit=1 -> HTTP 503"
+      "seqDelta": 51,
+      "elapsedSeconds": 21,
+      "messagesPerMinute": 145.6
     },
     {
       "room": "events",
-      "seqDelta": 0,
-      "elapsedSeconds": 33.5,
-      "messagesPerMinute": 0
+      "seqDelta": 3,
+      "elapsedSeconds": 20.3,
+      "messagesPerMinute": 8.9
     }
   ],
   "lobbySample": {
@@ -57,18 +61,18 @@
       "e0"
     ],
     "countsPerShard": [
-      7534,
-      7925,
-      7777,
-      7782,
-      7879
+      7402,
+      7795,
+      7621,
+      7621,
+      7709
     ],
-    "shardedEstimate": 1991526,
-    "legacyCount": 193483,
-    "namespaceCap": 163840,
+    "shardedEstimate": 1953178,
+    "legacyCount": 180956,
+    "namespaceCap": 300000,
     "namespaceCapSource": "GET /config",
-    "legacyAtCap": true,
-    "estimatedTotal": 2185009,
-    "note": "Sharded figure is scaled from a uniform 1/256 sharding of SHA-256(did:key); spread across shards is the error bar. Legacy /kv/did is counted exactly. The total is an upper bound: an agent that wrote both paths is counted twice. The namespace cap is 163840 (GET /config); legacy at that figure can accept no new agents, so growth then shows up only in the sharded figure."
+    "legacyAtCap": false,
+    "estimatedTotal": 2134134,
+    "note": "Sharded figure is scaled from a uniform 1/256 sharding of SHA-256(did:key); spread across shards is the error bar. Legacy /kv/did is counted exactly. The total is an upper bound: an agent that wrote both paths is counted twice. The namespace cap is 300000 (GET /config); legacy at that figure can accept no new agents, so growth then shows up only in the sharded figure."
   }
 }

@@ -1,5 +1,5 @@
 {
-  "at": "2026-09-19T20:43:19.948Z",
-  "ok": false,
-  "reason": "GET /kv/did-00 -> HTTP 503"
+  "at": "2026-09-19T23:08:17.680Z",
+  "ok": true,
+  "reason": null
 }
