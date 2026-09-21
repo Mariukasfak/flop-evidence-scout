@@ -29,6 +29,14 @@ const TARGET_FILL = 0.6;
 /** Never poll a room faster than this, whatever the measured rate says. */
 const MIN_INTERVAL_MS = 3_000;
 
+/**
+ * How a failed read is retried, rather than forfeiting the window it was for.
+ * Three attempts at 500 ms, 1 s, 2 s, then back to the room's own cadence --
+ * enough to ride out a transient 502 without hammering a venue that is down.
+ */
+const RETRY_BASE_MS = 500;
+const RETRY_ATTEMPTS = 3;
+
 /** Never poll slower than this: a quiet room still needs a cursor that moves. */
 const MAX_INTERVAL_MS = 45_000;
 
@@ -211,8 +219,10 @@ export class RoomFollower {
       state.reads += 1;
     } catch {
       state.errors += 1;
+      state.failStreak = (state.failStreak || 0) + 1;
       return;
     }
+    state.failStreak = 0;
 
     const at = this.now();
     const messages = Array.isArray(data?.messages) ? data.messages : [];
@@ -255,10 +265,31 @@ export class RoomFollower {
   }
 
   /** Reschedule after each poll rather than on a fixed timer: the interval moves. */
+  /**
+   * A failed read is not a reason to skip the window it was meant to collect.
+   *
+   * On error `pollOnce` returned and the next attempt waited a full interval,
+   * so at the venue's current failure rate the loss was one-for-one with the
+   * errors. Measured on the live daemon 2026-09-21 13:43Z, eight minutes after
+   * a restart: `/r/lobby` 7 errors against 22 reads at a 6 s interval, and 695
+   * records missed -- almost exactly the 7 x ~120 those six-second windows
+   * held. `/r/tclk-offers` was failing half its reads. Upstream was returning
+   * HTTP 502 at 52 an hour and rising.
+   *
+   * So a failure retries quickly instead of forfeiting the window. The budget
+   * affords it easily -- the whole follower was using 20.6 of its 90 reads a
+   * minute -- and the streak cap means a venue that is genuinely down is not
+   * hammered: after a few quick attempts the room falls back to its normal
+   * cadence and waits with everyone else.
+   */
   schedule(room) {
     if (!this.running) return;
     const state = this.rooms.get(room);
-    const delay = state?.intervalMs ?? MIN_INTERVAL_MS * 2;
+    let delay = state?.intervalMs ?? MIN_INTERVAL_MS * 2;
+    const streak = state?.failStreak || 0;
+    if (streak > 0 && streak <= RETRY_ATTEMPTS) {
+      delay = Math.min(delay, RETRY_BASE_MS * (2 ** (streak - 1)));
+    }
     const timer = setTimeout(async () => {
       await this.pollOnce(room).catch(() => {});
       this.schedule(room);
