@@ -671,7 +671,8 @@ export class TclkEngine {
         `[tclk] receipt withheld: the rail reads ${settled ?? 'unreadable'}, not claimed — the reveal stands on its own`);
     }
 
-    this.#close(deal, 'completed', railClaimed ? 'claimed' : 'claimed (rail CAS lost)');
+    this.#close(deal, 'completed', railClaimed ? 'claimed' : 'claimed (rail CAS lost)',
+      { kind: 'paper', status: settled ?? 'unreadable' });
     return {
       action: 'deal_claimed',
       contract: deal.contract,
@@ -850,12 +851,31 @@ export class TclkEngine {
     }
   }
 
-  #close(deal, bucket, reason) {
+  /**
+   * Record what the rail said, not only what we decided.
+   *
+   * Audited our own 24 completed deals on 2026-09-21 against flop-labs/tclk
+   * #172, which reports that a signed `reveal` can be read as money without the
+   * settlement rail ever being checked. Every one of ours read `claimed`, and
+   * **none carried a single rail-shaped field** — no status, no rail kind, no
+   * reference — so the record could not answer the question at all, and I first
+   * misread that as "we never check". We do: the claim path re-reads
+   * `#railStatus` and withholds the receipt when it disagrees, which is what
+   * #173 proposes adding. What we never kept was the evidence.
+   *
+   * So a closed deal now carries the rail's own verdict and which rail gave it.
+   * Our rail is `paper` — a `/kv/` note, not a chain — and saying so in the
+   * record is the point: it stops a later reader, including me, from taking
+   * `claimed` for settled money.
+   */
+  #close(deal, bucket, reason, rail = null) {
     const closedAt = this.now();
     const record = {
       contract: deal.contract, room: deal.room, payer: deal.offer.from,
       job: deal.offer.job ? `${deal.offer.job.proto}:${deal.offer.job.id}` : null,
-      acceptedAt: deal.acceptedAt, closedAt, reason
+      acceptedAt: deal.acceptedAt, closedAt, reason,
+      railKind: rail ? rail.kind : null,
+      railStatus: rail ? rail.status : null
     };
     this.state[bucket] = [...(this.state[bucket] || []), record].slice(-50);
     if (bucket === 'abandoned' && isNoLockReason(reason) && record.payer) {
