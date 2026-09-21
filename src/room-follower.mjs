@@ -131,7 +131,29 @@ export class RoomFollower {
     const basis = Math.max(state.ratePerMin || 0, state.peakPerMin || 0);
     if (basis <= 0) return MAX_INTERVAL_MS / 2;
     const seconds = (this.readWindow * TARGET_FILL) / (basis / 60);
-    const budgetFloorMs = (this.rooms.size * 60_000) / MAX_READS_PER_MINUTE;
+    /**
+     * Charge this room for what the others actually read, not for existing.
+     *
+     * `rooms.size * 60000 / MAX_READS_PER_MINUTE` reserves an equal share for
+     * every followed room, and the rooms are not equal. Measured on the live
+     * daemon 2026-09-21: seven rooms, so the floor stood at 4,667 ms and
+     * `/r/lobby` sat pinned to it at 5 s — while four of those seven were doing
+     * one to three records a minute at the 45 s idle cap, spending 1.3 reads a
+     * minute each. Everything together used **26.8 of the 90 reads a minute**
+     * we allow ourselves, and lobby was losing 813,564 records: 39% of the
+     * busiest room dropped to protect capacity the quiet ones never touch.
+     *
+     * So the floor is what is left after the other rooms' real demand. A room
+     * that goes quiet hands its share back; a room that wakes up takes it
+     * again on its next interval, and the ceiling still holds in aggregate.
+     */
+    let othersPerMin = 0;
+    for (const [, other] of this.rooms) {
+      if (other === state) continue;
+      othersPerMin += 60_000 / Math.max(MIN_INTERVAL_MS, other.intervalMs || MAX_INTERVAL_MS);
+    }
+    const mine = Math.max(1, MAX_READS_PER_MINUTE - othersPerMin);
+    const budgetFloorMs = 60_000 / mine;
     let ms = Math.min(MAX_INTERVAL_MS, Math.max(MIN_INTERVAL_MS, budgetFloorMs, seconds * 1000));
 
     /**
