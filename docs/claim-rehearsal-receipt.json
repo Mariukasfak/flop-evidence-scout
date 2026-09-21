@@ -1,19 +1,19 @@
 {
-  "rehearsedAt": "2026-09-14T11:04:21.823Z",
+  "rehearsedAt": "2026-09-21T11:13:43.941Z",
   "host": "github-actions",
   "identitySource": "live",
-  "challenge": "flop-claim-rehearsal|2026-09-14|53ca20de748a35d8b67a53859f84356f",
+  "challenge": "flop-claim-rehearsal|2026-09-21|188ddc36775edf68aead338679fc6289",
   "results": [
     {
       "agent": "Scout",
       "did": "did:key:z6MkvJAr8ZTs5n4d14e4SGVFAxo8nWndZTin8vc23Aks3zgn",
-      "signature": "JdCtBbho1x1y4F7soVw6DHJs09C_Y30LUHY-4K3Gm4DEfHGZ2nFo4EY21d3yXZP0a5PRkyKh4ElrbQMR0QtvCA",
+      "signature": "d-uwHR0ajfQOrFhldgcsFaehwnjLmmkb2LaBqmniagVb11Tc40s1eUmNJD0xvrRlp9Ptiovap8ePIkauwDq2Cw",
       "verified": true
     },
     {
       "agent": "Scribe",
       "did": "did:key:z6Mkfdd1cRSrTaA1yuUC45a2dXpHe4zPf4cE1DC3DmCpELvW",
-      "signature": "3VybDAasBXnhkrrm5ip-ny3707q0XJhb7PdJ9VNxLgxxiGQEHrrt0owkEhKJldvOEzNIVFaQl8I2DdOwso-YBg",
+      "signature": "UzaDN3cE_D_6tMaruLpgAg78-S3FgvuCTNEAtgaeqYazMeVr2Wz3GmwbS4liOOAKNlJX6cxrosh6yT-Xhe60Ag",
       "verified": true
     }
   ],
