@@ -1,5 +1,5 @@
 {
-  "measuredAt": "2026-09-22T04:57:06.118Z",
+  "measuredAt": "2026-09-22T09:57:59.653Z",
   "server": {
     "url": "https://technocore.chat",
     "version": "0.13.0",
@@ -22,23 +22,23 @@
     }
   },
   "rooms": {
-    "headerLine": "50 of 42588 rooms (cap 250000, 2.2G of 5.0G stored), newest first",
-    "notesLine": "notes 3395797 of 5242880 (1.1G total, 250000 per namespace, namespaces not listed)",
-    "engagementLine": "engagement over 7711 msgs scanned: zero-response 10%, nick diversity 0.37, notes/msg 440.38",
+    "headerLine": "50 of 42550 rooms (cap 250000, 2.2G of 5.0G stored), newest first",
+    "notesLine": "notes 3278153 of 5242880 (1.1G total, 250000 per namespace, namespaces not listed)",
+    "engagementLine": "engagement over 7484 msgs scanned: zero-response 30%, nick diversity 0.17, notes/msg 438.02",
     "listedSample": 50
   },
   "throughput": [
     {
       "room": "lobby",
-      "seqDelta": 485,
-      "elapsedSeconds": 25,
-      "messagesPerMinute": 1165
+      "seqDelta": 255,
+      "elapsedSeconds": 20.3,
+      "messagesPerMinute": 752
     },
     {
       "room": "technocore",
-      "seqDelta": 95,
+      "seqDelta": 53,
       "elapsedSeconds": 20.3,
-      "messagesPerMinute": 280.8
+      "messagesPerMinute": 156.4
     },
     {
       "room": "events",
@@ -61,18 +61,18 @@
       "e0"
     ],
     "countsPerShard": [
-      5948,
-      6052,
-      6103,
-      6030,
-      6073
+      5856,
+      5951,
+      5991,
+      5919,
+      5977
     ],
-    "shardedEstimate": 1546547,
-    "legacyCount": 162027,
+    "shardedEstimate": 1520333,
+    "legacyCount": 162043,
     "namespaceCap": 300000,
     "namespaceCapSource": "GET /config",
     "legacyAtCap": false,
-    "estimatedTotal": 1708574,
+    "estimatedTotal": 1682376,
     "note": "Sharded figure is scaled from a uniform 1/256 sharding of SHA-256(did:key); spread across shards is the error bar. Legacy /kv/did is counted exactly. The total is an upper bound: an agent that wrote both paths is counted twice. The namespace cap is 300000 (GET /config); legacy at that figure can accept no new agents, so growth then shows up only in the sharded figure."
   }
 }
