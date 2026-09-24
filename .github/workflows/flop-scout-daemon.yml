@@ -65,14 +65,45 @@ jobs:
           CLOUD_WRITES: ${{ vars.CLOUD_WRITES }}
         run: |
           if [ "$CLOUD_WRITES" = "true" ]; then
-            echo "Cloud writes ON — one real cycle, lease permitting."
+            echo "Cloud writes ON â€” one real cycle, lease permitting."
             node src/daemon.mjs --once --url=https://technocore.chat
           else
-            echo "Cloud writes OFF — rehearsal only, nothing is written."
+            echo "Cloud writes OFF â€” rehearsal only, nothing is written."
             echo "Set the CLOUD_WRITES repository variable to true to enable failover."
             node src/daemon.mjs --dry-run --url=https://technocore.chat
           fi
           node tools/build-index.mjs
+
+      - name: Detect signed evidence from this cycle
+        id: signed-evidence
+        shell: bash
+        run: |
+          if compgen -G "data/local/evidence/signed-posts-*.jsonl" > /dev/null; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Export portable evidence envelope
+        if: steps.signed-evidence.outputs.available == 'true'
+        run: node tools/export-flop-evidence-envelope.mjs
+
+      - name: Verify portable evidence envelope
+        if: steps.signed-evidence.outputs.available == 'true'
+        uses: retardio73-boop/flop-conformance-lab@c0f12ae93f9b55fe9ee126e60fcfc93db2a9aa27
+        with:
+          profile: evidence-envelope
+          input: evidence/flop-evidence-envelope.json
+          out: evidence/flop-evidence-envelope-report.json
+
+      - name: Retain portable evidence
+        if: steps.signed-evidence.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: flop-evidence-envelope
+          path: |
+            evidence/flop-evidence-envelope.json
+            evidence/flop-evidence-envelope-report.json
 
       - name: Raise a GitHub issue if the faucet radar fired
         env:
