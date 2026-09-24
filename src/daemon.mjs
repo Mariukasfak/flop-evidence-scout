@@ -56,7 +56,8 @@ export function deriveFrom(o) {
     heartbeatPath: o.heartbeatPath || path.join(dataDir, 'scout-heartbeat.json'),
     feedStatePath: o.feedStatePath || path.join(dataDir, 'feed-state.json'),
     feedPath: o.feedPath || path.join(docsDir, 'feed.json'),
-    chatArchiveDir: o.chatArchiveDir || path.join(dataDir, 'chats')
+    chatArchiveDir: o.chatArchiveDir || path.join(dataDir, 'chats'),
+    evidenceDir: o.evidenceDir || path.join(dataDir, 'evidence')
   };
 }
 
@@ -480,7 +481,7 @@ export async function runScoutDaemon(options = {}) {
    * by asking for it explicitly.
    */
   const readOnly = config.readOnly ?? config.dryRun;
-  const client = new TechnocoreClient({ baseUrl: config.serverUrl, readOnly });
+  const client = new TechnocoreClient({ baseUrl: config.serverUrl, readOnly, evidenceDir: config.evidenceDir });
   if (readOnly) console.log('[Dry Run] Reads only — every write will be refused.');
   const scoutGuardrails = new Guardrails({ maxPerHour: 2, minCooldownMs: 60_000 });
   const scribeGuardrails = new Guardrails({ maxPerHour: 2, minCooldownMs: 60_000 });

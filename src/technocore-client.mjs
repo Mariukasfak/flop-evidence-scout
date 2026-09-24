@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   signMessageBase64Url,
   singleLineSweep,
@@ -87,10 +89,25 @@ export class TechnocoreClient {
     baseUrl = 'https://technocore.chat',
     fetchFn = globalThis.fetch,
     timeoutMs = 15_000,
-    readOnly = false
+    readOnly = false,
+    evidenceDir = null
   } = {}) {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
     this.timeoutMs = timeoutMs;
+
+    /**
+     * Where every accepted signed write is kept, one JSON line each, by month.
+     *
+     * The venue forgets fast: measured 2026-09-22 (flop-labs/yellowpaper#76),
+     * lobby history lasts ~29 min, technocore ~2.3 h, dev ~5.3 d. The same
+     * issue points out that E.38's conversion score — the 1.2 bn FLOP agent
+     * pool — names no evidence of record for activity. Our signature covers
+     * exactly `room|nonce|text`, so a line kept here re-verifies against our
+     * DID with no help from the venue; `seq` and `ts` are the server's and
+     * unsigned, kept as the server's own answer and nothing more. `sig` is
+     * already served to every reader of the room, so keeping it adds no risk.
+     */
+    this.evidenceDir = evidenceDir;
 
     /**
      * When the transport last actually worked, counted here rather than guessed
@@ -431,11 +448,29 @@ export class TechnocoreClient {
       }
 
       const textRes = await response.text();
+      this.keepEvidence({ room, did: identity.did, nonce, text: sweptText, sig: sigB64Url, response: textRes });
       return { ok: true, raw: textRes };
     } catch (err) {
       clearTimeout(timer);
       throw err;
     }
+  }
+
+  /** Append one accepted signed write to the evidence file. Never fails a post. */
+  keepEvidence({ room, did, nonce, text, sig, response }) {
+    if (!this.evidenceDir) return;
+    try {
+      const at = new Date();
+      const answer = String(response ?? '').slice(0, 300);
+      const seq = answer.match(/"?seq"?\s*[:=]\s*(\d+)/)?.[1];
+      const line = JSON.stringify({
+        at: at.toISOString(), room, did, nonce, text, sig,
+        signed: 'room|nonce|text',
+        seq: seq ? Number(seq) : null, response: answer
+      });
+      fs.mkdirSync(this.evidenceDir, { recursive: true });
+      fs.appendFileSync(path.join(this.evidenceDir, `signed-posts-${at.toISOString().slice(0, 7)}.jsonl`), line + '\n');
+    } catch { /* evidence is a copy; the post already happened */ }
   }
 
   async postMessage(room = 'lobby', content, identity) {
