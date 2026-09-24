@@ -12,7 +12,18 @@ function clientWith(fetchFn, evidenceDir) {
   return new TechnocoreClient({ baseUrl: 'https://test.example', fetchFn, evidenceDir });
 }
 
-const okFetch = async () => ({ ok: true, status: 200, text: async () => '{"ok":true,"seq":4242,"ts":"2026-09-24T18:00:00Z"}' });
+/** The venue answers a say-signed write with the room's text tail, our own line in it. */
+const okFetch = async (url) => {
+  const [did, , , ...rest] = url.split('/say-signed/')[1].split('/');
+  const text = decodeURIComponent(rest.join('/'));
+  const who = decodeURIComponent(did).slice(-4);
+  return {
+    ok: true, status: 200,
+    text: async () => '# room technocore  messages 2  range 4241..4242\n\n'
+      + '[4241] 2026-09-24T17:59:59Z <z6Mk…zzzz> someone else\n'
+      + `[4242] 2026-09-24T18:00:00Z <z6Mk…${who}> ${text}\n`
+  };
+};
 
 test('an accepted signed write is kept, and re-verifies from the file alone', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'evidence-'));
@@ -24,6 +35,8 @@ test('an accepted signed write is kept, and re-verifies from the file alone', as
   assert.equal(entry.room, 'technocore');
   assert.equal(entry.did, me.did);
   assert.equal(entry.seq, 4242);
+  assert.equal(entry.ts, '2026-09-24T18:00:00Z');
+  assert.equal(entry.response.includes('someone else'), false, 'other people\'s lines are not kept');
   assert.ok(!entry.text.includes('\n'), 'the swept text, which is what was signed');
   assert.equal(JSON.stringify(entry).includes('PRIVATE'), false, 'no key material');
 

@@ -461,12 +461,22 @@ export class TechnocoreClient {
     if (!this.evidenceDir) return;
     try {
       const at = new Date();
-      const answer = String(response ?? '').slice(0, 300);
-      const seq = answer.match(/"?seq"?\s*[:=]\s*(\d+)/)?.[1];
+      /**
+       * The server answers a say-signed write with the room's text tail, our
+       * line among it as `[seq] ts <z6Mk…abcd> text`. Only that line's seq and
+       * ts are kept, and the header — the rest is other people's writing.
+       */
+      const lines = String(response ?? '').split('\n');
+      const head = text.slice(0, 40);
+      let seq = null; let ts = null;
+      for (const l of lines) {
+        const m = l.match(/^\[(\d+)\] (\S+) <([^>]+)> (.*)$/);
+        if (m && m[3].endsWith(did.slice(-4)) && m[4].startsWith(head)) { seq = Number(m[1]); ts = m[2]; }
+      }
       const line = JSON.stringify({
         at: at.toISOString(), room, did, nonce, text, sig,
         signed: 'room|nonce|text',
-        seq: seq ? Number(seq) : null, response: answer
+        seq, ts, response: (lines[0] || '').slice(0, 200)
       });
       fs.mkdirSync(this.evidenceDir, { recursive: true });
       fs.appendFileSync(path.join(this.evidenceDir, `signed-posts-${at.toISOString().slice(0, 7)}.jsonl`), line + '\n');
