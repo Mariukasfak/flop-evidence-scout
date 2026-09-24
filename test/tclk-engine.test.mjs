@@ -173,6 +173,17 @@ describe('tclk payee lane: accepting', () => {
     assert.equal(result.action, 'no_acceptable_offer', 'a board of strangers is a board to sit out');
   });
 
+  test('an offer the room has already passed over for seconds is a race we cannot win', async () => {
+    const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity(); const other = generateIdentity();
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer)));
+    const [stale] = venue.rooms.get(OFFER_ROOM);
+    stale.ts = new Date(Date.parse(stale.ts) - 10_000).toISOString();
+    venue.say(OFFER_ROOM, other.did, 'chatter');     // the newest record is the read's clock
+    const engine = engineFor(venue, me);
+
+    assert.equal((await engine.runTurn()).action, 'no_acceptable_offer');
+  });
+
   test('refuses an offer that names no protocol, however new it is', async () => {
     const venue = makeVenue(); const me = generateIdentity(); const a = generateIdentity(); const b = generateIdentity();
     venue.say(OFFER_ROOM, b.did, encodeFrame(payerOffer(b, { job: { proto: 'a2a', id: 'x' } })));
@@ -753,6 +764,21 @@ describe('tclk payee lane: a payer who does not lock loses the slot', () => {
     const again = await engine.runTurn();
 
     assert.equal(again.action, 'no_acceptable_offer', 'their next offer is skipped');
+  });
+
+  test('a payer seen locking with another payee lost us a race, and is not benched for it', async () => {
+    const { venue, payer, engine, tick } = await accepted();
+    tick(60_000);
+    venue.say(OFFER_ROOM, payer.did, encodeFrame({ type: 'lock', from: payer.did, contract: '0x' + 'b'.repeat(64), rail: 'paper' }));
+    assert.equal((await engine.runTurn()).action, 'waiting_for_lock');
+
+    tick(5 * 60_000);
+    const done = await engine.runTurn();
+    assert.equal(done.action, 'deal_cancelled');
+    assert.equal(done.reason, 'payer locked with another payee');
+
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer, { claimByMs: T0 + 4 * HOUR, refundAfterMs: T0 + 5 * HOUR })));
+    assert.equal((await engine.runTurn()).action, 'offer_accepted', 'their next offer is still ours to take');
   });
 
   test('a stranger is still accepted after another payer went quiet', async () => {

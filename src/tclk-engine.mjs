@@ -75,12 +75,29 @@ export const NO_LOCK_MS = 5 * 60_000;
 /** Keep a payer out for one day after a precise no-lock abandonment. */
 export const NO_LOCK_COOLDOWN_MS = 24 * 60 * 60_000;
 
+const LOST_RACE_REASON = 'payer locked with another payee';
+
 function isNoLockReason(reason) {
   return reason === 'payer never locked before claimByMs'
     || reason === `payer did not lock within ${Math.round(NO_LOCK_MS / 60_000)} min`;
 }
 
 const READ_LIMIT = 200;
+
+/**
+ * Only accept an offer this young, measured against the newest record in the
+ * same read so the venue's clock and ours never have to agree.
+ *
+ * Followed without gaps for six minutes on 2026-09-24 (3,879 records): 615
+ * offers drew a median of 4 accepts and up to 11, the first within 0.7 s
+ * (p10 0.34 s), and 61 of the 83 locks went to that first accept. Our read is
+ * a 200-record tail — 13 seconds of this room — taken once a cycle, so an offer
+ * we can still see unaccepted is either seconds old or one the whole room has
+ * already passed over. Our record over the four days before: 705 accepts, 3
+ * claimed, every other one a race lost to a faster payee that we then waited
+ * five minutes on and blamed the payer for.
+ */
+export const FRESH_OFFER_MS = 2_000;
 
 /**
  * How much of the room the reputation file must hold before the lane is
@@ -274,7 +291,7 @@ export class TclkEngine {
     const out = [];
     for (const m of messages || []) {
       const frame = decodeFrame(m.text ?? m.content ?? '');
-      if (frame && frame.from === m.from) out.push({ frame, seq: m.seq });
+      if (frame && frame.from === m.from) out.push({ frame, seq: m.seq, at: Date.parse(m.ts) });
     }
     return out;
   }
@@ -345,8 +362,14 @@ export class TclkEngine {
      */
     const repUsable = Object.keys(this.payerRep?.payers ?? {}).length >= MIN_REP_PAYERS;
 
+    // Unknown stamps (a record without `ts`) are not a reason to refuse; see FRESH_OFFER_MS.
+    const stamps = (messages || []).map((m) => Date.parse(m.ts)).filter(Number.isFinite);
+    const readAt = stamps.length ? Math.max(...stamps) : null;
+    const fresh = (at) => readAt === null || !Number.isFinite(at) || (readAt - at) <= FRESH_OFFER_MS;
+
     const candidates = frames
       .filter(({ frame }) => frame.type === 'offer')
+      .filter(({ at }) => fresh(at))             // a race we can still be first in
       .filter(({ frame: o }) =>
         o.role === 'payer'                       // we are the payee, the side that reveals last
         && o.lock === 'hash'                     // never the unaudited point path
@@ -478,9 +501,18 @@ export class TclkEngine {
     if (giveUp) {
       // The payer never locked. Cancel is valid before any lock exists, from
       // either side; posting it frees the room's record and us.
-      const reason = now >= deal.offer.claimByMs
-        ? 'payer never locked before claimByMs'
-        : `payer did not lock within ${Math.round(NO_LOCK_MS / 60_000)} min`;
+      /**
+       * A payer we watched lock while we waited did not walk away, they chose
+       * a faster payee. That is a race we lost, not a payer to cool down or
+       * mark in the store: doing so is how the payers most worth accepting
+       * from were being benched for a day, 569 times in four days.
+       */
+      const lockedElsewhere = (this.state.payerLockSeenAt?.[deal.offer.from] ?? 0) > deal.acceptedAt;
+      const reason = lockedElsewhere
+        ? LOST_RACE_REASON
+        : now >= deal.offer.claimByMs
+          ? 'payer never locked before claimByMs'
+          : `payer did not lock within ${Math.round(NO_LOCK_MS / 60_000)} min`;
       /**
        * Only announce a cancel where there is something to withdraw.
        *
@@ -552,8 +584,11 @@ export class TclkEngine {
       } catch (err) {
         return { action: 'read_failed', error: err.message };
       }
-      lock = this.#framesIn(onTheBoard).map(({ frame }) => frame).find(isOurLock);
+      const board = this.#framesIn(onTheBoard).map(({ frame }) => frame);
+      lock = board.find(isOurLock);
       if (lock) lockRoom = this.offerRoom;
+      // Same bookkeeping as findAndAccept, so a lock our payer gives someone else is seen.
+      for (const f of board) if (f.type === 'lock' && f.from) this.state.payerLockSeenAt[f.from] = now;
     }
     if (!lock) return { action: 'waiting_for_lock', contract: deal.contract };
 
@@ -884,7 +919,7 @@ export class TclkEngine {
     }
     this.state.deal = null;
     this.save();
-    this.#learn(deal.offer.from, bucket === 'completed', deal.contract);
+    if (reason !== LOST_RACE_REASON) this.#learn(deal.offer.from, bucket === 'completed', deal.contract);
   }
 
   /**
