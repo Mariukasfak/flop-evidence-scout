@@ -33,7 +33,10 @@ const CHANGE_PATH = path.resolve('data/source-change.json');
  * were added after Hayes said on 2026-08-25 that there would be specific tasks
  * requiring a DID key — a task room appearing is the event we cannot be late for.
  */
-const KEYWORDS = /faucet|testnet|airdrop|\btasks?\b|\bquests?\b|\bbount(?:y|ies)\b|\bdrip\b|\bclaims?\b/i;
+const KEYWORDS = /faucet|testnet|airdrop|\btasks?\b|\bquests?\b|\bbount(?:y|ies)\b|\bdrip\b|\bclaims?\b|\bregistration\b|\bcontests?\b|\bcompetitions?\b|\bchallenges?\b|\btrad(?:e|es|ing)\b/i;
+// The contest words were added 2026-09-24, after Hayes: "Get ready for the next
+// competition, register your agent DID key today", prize 10x sonnet-2's. Sonnet-2
+// launched as `mb-sonnet-2-registration` and friends, so a room is how it arrives.
 // Word boundaries are not decoration here: the first version matched
 // `room-permissions` on "mission", and an unbounded `quest` would fire on every
 // room with "request" or "question" in the name. Room names are [a-z0-9_-], so
@@ -136,7 +139,17 @@ const SOURCES = [
    * this operator's, which listed the Substack as a first-party link while this
    * watcher had never heard of it.
    */
-  { id: 'hayes-substack', url: 'https://cryptohayes.substack.com/feed', kind: 'rss' }
+  { id: 'hayes-substack', url: 'https://cryptohayes.substack.com/feed', kind: 'rss' },
+  /**
+   * Where the next contest will be launched, if it follows sonnet-2: a launch
+   * record and contest.json committed to a flop-labs repo, possibly a new one.
+   * Sonnet-2 admitted only DIDs with signed evidence *before* its identity
+   * cutoff, which was also its opening, so an hour's notice is worth having.
+   * Repo names only: the listing's timestamps move on every push.
+   */
+  { id: 'flop-labs-repos', url: 'https://api.github.com/orgs/flop-labs/repos?per_page=100', kind: 'gh-names' },
+  { id: 'sonnet-challenge-commits', url: 'https://api.github.com/repos/flop-labs/technocore-sonnet-challenge/commits?per_page=30', kind: 'gh' },
+  { id: 'tclk-commits', url: 'https://api.github.com/repos/flop-labs/tclk/commits?per_page=30', kind: 'gh' }
 ];
 
 /**
@@ -258,6 +271,9 @@ function normalise(kind, body) {
       .filter(Boolean);
     return titles.slice(0, 20).join(' | ');
   }
+  if (kind === 'gh-names') {
+    try { return JSON.parse(body).map((r) => r.name).sort().join('\n'); } catch { return body.trim(); }
+  }
   if (kind === 'html') {
     return body
       .replace(/<script[\s\S]*?<\/script>/gi, '')
@@ -311,6 +327,10 @@ function summarise(id, kind, body) {
     if (id.endsWith('-commits')) {
       const c = JSON.parse(body)[0];
       return c ? `${c.sha.slice(0, 7)} — ${c.commit.message.split('\n')[0].slice(0, 80)}` : 'no commits';
+    }
+    if (kind === 'gh-names') {
+      const names = JSON.parse(body).map((r) => r.name).sort();
+      return `${names.length} repos: ${names.join(', ')}`;
     }
     if (id === 'upstream-releases') {
       const r = JSON.parse(body)[0];
