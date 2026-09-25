@@ -182,7 +182,14 @@ export class TclkEngine {
     /** Shared with the payer lane: the room budget belongs to the machine. */
     roomBudgetPath = null,
     /** Who finishes deals, measured over the room rather than over our fourteen. */
-    payerRepPath = null
+    payerRepPath = null,
+    /**
+     * Whether to take new offers at all. A deal already in flight is always
+     * finished. Off in the daemon since 2026-09-25: after the freshness fix it
+     * still accepted 184 in a day and claimed 0, and the trading contest that
+     * was announced (close-1) does not run on tclk.
+     */
+    acceptNew = true
   } = {}) {
     if (!identity?.did) throw new Error('TclkEngine needs an identity');
     if (!client) throw new Error('TclkEngine needs a client');
@@ -191,6 +198,7 @@ export class TclkEngine {
     this.client = client;
     this.statePath = statePath;
     this.ours = new Set([identity.did, ...otherDids]);
+    this.acceptNew = acceptNew;
     this.offerRoom = offerRoom;
     this.minClaimWindowMs = minClaimWindowMs;
     this.now = now;
@@ -281,6 +289,7 @@ export class TclkEngine {
   async runTurn({ backend = null, real = false, ledgerPath = null } = {}) {
     this.load();
     if (this.state.deal) return this.advanceDeal({ backend, real, ledgerPath });
+    if (!this.acceptNew) return { action: 'accepting_paused' };
     return this.findAndAccept();
   }
 

@@ -173,6 +173,21 @@ describe('tclk payee lane: accepting', () => {
     assert.equal(result.action, 'no_acceptable_offer', 'a board of strangers is a board to sit out');
   });
 
+  test('paused, the lane takes no new offer but still finishes the deal it holds', async () => {
+    const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer)));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tclk-'));
+    const statePath = path.join(dir, 'tclk-state.json');
+
+    const paused = new TclkEngine({ identity: me, client: venue, statePath, now: () => T0, acceptNew: false });
+    assert.equal((await paused.runTurn()).action, 'accepting_paused');
+    assert.equal(venue.posts.length, 0);
+
+    await new TclkEngine({ identity: me, client: venue, statePath, now: () => T0 }).runTurn();
+    const again = new TclkEngine({ identity: me, client: venue, statePath, now: () => T0 + 60_000, acceptNew: false });
+    assert.equal((await again.runTurn()).action, 'waiting_for_lock', 'a deal in flight is not abandoned by the pause');
+  });
+
   test('an offer the room has already passed over for seconds is a race we cannot win', async () => {
     const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity(); const other = generateIdentity();
     venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer)));

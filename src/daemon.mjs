@@ -531,7 +531,9 @@ export async function runScoutDaemon(options = {}) {
   // Scout takes the deals; Scribe's key is named so its offers are never ours to accept.
   const tclkEngine = new TclkEngine({
     identity: scoutIdentity, client, statePath: config.tclkStatePath, otherDids: [scribeIdentity.did],
-    roomBudgetPath: config.roomBudgetPath, payerRepPath: config.payerRepPath
+    roomBudgetPath: config.roomBudgetPath, payerRepPath: config.payerRepPath,
+    // Paused 2026-09-25 (0 claimed of ~250 accepts after the race fix); TCLK_ACCEPT=1 resumes.
+    acceptNew: process.env.TCLK_ACCEPT === '1'
   });
   /**
    * The other side of the same convention, on Scribe's key.
@@ -1354,7 +1356,7 @@ export async function runScoutDaemon(options = {}) {
              * looked identical to "nothing to do". A lane that cannot read and
              * a lane with nothing to read must not write the same silence.
              */
-            const quiet = ['no_acceptable_offer', 'waiting_for_lock', 'lock_not_verified', 'rooms_refused'];
+            const quiet = ['no_acceptable_offer', 'waiting_for_lock', 'lock_not_verified', 'rooms_refused', 'accepting_paused'];
             const changed = tclk.action !== lastTclkAction;
             lastTclkAction = tclk.action;
             if (!quiet.includes(tclk.action) || changed) {
