@@ -36,6 +36,7 @@ import { decide, ACTION } from '../src/close1/strategy.mjs';
 import { approveTrade, approveProbe, DEFAULT_POLICY } from '../src/close1/risk-gate.mjs';
 import { Executor } from '../src/close1/executor.mjs';
 import { buildSnapshot, alertsBetween, deliverAlerts } from '../src/close1/runtime.mjs';
+import { observeUpstream, upstreamAlerts } from '../src/close1/upstream.mjs';
 
 export { checkedTerms, makerPayload, takerPayload, tradeText, SEASON };
 export const REFEREE = PINNED.refereeDid;
@@ -175,6 +176,26 @@ export async function run(argv = process.argv.slice(2)) {
   writeJson(STATE, state);
   const price = prices.latest ? { ...prices.latest.body, postedAt: prices.latest.ts } : null;
 
+  // Integrity of what we pinned: one seed only, and no author but the referee in its rooms.
+  const integrity = { seedRecords: 0, foreignAuthors: [], sigFailures };
+  for (const room of ['d-close1-price', 'd-close1-flow', 'd-close1-pnl']) {
+    for (const r of evidence.read(room)) {
+      if (r.from !== refereeDid && !integrity.foreignAuthors.includes(r.from)) integrity.foreignAuthors.push(r.from);
+      if (r.from === refereeDid && r.source !== SOURCE.REFEREE_SIGNED) integrity.sigFailures += 1;
+      if (room === 'd-close1-price') { try { if (JSON.parse(r.text).t === 'seed') integrity.seedRecords += 1; } catch { /* not json */ } }
+    }
+  }
+
+  // The official repo, for rule changes, a launch record, draft status, and watched issues.
+  const upstreamFile = path.join(DIR, 'upstream.json');
+  const upstreamPrev = readJson(upstreamFile, null);
+  let upstream = upstreamPrev; let upstreamError = null; let upstreamNotes = [];
+  try {
+    upstream = await observeUpstream({ prev: upstreamPrev });
+    upstreamNotes = upstreamAlerts(upstreamPrev, upstream, PINNED);
+    writeJson(upstreamFile, upstream);
+  } catch (err) { upstreamError = String(err.message).slice(0, 200); }
+
   // 4. What the strategy would do, and whether the gate would allow it — computed
   //    on every run, so the snapshot always says whether writes are open.
   const ref = Number(price?.ref?.px);
@@ -198,9 +219,9 @@ export async function run(argv = process.argv.slice(2)) {
   gate.kind = gate.ok ? 'open' : gate.reasons.some((r) => HALT.test(r)) ? 'halt' : 'hold';
 
   // 5. Snapshot and alerts.
-  const snapshot = buildSnapshot({ contest, contestError, streams: stream.stats(), price, ledger, pnl, ourDid, trades: state.trades, gate, nowMs, writeErrors5m: writeErrors });
+  const snapshot = buildSnapshot({ contest, contestError, streams: stream.stats(), price, ledger, pnl, ourDid, trades: state.trades, gate, nowMs, writeErrors5m: writeErrors, upstream, upstreamError, integrity });
   const prev = readJson(path.join(DIR, 'runtime.json'), null);
-  const alerts = alertsBetween(prev, snapshot);
+  const alerts = [...alertsBetween(prev, snapshot), ...upstreamNotes];
   await deliverAlerts(alerts, { logFile: path.join(DIR, 'alerts.jsonl') });
   writeJson(path.join(DIR, 'runtime.json'), snapshot);
   printReport(snapshot, state, ledger, contestError);
@@ -215,8 +236,11 @@ export async function run(argv = process.argv.slice(2)) {
   const executor = new Executor({ identityPath: IDENTITY, client, room: ROOM });
   if (executor.did !== ourDid) throw new Error('the signing key is not the registered owner; refusing to write');
   let probes = 0;
-  for (const t of state.trades) {
-    if (probes >= MAX_PROBES_PER_RUN || t.resolution?.status !== STATUS.PROBE_DUE) continue;
+  // Fewest probes first, newest first: an older offer that keeps losing its void must not starve a fresh one.
+  const due = state.trades.filter((t) => t.resolution?.status === STATUS.PROBE_DUE)
+    .sort((x, y) => ((x.probes?.length ?? 0) + (x.probe ? 1 : 0)) - ((y.probes?.length ?? 0) + (y.probe ? 1 : 0)) || Date.parse(y.postedAt) - Date.parse(x.postedAt));
+  for (const t of due) {
+    if (probes >= MAX_PROBES_PER_RUN) break;
     try {
       const valid = (t.takers || []).find((k) => k.valid && k.text);
       const record = t.role === 'maker'
@@ -342,16 +366,20 @@ async function followOffers(stream, { ours, ref, nextSweep, state }) {
 function printReport(s, state, ledger, contestError) {
   console.log(`contest: ${s.contest_verified ? `verified (package ${String(s.package_sha256).slice(0, 8)}…, referee …${String(s.referee_did).slice(-8)})` : `NOT VERIFIED — ${contestError}`}`);
   console.log(`sweep ${s.current_sweep ?? '?'}: reference ${s.reference_price ?? '?'} (trade ${s.reference_age_seconds ?? '?'} s old, post ${s.price_post_age_seconds ?? '?'} s old)`);
-  console.log(`owner: ${s.owner_state} (${s.owner_evidence})`);
+  const c = s.flow_counts;
+  if (c) console.log(`flow ${c.n}: listed settled ${c.listed.settled} / void ${c.listed.void} / mints ${c.listed.mints}; omitted settled ${c.omitted.settled} / void ${c.omitted.void} / mints ${c.omitted.mints}${c.missed ? `; missed ranges ${c.missed}` : ''}`);
+  console.log(`owner: ${s.owner_state} (${s.owner_evidence}${s.evidence_confidence?.owner_assumption ? `, assumes ${s.evidence_confidence.owner_assumption}` : ''})`);
   if (ledger) {
-    console.log(`position, trades proven ours only: ${s.net_position} @ ${s.average_entry ?? '-'}; free ${s.free_polf} POLF, fees ${s.fees}${s.fees_exact ? '' : ' (estimated)'}`);
-    console.log(`worst case counting unproven trades: position ${s.exposure_low} … ${s.exposure_high}`);
-    console.log(`score, our replay: ${s.local_replay_score}; official: ${s.official_score ?? s.official_rank_note}`);
+    console.log(`proven position: ${s.proven_position}; possible range ${s.exposure_low} … ${s.exposure_high}; proven-ours settlements ${s.settled_proven_count}, id-only settlements ${s.id_settled_count}`);
+    console.log(`POLF balance: ${s.balance_provable ? s.polf_balance : `not provable (worst-case free ${s.free_polf_worst_case})`}`);
+    console.log(`official score: ${s.official_score ?? s.official_rank_note}`);
   }
   for (const t of state.trades) {
     const r = t.resolution || {};
-    console.log(`${t.postedAt}  ${t.role === 'maker' ? 'offer' : 'take '}  ${t.id}  ${t.ourSide} ${t.qty} @ ${t.px}  -> ${r.status ?? '?'}${r.voidReason ? ` (${r.voidReason})` : ''} [${r.evidence ?? '?'}${r.attributed ? '' : ', not provably ours'}]${r.sweep ? ` sweep ${r.sweep}` : ''}`);
+    console.log(`${t.postedAt}  ${t.role === 'maker' ? 'offer' : 'take '}  ${t.id}  ${t.ourSide} ${t.qty} @ ${t.px}  -> ${r.status ?? '?'}${r.voidReason ? ` (${r.voidReason})` : ''} [evidence ${r.evidence ?? '?'}, ownership ${r.ownership ?? '?'}]${r.sweep ? ` sweep ${r.sweep}` : ''}`);
   }
+  if (s.upstream) console.log(`upstream: manifest ${String(s.upstream.manifest_sha256).slice(0, 8)}… (${s.upstream.manifest_status}), rules ${s.upstream.rules_version}, #10 comments ${s.upstream.watched?.[10]?.comments ?? '?'}`);
+  if (s.upstream_error) console.log(`upstream check failed: ${s.upstream_error}`);
   console.log(`gate: ${s.gate?.kind ?? '?'}${s.gate?.ok ? '' : ` — ${(s.gate?.reasons || []).join(', ')}`}`);
 }
 

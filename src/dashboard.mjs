@@ -4,6 +4,7 @@ import path from 'node:path';
 import { loadOrCreateIdentity, getDidShardedPath, getStateKey } from './identity.mjs';
 import { TechnocoreClient } from './technocore-client.mjs';
 import { getLatestLearningReport } from './learning-engine.mjs';
+import { renderClose1Section } from './close1/dashboard-section.mjs';
 
 /**
  * Everything this page renders about the network was typed by a stranger, so
@@ -26,6 +27,7 @@ export function generateDashboardHtml({
   logs = [],
   roomMessages = {},
   learningReport = null,
+  close1 = null,
   generatedAt = new Date().toISOString()
 }) {
   const did = identity?.did || 'did:key:z6MkvJAr8ZTs5n4d14e4SGVFAxo8nWndZTin8vc23Aks3zgn';
@@ -546,6 +548,8 @@ export function generateDashboardHtml({
       </div>
     </div>
 
+    ${renderClose1Section(close1)}
+
     <!-- Live Room Feed Terminal -->
     <h2 class="section-title">
       <span id="room-feed-title">📡 Live Technocore Feed</span>
@@ -969,8 +973,10 @@ export async function updateDashboardFile(outputDir = 'docs', serverUrl = 'https
   } catch { }
 
   const learningReport = getLatestLearningReport();
+  let close1 = null;
+  try { close1 = JSON.parse(fs.readFileSync(path.join(dataDir, 'local', 'close1', 'runtime.json'), 'utf8')); } catch { /* no close-1 run yet */ }
   const html = generateDashboardHtml({
-    identity, scribeIdentity, heartbeat, logs: history, roomMessages, learningReport
+    identity, scribeIdentity, heartbeat, logs: history, roomMessages, learningReport, close1
   });
   const targetFile = path.join(resolvedDir, 'status.html');
   fs.writeFileSync(targetFile, html, 'utf8');

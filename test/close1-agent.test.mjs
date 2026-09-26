@@ -13,7 +13,9 @@ import {
 } from '../src/close1/contest-source.mjs';
 import { EvidenceStore } from '../src/close1/evidence-store.mjs';
 import { RoomStream } from '../src/close1/stream-watcher.mjs';
-import { buildLedger, resolveTrade, STATUS, EVIDENCE, OWNER, MAX_PROBES, PROBE_WAIT_SWEEPS } from '../src/close1/ledger.mjs';
+import { buildLedger, resolveTrade, flowCounts, STATUS, EVIDENCE, OWNERSHIP, OWNER, MAX_PROBES, PROBE_WAIT_SWEEPS } from '../src/close1/ledger.mjs';
+import { upstreamAlerts, observeUpstream } from '../src/close1/upstream.mjs';
+import { renderClose1Section } from '../src/close1/dashboard-section.mjs';
 import { approveTrade, approveProbe, DEFAULT_POLICY, REASON } from '../src/close1/risk-gate.mjs';
 import { decide, ACTION } from '../src/close1/strategy.mjs';
 import { Executor } from '../src/close1/executor.mjs';
@@ -195,11 +197,11 @@ test('the executor posts only a byte-identical, gate-approved text, rebuilt from
 
 const OUR = me.did;
 const at = (n) => iso(sweepTime(n) - 60_000);      // stamped a minute before sweep n closes
-const flow = (n, { settled = [], voids = [], omitted = {}, mints = [] } = {}) => [n, { t: 'flow', n, settled, void: voids, omitted, mints }];
+const flow = (n, { settled = [], voids = [], omitted = {}, mints = [], missed = [] } = {}) => [n, { t: 'flow', n, settled, void: voids, omitted, mints, missed }];
 const flowsOf = (...entries) => {
   const m = new Map(entries);
   const top = Math.max(...m.keys());
-  for (let n = 1; n <= top; n++) if (!m.has(n)) m.set(n, { t: 'flow', n, settled: [], void: [], omitted: {}, mints: [] });
+  for (let n = 1; n <= top; n++) if (!m.has(n)) m.set(n, { t: 'flow', n, settled: [], void: [], omitted: {}, mints: [], missed: [] });
   return m;
 };
 const offer = (id, n, over = {}) => ({ role: 'maker', id, maker: OUR, ourSide: 'buy', qty: '0.50', px: '224.00', until: n + 6, postedAt: at(n), ...over });
@@ -210,58 +212,101 @@ const takeOf = (id, n, { taker = 'any', side = 'buy' } = {}) => {
 };
 const registration = { did: OUR, postedAt: at(2) };
 const prices = (top, px = '224.00') => new Map(Array.from({ length: top }, (_, i) => [i + 1, { t: 'price', n: i + 1, ref: { px } }]));
+/** A referee record naming the copy that settled — the provenance no public source offers today. */
+const provenanceFor = (id, { maker = OUR, countersigner = stranger.did, sweep = 12 } = {}) => new Map([[id, { sweep, maker, countersigner, source: 'REFEREE_SIGNED' }]]);
 
-test('REGRESSION: a settlement confirmed only by re-post counts in net position and exposure', () => {
+test('a settled id is NOT our settlement: our own offer id listed settled stays ID_SETTLED, ownership UNPROVEN', () => {
+  const flows = flowsOf(flow(12, { settled: ['mfk-a'] }), flow(20));
+  const r = resolveTrade(offer('mfk-a', 10), { flows, latest: 20, ourDid: OUR });
+  assert.deepEqual([r.status, r.evidence, r.ownership], [STATUS.ID_SETTLED, EVIDENCE.OFFICIAL, OWNERSHIP.UNPROVEN]);
+  const L = buildLedger({ trades: [offer('mfk-a', 10)], registration, flows, prices: prices(20), ourDid: OUR });
+  assert.equal(L.exposure.definite, 0, 'not in the proven position');
+  assert.deepEqual([L.exposure.low, L.exposure.high], [0, 0.5], 'only in the possible range');
+  assert.equal(L.settledProvenCount, 0);
+  assert.equal(L.idSettledCount, 1);
+});
+
+test('with copy provenance naming our key, the same listing becomes SETTLED_PROVEN; naming another, NOT_OURS', () => {
+  const flows = flowsOf(flow(12, { settled: ['mfk-a'] }), flow(20));
+  const ours = buildLedger({ trades: [offer('mfk-a', 10)], registration, flows, prices: prices(20), ourDid: OUR, provenance: provenanceFor('mfk-a') });
+  const r = ours.resolutions.get('mfk-a');
+  assert.deepEqual([r.status, r.ownership], [STATUS.SETTLED_PROVEN, OWNERSHIP.PROVEN]);
+  assert.equal(ours.exposure.definite, 0.5);
+  assert.equal(ours.settledProvenCount, 1);
+  // A copy with our id but another maker (the fold keys `settled` on the id alone).
+  const theirs = resolveTrade(offer('mfk-a', 10), { flows, latest: 20, ourDid: OUR, provenance: provenanceFor('mfk-a', { maker: stranger.did }) });
+  assert.equal(theirs.status, STATUS.NOT_OURS);
+  // Provenance from anything but a verified referee record is ignored.
+  const hearsay = new Map([['mfk-a', { maker: OUR, countersigner: stranger.did, source: 'PEER_CLAIM' }]]);
+  assert.equal(resolveTrade(offer('mfk-a', 10), { flows, latest: 20, ourDid: OUR, provenance: hearsay }).status, STATUS.ID_SETTLED);
+});
+
+test('REGRESSION: a re-post-confirmed settlement is tracked in exposure (as a range until proven ours)', () => {
   // The old maker code summed `outcome === "settled"` and skipped "settled (confirmed by re-post)".
   const t = { ...offer('mfk-aaa', 10), outcome: 'settled (confirmed by re-post)', probe: { sweep: 20 } };
   const flows = flowsOf(flow(21, { voids: [['mfk-aaa', 'settled']] }), flow(24));
   const L = buildLedger({ trades: [t], registration, flows, prices: prices(24), ourDid: OUR });
   const r = L.resolutions.get('mfk-aaa');
-  assert.deepEqual([r.status, r.evidence, r.attributed], [STATUS.SETTLED, EVIDENCE.INFERRED_PROBE, true]);
-  assert.equal(L.replay.netPosition, 0.5);
-  assert.equal(L.exposure.definite, 0.5);
-  assert.equal(decide({ ourDid: OUR, ref: 224, nextSweep: 25, netPosition: L.replay.netPosition, idHint: 'mfk-next' }, DEFAULT_POLICY).terms.side, 'sell');
+  assert.deepEqual([r.status, r.evidence, r.ownership], [STATUS.ID_SETTLED, EVIDENCE.INFERRED_PROBE, OWNERSHIP.UNPROVEN]);
+  assert.equal(L.exposure.high, 0.5, 'counted in the worst case, not dropped');
+  const proven = buildLedger({ trades: [t], registration, flows, prices: prices(24), ourDid: OUR, provenance: provenanceFor('mfk-aaa', { sweep: 12 }) });
+  assert.equal(proven.replay.netPosition, 0.5, 'and in the net position once provenance names our copy');
+  assert.equal(decide({ ourDid: OUR, ref: 224, nextSweep: 25, netPosition: proven.replay.netPosition, idHint: 'mfk-next' }, DEFAULT_POLICY).terms.side, 'sell');
 });
 
-test('official vs inferred evidence is a field: flow listing, probe, fold order', () => {
-  const official = resolveTrade(offer('mfk-a', 10), { flows: flowsOf(flow(12, { settled: ['mfk-a'] }), flow(20)), latest: 20, ourDid: OUR });
-  assert.deepEqual([official.status, official.evidence, official.basis], [STATUS.SETTLED, EVIDENCE.OFFICIAL, 'FLOW_SETTLED']);
+test('official vs inferred evidence is a field: listing, probe, fold order', () => {
   const probed = resolveTrade({ ...offer('mfk-b', 10), probes: [{ sweep: 18 }] }, { flows: flowsOf(flow(19, { voids: [['mfk-b', 'expired']] }), flow(22)), latest: 22, ourDid: OUR });
-  assert.deepEqual([probed.status, probed.evidence], [STATUS.NOT_SETTLED, EVIDENCE.INFERRED_PROBE]);
+  assert.deepEqual([probed.status, probed.evidence, probed.ownership], [STATUS.NOT_SETTLED, EVIDENCE.INFERRED_PROBE, OWNERSHIP.NOT_APPLICABLE]);
   const L = buildLedger({ trades: [{ ...offer('mfk-b', 10), probes: [{ sweep: 18 }] }], registration, flows: flowsOf(flow(19, { voids: [['mfk-b', 'expired']] }), flow(22)), prices: prices(22), ourDid: OUR });
-  assert.deepEqual([L.owner.state, L.owner.evidence], [OWNER.MINT_CONFIRMED, EVIDENCE.INFERRED_FOLD_ORDER]);
+  assert.deepEqual([L.owner.state, L.owner.evidence, L.owner.assumption], [OWNER.MINT_CONFIRMED, EVIDENCE.INFERRED_FOLD_ORDER, 'ID_UNIQUE_TO_US']);
   const listed = buildLedger({ trades: [], registration, flows: flowsOf(flow(3, { mints: [OUR] }), flow(5)), prices: prices(5), ourDid: OUR });
   assert.deepEqual([listed.owner.state, listed.owner.evidence], [OWNER.MINT_CONFIRMED, EVIDENCE.OFFICIAL]);
 });
 
-test('a take of an open offer is never attributed from an id-level listing; an expired probe is', () => {
+test('a take of an open offer: listed settled or void-settled is id-level only; an expired probe proves none', () => {
   const t = takeOf('open1', 10);
   const listed = resolveTrade(t, { flows: flowsOf(flow(10, { settled: ['open1'] }), flow(30)), latest: 30, ourDid: OUR });
-  assert.deepEqual([listed.status, listed.attributed], [STATUS.SETTLED, false]);
+  assert.deepEqual([listed.status, listed.ownership], [STATUS.ID_SETTLED, OWNERSHIP.UNPROVEN]);
   const L = buildLedger({ trades: [t], registration, flows: flowsOf(flow(10, { settled: ['open1'] }), flow(30)), prices: prices(30), ourDid: OUR });
   assert.equal(L.replay.netPosition, 0, 'not counted as ours');
   assert.deepEqual([L.exposure.low, L.exposure.high], [-1, 0], 'but inside the worst case');
   const lost = resolveTrade(t, { flows: flowsOf(flow(10, { voids: [['open1', 'settled']] }), flow(30)), latest: 30, ourDid: OUR });
-  assert.deepEqual([lost.status, lost.voidReason, lost.attributed], [STATUS.VOID, 'settled', false]);
+  assert.deepEqual([lost.status, lost.voidReason, lost.ownership], [STATUS.ID_SETTLED, 'settled', OWNERSHIP.UNPROVEN]);
   const expired = resolveTrade({ ...t, probes: [{ sweep: 25 }] }, { flows: flowsOf(flow(26, { voids: [['open1', 'expired']] }), flow(30)), latest: 30, ourDid: OUR });
-  assert.deepEqual([expired.status, expired.attributed], [STATUS.NOT_SETTLED, true]);
-  const { text: _gone, ...old } = t;   // a take from before we stored its text
-  const noText = resolveTrade(old, { flows: flowsOf(flow(10, { voids: [['open1', 'funds']] }), flow(30)), latest: 30, ourDid: OUR });
-  assert.deepEqual([noText.status, noText.voidReason, noText.attributed], [STATUS.VOID, 'funds', false]);
+  assert.deepEqual([expired.status, expired.ownership], [STATUS.NOT_SETTLED, OWNERSHIP.NOT_APPLICABLE]);
+  // A named-taker offer to us is still id-level: someone may reuse the id with other keys.
   const named = resolveTrade(takeOf('named1', 10, { taker: OUR }), { flows: flowsOf(flow(10, { settled: ['named1'] }), flow(30)), latest: 30, ourDid: OUR });
-  assert.equal(named.attributed, true);
+  assert.equal(named.ownership, OWNERSHIP.UNPROVEN);
 });
 
-test('absence from a truncated flow list is never read as "not settled"', () => {
+test('UNKNOWN_OMITTED: aggregate activity the referee did not list is a terminal evidence state', () => {
+  const { text: _gone, ...old } = takeOf('open2', 10);    // a take from before we stored its text: not probeable
+  const hidden = resolveTrade(old, { flows: flowsOf(flow(10, { voids: [['open2', 'funds']], omitted: { settled: 351, void: 22 } }), flow(30)), latest: 30, ourDid: OUR });
+  assert.deepEqual([hidden.status, hidden.evidence, hidden.basis, hidden.voidReason], [STATUS.UNKNOWN, EVIDENCE.UNKNOWN_OMITTED, 'NOT_PROBEABLE', 'funds']);
+  const quiet = resolveTrade(old, { flows: flowsOf(flow(30)), latest: 30, ourDid: OUR });
+  assert.deepEqual([quiet.status, quiet.evidence], [STATUS.UNKNOWN, EVIDENCE.UNKNOWN], 'no omissions: plain UNKNOWN');
+  // Probes whose voids are omitted: retried, then terminal — never NOT_SETTLED.
   const t = offer('mfk-quiet', 10);
-  const open = resolveTrade(t, { flows: flowsOf(flow(14, { omitted: { settled: 1300 } })), latest: 14, ourDid: OUR });
-  assert.equal(open.status, STATUS.PENDING);
-  const due = resolveTrade(t, { flows: flowsOf(flow(18, { omitted: { settled: 1300 } })), latest: 18, ourDid: OUR });
-  assert.deepEqual([due.status, due.evidence], [STATUS.PROBE_DUE, EVIDENCE.UNKNOWN]);
-  // Probes whose voids are omitted: retried, then UNKNOWN — never NOT_SETTLED.
   const probes = Array.from({ length: MAX_PROBES }, (_, i) => ({ sweep: 18 + i * 5 }));
-  const gone = resolveTrade({ ...t, probes }, { flows: flowsOf(flow(18 + MAX_PROBES * 5 + PROBE_WAIT_SWEEPS, { omitted: { void: 40 } })), latest: 18 + MAX_PROBES * 5 + PROBE_WAIT_SWEEPS, ourDid: OUR });
-  assert.deepEqual([gone.status, gone.basis], [STATUS.UNKNOWN, 'PROBES_EXHAUSTED']);
+  const end = 18 + MAX_PROBES * 5 + PROBE_WAIT_SWEEPS;
+  const gone = resolveTrade({ ...t, probes }, { flows: flowsOf(flow(19, { omitted: { void: 40 } }), flow(end)), latest: end, ourDid: OUR });
+  assert.deepEqual([gone.status, gone.evidence, gone.basis], [STATUS.UNKNOWN, EVIDENCE.UNKNOWN_OMITTED, 'PROBES_EXHAUSTED']);
+});
+
+test('listed and omitted counts are tracked; an empty list with omissions is not an empty sweep', () => {
+  const c = flowCounts({ n: 312, mints: [], settled: [], void: [['x', 'funds']], omitted: { mints: 3230, settled: 1375, void: 146 }, missed: [[1, 5]] });
+  assert.deepEqual(c, { n: 312, listed: { mints: 0, settled: 0, void: 1 }, omitted: { mints: 3230, settled: 1375, void: 146 }, missed: 1 });
+  const t = offer('mfk-c', 10);
+  const r = resolveTrade(t, { flows: flowsOf(flow(12, { omitted: { settled: 900 } }), flow(14)), latest: 14, ourDid: OUR });
+  assert.equal(r.status, STATUS.PENDING);
+  assert.ok(r.flowCounts.some((x) => x.n === 12 && x.omitted.settled === 900), 'the counts behind the verdict travel with it');
+  const L = buildLedger({ trades: [], registration, flows: flowsOf(flow(14, { omitted: { settled: 900, void: 3 } })), prices: prices(14), ourDid: OUR });
+  assert.deepEqual(L.latestFlowCounts.omitted, { mints: 0, settled: 900, void: 3 });
+});
+
+test('the probe for our newest offer is not starved: a listed expired void settles it as NOT_SETTLED', () => {
+  const r = resolveTrade(offer('mfk-77', 312, { until: 318 }), { flows: flowsOf(flow(320, { voids: [['mfk-77', 'expired']] }), flow(322)), latest: 322, ourDid: OUR });
+  assert.deepEqual([r.status, r.evidence, r.basis], [STATUS.NOT_SETTLED, EVIDENCE.OFFICIAL, 'FLOW_VOID_EXPIRED']);
 });
 
 test('owner states: unregistered, posted, mint unknown', () => {
@@ -271,6 +316,15 @@ test('owner states: unregistered, posted, mint unknown', () => {
   assert.equal(posted.owner.state, OWNER.REGISTRATION_POSTED);
   const unknown = buildLedger({ trades: [], registration, flows: flowsOf(flow(9, { omitted: { mints: 3000 } })), prices: prices(9), ourDid: OUR });
   assert.equal(unknown.owner.state, OWNER.MINT_UNKNOWN);
+  const takesOnly = buildLedger({ trades: [takeOf('t1', 3)], registration, flows: flowsOf(flow(3, { voids: [['t1', 'funds']] }), flow(9)), prices: prices(9), ourDid: OUR });
+  assert.equal(takesOnly.owner.state, OWNER.MINT_UNKNOWN, 'a void on a take is some copy\'s, not proof of our mint');
+});
+
+test('the POLF balance is shown only when provable: official mint and no trade of unknown effect', () => {
+  const clean = buildLedger({ trades: [], registration, flows: flowsOf(flow(3, { mints: [OUR] }), flow(9)), prices: prices(9), ourDid: OUR });
+  assert.deepEqual([clean.balance.provable, clean.balance.polf], [true, 10000]);
+  const murky = buildLedger({ trades: [offer('mfk-u', 3)], registration, flows: flowsOf(flow(3, { mints: [OUR] }), flow(20)), prices: prices(20), ourDid: OUR });
+  assert.deepEqual([murky.balance.provable, murky.balance.polf], [false, null]);
 });
 
 test('sweep arithmetic: a stamp is applied by the first sweep that closes after it', () => {
@@ -293,6 +347,7 @@ function healthy(over = {}) {
   };
 }
 const proposalFor = (snap, over = {}) => ({ ...decide({ ourDid: OUR, ref: 224, nextSweep: 41, netPosition: 0, idHint: 'mfk-gate' }, DEFAULT_POLICY), ...over });
+const withQty = (q) => proposalFor(null, { terms: { ...proposalFor().terms, qty: q } });
 
 test('the gate opens only when everything checks out', () => {
   const g = approveTrade(healthy(), proposalFor(), DEFAULT_POLICY, NOW);
@@ -318,11 +373,22 @@ test('the gate holds: insufficient funds, a pending trade, an unconfirmed mint, 
   assert.ok(reasons({ ...s, ledger: pendingLedger }).includes(REASON.PENDING_TRADE));
   const unminted = buildLedger({ trades: [], registration, flows: flowsOf(flow(40)), prices: prices(40), ourDid: OUR });
   assert.ok(reasons({ ...s, ledger: unminted }).includes(REASON.MINT_NOT_CONFIRMED));
-  const big = proposalFor(s, { terms: { ...proposalFor().terms, qty: '5.00' } });
-  assert.ok(reasons(s, big).includes(REASON.QTY));
+  assert.ok(reasons(s, withQty('5.00')).includes(REASON.QTY));
   const far = proposalFor(s, { terms: { ...proposalFor().terms, px: '230.00' } });
   assert.ok(reasons(s, far).includes(REASON.PRICE_POLICY));
   assert.ok(reasons({ ...s, ledger: { ...s.ledger, exposure: { ...s.ledger.exposure, worstAbs: 9.8 } } }).includes(REASON.EXPOSURE));
+});
+
+test('quantity stays at 0.50 or below until one of our trades is SETTLED_PROVEN', () => {
+  const s = healthy();
+  const reasons = (snap, q) => approveTrade(snap, withQty(q), DEFAULT_POLICY, NOW).reasons;
+  assert.ok(!reasons(s, '0.50').includes(REASON.QTY));
+  assert.ok(reasons(s, '0.51').includes(REASON.QTY));
+  assert.ok(reasons(s, '1.00').includes(REASON.QTY));
+  const proven = { ...s, ledger: { ...s.ledger, settledProvenCount: 1 } };
+  assert.ok(!reasons(proven, '1.00').includes(REASON.QTY));
+  assert.ok(reasons(proven, '1.01').includes(REASON.QTY));
+  assert.equal(DEFAULT_POLICY.offerQty, 0.5, 'the strategy offers half a contract');
 });
 
 test('a probe is allowed only once it can no longer settle, and only with both signatures valid', () => {
@@ -341,24 +407,93 @@ test('policy qty is separate from protocol: the rules have no max, our default i
   assert.equal(decide({ ourDid: OUR, ref: 224, nextSweep: 5, netPosition: 0, candidate: null, idHint: 'x' }, { ...DEFAULT_POLICY, mode: 'take' }).action, ACTION.NO_ACTION);
 });
 
-// ---------------------------------------------------------------- snapshot & alerts
+// ---------------------------------------------------------------- snapshot, alerts, upstream, dashboard
 
-test('alerts fire on changes only; a healthy unchanged run sends nothing', () => {
+function snapOf(over = {}) {
   const s = healthy();
   const gate = { ok: true, reasons: [], kind: 'open' };
-  const snap = buildSnapshot({ contest: { packageSha256: 'x', refereeDid: referee.did }, streams: {}, price: s.price, ledger: s.ledger, pnl: null, ourDid: OUR, trades: [], gate, nowMs: NOW });
+  return { ...buildSnapshot({ contest: { packageSha256: 'x', refereeDid: referee.did }, streams: {}, price: s.price, ledger: s.ledger, pnl: null, ourDid: OUR, trades: [], gate, nowMs: NOW, integrity: { seedRecords: 1, foreignAuthors: [], sigFailures: 0 } }), ...over };
+}
+
+test('alerts fire on changes only; a healthy unchanged run sends nothing', () => {
+  const snap = snapOf();
   assert.deepEqual(alertsBetween(null, snap), [], 'first run is a baseline');
   assert.deepEqual(alertsBetween(snap, snap), []);
-  const broken = { ...snap, contest_verified: false, contest_error: 'package_hash' };
-  assert.deepEqual(alertsBetween(snap, broken).map((a) => a.kind), ['contest_verification_failed']);
-  const halted = { ...snap, gate: { ok: false, kind: 'halt', reasons: ['reference_stale'] } };
-  assert.deepEqual(alertsBetween(snap, halted).map((a) => a.kind).sort(), ['referee_stale', 'risk_gate_halt']);
-  const settled = { ...snap, trades: [{ id: 'mfk-a', status: 'SETTLED', evidence: 'INFERRED_PROBE', attributed: true }] };
-  assert.deepEqual(alertsBetween(snap, settled).map((a) => a.kind), ['trade_resolved']);
-  const top = { ...snap, official_rank: 2 };
-  assert.deepEqual(alertsBetween(snap, top).map((a) => a.kind), ['entered_top3']);
+  assert.deepEqual(alertsBetween(snap, { ...snap, contest_verified: false, contest_error: 'package_hash' }).map((a) => a.kind), ['contest_verification_failed']);
+  assert.deepEqual(alertsBetween(snap, { ...snap, gate: { ok: false, kind: 'halt', reasons: ['reference_stale'] } }).map((a) => a.kind).sort(), ['referee_stale', 'risk_gate_halt']);
+  const idSettled = { ...snap, trades: [{ id: 'mfk-a', status: STATUS.ID_SETTLED, evidence: 'INFERRED_PROBE', ownership: 'UNPROVEN', terminal: true }] };
+  const a = alertsBetween(snap, idSettled);
+  assert.deepEqual(a.map((x) => x.kind), ['trade_resolved']);
+  assert.match(a[0].text, /not proven/);
+  assert.deepEqual(alertsBetween(snap, { ...snap, official_rank: 2 }).map((x) => x.kind), ['entered_top3']);
   for (const key of ['contest_verified', 'package_sha256', 'referee_did', 'current_sweep', 'reference_price', 'reference_age_seconds',
-    'stream_cursor_by_room', 'stream_gap_by_room', 'owner_state', 'free_polf', 'collateral', 'net_position', 'average_entry', 'fees',
-    'official_score', 'local_replay_score', 'official_rank', 'pending_trades', 'settled_count', 'void_count_by_reason',
+    'stream_cursor_by_room', 'stream_gap_by_room', 'owner_state', 'free_polf', 'collateral', 'net_position', 'proven_position', 'average_entry', 'fees',
+    'official_score', 'local_replay_score', 'official_rank', 'pending_trades', 'open_offers', 'settled_count', 'settled_proven_count', 'void_count_by_reason',
+    'flow_counts', 'evidence_confidence', 'latest_trade', 'balance_provable', 'polf_balance',
     'maker_fill_latency_ms', 'read_errors_5m', 'write_errors_5m', 'last_successful_referee_read']) assert.ok(key in snap, key);
+});
+
+test('alerts: a second seed record, or a foreign author or bad signature in a referee room', () => {
+  const snap = snapOf();
+  assert.deepEqual(alertsBetween(snap, { ...snap, integrity: { ...snap.integrity, seed_records: 2 } }).map((a) => a.kind), ['seed_changed']);
+  assert.deepEqual(alertsBetween(snap, { ...snap, integrity: { ...snap.integrity, foreign_referee_authors: [stranger.did] } }).map((a) => a.kind), ['referee_key_changed']);
+  assert.deepEqual(alertsBetween(snap, { ...snap, integrity: { ...snap.integrity, referee_signature_failures: 1 } }).map((a) => a.kind), ['referee_key_changed']);
+});
+
+const PIN = { packageSha256: PINNED.packageSha256 };
+const obs = (over = {}) => ({
+  treeSha: 't1', files: { 'contest.json': 'a', 'manifest.json': 'b' }, manifestSha256: PINNED.packageSha256, manifestStatus: 'draft', rulesVersion: '0.1-draft',
+  headCommit: { sha: '66c1da3653', title: 'Rules' }, issues: { 10: { title: 'Mint flow stalled', state: 'open', comments: 2 } },
+  watched: { 10: { state: 'open', comments: 2, latest: [] } }, ...over
+});
+
+test('upstream: quiet when nothing changed; alerts on rules, draft status, launch record, issue #10', () => {
+  assert.deepEqual(upstreamAlerts(null, obs(), PIN), [], 'first look at an unchanged repo');
+  assert.deepEqual(upstreamAlerts(obs(), obs(), PIN), []);
+  const kinds = (next) => upstreamAlerts(obs(), next, PIN).map((a) => a.kind).sort();
+  assert.deepEqual(kinds(obs({ treeSha: 't2', files: { 'contest.json': 'c', 'manifest.json': 'd' }, manifestSha256: 'e'.repeat(64) })), ['package_changed_upstream', 'rules_repo_changed']);
+  assert.deepEqual(kinds(obs({ manifestStatus: 'final' })), ['package_not_draft']);
+  assert.deepEqual(kinds(obs({ rulesVersion: '1.0' })), ['rules_version_final']);
+  assert.deepEqual(kinds(obs({ treeSha: 't3', files: { ...obs().files, 'launch-record.json.sig': 'f' } })), ['launch_record_published', 'rules_repo_changed']);
+  const reply = obs({ issues: { 10: { title: 'x', state: 'open', comments: 3 } }, watched: { 10: { state: 'open', comments: 3, latest: [{ author: 'ktrxktr', text: '5/5 settled' }] } } });
+  const a = upstreamAlerts(obs(), reply, PIN);
+  assert.deepEqual(a.map((x) => x.kind), ['watched_issue_update']);
+  assert.match(a[0].text, /ktrxktr: 5\/5 settled/);
+  assert.deepEqual(kinds(obs({ issues: { ...obs().issues, 11: { title: 'new', state: 'open', comments: 0 } } })), ['new_issue']);
+});
+
+test('upstream: an unchanged tree reuses the last manifest read; comments are fetched only when the count moves', async () => {
+  const calls = [];
+  const fetchFn = async (url) => {
+    calls.push(url);
+    const body = url.includes('/git/trees/') ? { sha: 't1', tree: [{ type: 'blob', path: 'manifest.json', sha: 'b' }] }
+      : url.includes('/issues?') ? [{ number: 10, title: 'Mint flow stalled', state: 'open', comments: 2, updated_at: 'x' }]
+        : null;
+    return { ok: true, json: async () => body, text: async () => '' };
+  };
+  const next = await observeUpstream({ prev: obs(), fetchFn, nowMs: NOW });
+  assert.equal(calls.length, 2, calls.join('\n'));
+  assert.equal(next.manifestSha256, PINNED.packageSha256);
+});
+
+test('the dashboard section shows proven vs possible, listed vs omitted, and escapes what it prints', () => {
+  const html = renderClose1Section(snapOf({
+    flow_counts: { n: 312, listed: { mints: 0, settled: 0, void: 1 }, omitted: { mints: 3230, settled: 1375, void: 146 }, missed: 0 },
+    exposure_low: -4.5, exposure_high: 6.92, balance_provable: false, free_polf_worst_case: 7304.57,
+    latest_trade: { id: '<script>', status: 'ID_SETTLED', evidence: 'OFFICIAL', ownership: 'UNPROVEN' }
+  }));
+  for (const s of ['Proven position', '-4.5 … 6.92', 'not provable', 'omitted</strong> settled 1375', 'Gate', 'Evidence confidence', 'Open offers', 'Latest trade']) assert.ok(html.includes(s), s);
+  assert.ok(!html.includes('<script>'));
+  assert.equal(renderClose1Section(null), '');
+});
+
+test('the close-1 timer is a real unit, installed and enabled by the updater, at the same 20-minute cadence', () => {
+  const timer = fs.readFileSync('deploy/close1-take.timer', 'utf8');
+  assert.match(timer, /OnCalendar=\*:03\/20/);
+  assert.match(timer, /WantedBy=timers.target/);
+  const svc = fs.readFileSync('deploy/close1-take.service', 'utf8');
+  assert.match(svc, /ExecStart=\/usr\/bin\/node tools\/close1-take.mjs --go/);
+  const installer = fs.readFileSync('deploy/reinstall-units.sh', 'utf8');
+  assert.match(installer, /close1-take.service close1-take.timer/);
+  assert.match(installer, /enable --now close1-take.timer/);
 });

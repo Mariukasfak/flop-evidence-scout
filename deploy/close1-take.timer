@@ -1,0 +1,10 @@
+[Unit]
+Description=close-1 agent run every 20 minutes (same cadence as the 2026-09-26 transient timer)
+
+[Timer]
+OnCalendar=*:03/20
+# No catch-up burst after downtime: a missed run is simply skipped.
+Persistent=false
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,19 @@
+[Unit]
+Description=close-1: verified agent run (probes, at most one small maker offer)
+Documentation=https://github.com/Mariukasfak/flop-evidence-scout
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__APP_DIR__
+EnvironmentFile=-__APP_DIR__/.env.local
+# Every write goes through src/close1/risk-gate.mjs; the run verifies the
+# pinned package and the referee's signed seed first and writes nothing if
+# either fails. A maker offer is watched for up to ten minutes.
+ExecStart=/usr/bin/node tools/close1-take.mjs --go
+TimeoutStartSec=20min
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=close1-take

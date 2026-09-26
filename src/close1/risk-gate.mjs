@@ -15,6 +15,7 @@ export const DEFAULT_POLICY = Object.freeze({
   mode: 'make',               // 'make' (our own offer) or 'take' (a stranger's open offer)
   allowOpenTake: false,       // see strategy.mjs: a take's settlement cannot be attributed to us
   maxTakeQty: 1.0,            // POLICY: contracts per trade (the protocol has no cap)
+  unprovenMaxQty: 0.5,        // POLICY: the cap until one of OUR trades is SETTLED_PROVEN
   offerQty: 0.5,
   offerEdge: 0.002,
   offerSweeps: 6,
@@ -95,7 +96,9 @@ export function approveTrade(snap, proposal, policy = DEFAULT_POLICY, nowMs = Da
   if (canon) {
     const qty = Number(canon.qty); const px = Number(canon.px);
     const ref = Number(snap.price?.ref?.px);
-    if (qty > policy.maxTakeQty) reasons.push(REASON.QTY);
+    // Until we can prove one settlement is ours, nothing larger than half a contract.
+    const cap = (L.settledProvenCount ?? 0) > 0 ? policy.maxTakeQty : Math.min(policy.maxTakeQty, policy.unprovenMaxQty);
+    if (qty > cap + 1e-9) reasons.push(REASON.QTY);
     if (ref > 0 && Math.abs(px / ref - 1) > LIMIT_WINDOW) reasons.push(REASON.PRICE_PROTOCOL);
     else if (ref > 0 && Math.abs(px / ref - 1) > policy.maxDrift) reasons.push(REASON.PRICE_POLICY);
     const need = qty * px * 1.06;          // price + the worst fee inside the band
