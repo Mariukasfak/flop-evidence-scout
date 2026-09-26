@@ -974,7 +974,11 @@ export async function updateDashboardFile(outputDir = 'docs', serverUrl = 'https
 
   const learningReport = getLatestLearningReport();
   let close1 = null;
-  try { close1 = JSON.parse(fs.readFileSync(path.join(dataDir, 'local', 'close1', 'runtime.json'), 'utf8')); } catch { /* no close-1 run yet */ }
+  // The VPS daemon runs with --data-dir=data/local; a local run defaults to data/. The close-1
+  // tool always writes data/local/close1, so look where each layout puts it.
+  for (const p of [path.join(dataDir, 'close1', 'runtime.json'), path.join(dataDir, 'local', 'close1', 'runtime.json')]) {
+    try { close1 = JSON.parse(fs.readFileSync(p, 'utf8')); break; } catch { /* not here */ }
+  }
   const html = generateDashboardHtml({
     identity, scribeIdentity, heartbeat, logs: history, roomMessages, learningReport, close1
   });
