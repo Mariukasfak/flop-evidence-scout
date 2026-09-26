@@ -112,10 +112,21 @@ async function refereeLatest(room, limit = 3) {
  * trade.
  */
 const FRESH_MS = 3_000;
+/**
+ * A maker who has offered more than an account holds cannot fill them all.
+ * Measured 2026-09-26 over 90 s of close1: seven makers posted open offers, one
+ * of them 28,064 POLF across nine against a 10,000 mint; our takes from two
+ * others both voided on `funds`. So the room is watched before anything is
+ * taken, and a maker whose offers seen so far exceed this is passed over.
+ */
+const WARM_MS = 45_000;
+const MAX_MAKER_OFFERED = 9_000;
 async function firstFreshOffer(judge, ms) {
   let last = null;
   const taken = new Set();
+  const offered = new Map();
   const refused = {};
+  const warmUntil = Date.now() + WARM_MS;
   const end = Date.now() + ms;
   while (Date.now() < end) {
     let batch = [];
@@ -125,14 +136,22 @@ async function firstFreshOffer(judge, ms) {
       if (batch.length) last = batch.at(-1).seq;
     } catch { /* a missed read is a second of offers */ }
     for (const m of batch) {
-      try { const o = JSON.parse(m.text); if (o?.t === 'trade' && o.terms?.id) taken.add(o.terms.id); } catch { /* chatter */ }
+      try {
+        const o = JSON.parse(m.text);
+        if (o?.t === 'trade' && o.terms?.id) taken.add(o.terms.id);
+        if (o?.t === 'offer' && typeof o.terms?.maker === 'string') {
+          offered.set(o.terms.maker, (offered.get(o.terms.maker) || 0) + Number(o.terms.qty) * Number(o.terms.px) || 0);
+        }
+      } catch { /* chatter */ }
     }
+    if (Date.now() < warmUntil) { await new Promise((r) => setTimeout(r, 700)); continue; }
     const newest = Math.max(...batch.map((m) => Date.parse(m.ts)).filter(Number.isFinite), 0);
     for (const m of [...batch].reverse()) {
       if (newest - Date.parse(m.ts) > FRESH_MS) break;
       const j = judge(m);
       if (!j.ok) { if (j.why !== 'not an offer' && j.why !== 'not json') refused[j.why] = (refused[j.why] || 0) + 1; continue; }
       if (taken.has(j.terms.id)) continue;
+      if ((offered.get(j.terms.maker) || 0) > MAX_MAKER_OFFERED) { refused['maker over-offered'] = (refused['maker over-offered'] || 0) + 1; continue; }
       return j;
     }
     await new Promise((r) => setTimeout(r, 700));
