@@ -20,7 +20,9 @@
  *   node tools/close1-take.mjs            dry run: show the offer it would take
  *   node tools/close1-take.mjs --go       take one, if no earlier trade is unresolved
  *   node tools/close1-take.mjs --check    report every trade we posted and its outcome
+ *   node tools/close1-take.mjs --make     dry run of posting our own open offer (--make --go posts it)
  */
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -122,7 +124,7 @@ function loadState() {
 }
 
 /** Walk the referee's recent flow posts for each trade we posted. */
-async function resolve(state) {
+async function resolve(state, currentSweep = null) {
   const flows = (await json(`${BASE}/r/d-close1-flow?limit=200&format=json`)).messages
     .filter((m) => m.from === REFEREE).map((m) => JSON.parse(m.text));
   for (const t of state.trades) {
@@ -132,6 +134,8 @@ async function resolve(state) {
       const v = (f.void || []).find(([id]) => id === t.id);
       if (v) { t.outcome = `void: ${v[1]}`; t.sweep = f.n; break; }
     }
+    // An offer of ours nobody took never reaches the flow at all.
+    if (!t.outcome && t.role === 'maker' && currentSweep !== null && currentSweep > t.until) t.outcome = 'untaken';
   }
   return state;
 }
@@ -143,23 +147,26 @@ async function main() {
   const ours = new Set([identity.did]);
   try { ours.add(JSON.parse(fs.readFileSync(SIBLING, 'utf8')).did); } catch { /* no sibling key here */ }
 
-  const state = await resolve(loadState());
+  const make = process.argv.includes('--make');
+  const [price] = (await refereeLatest('d-close1-price')).slice(-1);
+  if (!price?.ref?.px) throw new Error('no reference price from the referee');
+  const ref = Number(price.ref.px);
+  const nextSweep = price.for ?? price.n + 1;
+
+  const state = await resolve(loadState(), price.n);
   fs.writeFileSync(STATE, JSON.stringify(state, null, 2));
   for (const t of state.trades) {
-    console.log(`${t.postedAt}  ${t.id}  ${t.ourSide} ${t.qty} @ ${t.px} with …${t.maker.slice(-8)}  -> ${t.outcome ?? 'not in the referee flow yet'}${t.sweep ? ` (sweep ${t.sweep})` : ''}`);
+    console.log(`${t.postedAt}  ${t.role === 'maker' ? 'offer ' : ''}${t.id}  ${t.ourSide} ${t.qty} @ ${t.px} with …${t.maker.slice(-8)}  -> ${t.outcome ?? 'not in the referee flow yet'}${t.sweep ? ` (sweep ${t.sweep})` : ''}`);
   }
   if (checkOnly) return;
 
   const settled = state.trades.filter((t) => t.outcome === 'settled').length;
   if (settled >= MAX_TRADES) { console.log(`${settled} trades settled; that is enough.`); return; }
   const pending = state.trades.find((t) => !t.outcome);
-  if (pending && go) { console.log(`waiting on ${pending.id} before taking another`); return; }
-
-  const [price] = (await refereeLatest('d-close1-price')).slice(-1);
-  if (!price?.ref?.px) throw new Error('no reference price from the referee');
-  const ref = Number(price.ref.px);
-  const nextSweep = price.for ?? price.n + 1;
+  if (pending && (go || make)) { console.log(`waiting on ${pending.id} before another`); return; }
   console.log(`reference ${price.ref.px} for sweep ${nextSweep}`);
+
+  if (make) return makeOffer({ identity, state, price, nextSweep });
 
   const msgs = await follow(20_000);
   /**
@@ -198,6 +205,37 @@ async function main() {
   });
   fs.writeFileSync(STATE, JSON.stringify(state, null, 2));
   console.log(`posted; the referee settles it at sweep ${nextSweep} or voids it with a reason`);
+}
+
+/**
+ * Be the maker instead: post our own open offer at the reference and let
+ * whoever wants it countersign. Taking an open offer is a race — our second
+ * try (2026-09-26) voided as `settled`, somebody faster had countersigned — and
+ * a maker races nobody. The terms are ours end to end, so is every byte signed.
+ */
+export function makerTerms({ did, px, side, until, id }) {
+  return checkedTerms({ id, maker: did, px: Number(px).toFixed(2), qty: '0.50', side, taker: 'any', until });
+}
+
+async function makeOffer({ identity, state, price, nextSweep }) {
+  const net = state.trades.filter((t) => t.outcome === 'settled')
+    .reduce((n, t) => n + (t.ourSide === 'buy' ? 1 : -1) * Number(t.qty), 0);
+  const side = net > 0 ? 'sell' : 'buy';          // lean back toward flat
+  const id = `mfk-${crypto.randomBytes(5).toString('hex')}`;
+  const terms = makerTerms({ did: identity.did, px: price.ref.px, side, until: nextSweep + 2, id });
+  if (!terms) throw new Error('our own terms failed the shape check');
+  const makerSig = signMessageBase64Url(makerPayload(terms), identity.privateKeyPem);
+  const text = JSON.stringify({ t: 'offer', season: SEASON, terms, maker_sig: makerSig });
+  if (!process.argv.includes('--go')) { console.log(`would post: ${text}`); console.log('dry run; add --go to post'); return; }
+  const client = new TechnocoreClient({ evidenceDir: path.resolve('data/local/evidence') });
+  const res = await client.postSignedMessage(ROOM, text, identity);
+  const line = String(res.raw).split('\n').find((l) => l.includes(id));
+  state.trades.push({
+    role: 'maker', id, maker: identity.did, ourSide: side, qty: terms.qty, px: terms.px, until: terms.until,
+    postedAt: new Date().toISOString(), seq: Number(line?.match(/^\[(\d+)\]/)?.[1]) || null
+  });
+  fs.writeFileSync(STATE, JSON.stringify(state, null, 2));
+  console.log(`offered: we ${side} ${terms.qty} @ ${terms.px}, open to anyone through sweep ${terms.until}`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

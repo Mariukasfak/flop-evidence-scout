@@ -2,7 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { generateIdentity, signMessageBase64Url, verifyMessage } from '../src/identity.mjs';
-import { checkedTerms, judgeOffer, makerPayload, takerPayload, tradeText, MAX_QTY } from '../tools/close1-take.mjs';
+import { checkedTerms, judgeOffer, makerPayload, takerPayload, tradeText, makerTerms, MAX_QTY } from '../tools/close1-take.mjs';
+
+test('our own offer passes the same checks we hold strangers to, and a stranger could take it', () => {
+  const t = makerTerms({ did: me.did, px: '224.4', side: 'buy', until: 252, id: 'mfk-0a1b2c3d4e' });
+  assert.equal(t.px, '224.40');
+  const sig = signMessageBase64Url(makerPayload(t), me.privateKeyPem);
+  const msg = { seq: 9, from: me.did, text: JSON.stringify({ t: 'offer', season: 'close-1', terms: t, maker_sig: sig }) };
+  const other = generateIdentity();
+  assert.equal(judgeOffer(msg, { ours: new Set([other.did]), ref: 224.4, nextSweep: 251 }).ok, true);
+});
 
 const maker = generateIdentity();
 const me = generateIdentity();
