@@ -39,6 +39,8 @@ const SIBLING = path.resolve('.secrets/scribe-identity.json');
 
 /** Never more than this many trades over the season, and each one small. */
 export const MAX_TRADES = 3;
+/** And never more than this many tries in all, settled or not. */
+export const MAX_ATTEMPTS = 20;
 export const MAX_QTY = 10;
 /** Only a price this close to the referee's reference: the clawback makes a far one pointless anyway. */
 export const MAX_DRIFT = 0.005;
@@ -170,26 +172,53 @@ async function resolve(state, currentSweep = null) {
     .filter((m) => m.from === REFEREE).map((m) => JSON.parse(m.text));
   for (const t of state.trades) {
     if (t.outcome) continue;
+    if (t.probe?.sweep) {
+      /**
+       * The re-post's verdict. An id settles once and the fold checks
+       * `settled` before `expired`, so a copy posted after the window voids as
+       * `settled` if the original went through and as `expired` if it did not.
+       * Voids are listed almost whole (0-2 omitted a sweep, 2026-09-26), so
+       * this answers what the settled list, 700-1,400 short a sweep, cannot.
+       */
+      for (const f of flows) {
+        if (f.n <= t.probe.sweep) continue;
+        const v = (f.void || []).find(([id]) => id === t.id);
+        if (!v) continue;
+        t.outcome = v[1] === 'settled' ? 'settled (confirmed by re-post)' : v[1] === 'expired' ? 'did not settle' : `void: ${v[1]}`;
+        t.sweep = f.n;
+        break;
+      }
+      continue;
+    }
     for (const f of flows) {
       if ((f.settled || []).includes(t.id)) { t.outcome = 'settled'; t.sweep = f.n; break; }
       const v = (f.void || []).find(([id]) => id === t.id);
       if (v) { t.outcome = `void: ${v[1]}`; t.sweep = f.n; break; }
     }
-    // An offer of ours nobody took never reaches the flow at all.
-    if (!t.outcome && t.role === 'maker' && currentSweep !== null && currentSweep > t.until + 1) {
-      const good = (t.takers || []).filter((k) => k.valid);
-      t.outcome = good.length ? 'unlisted'
-        : (t.takers || []).length ? 'taken only with a bad signature' : 'untaken';
-    }
-    /**
-     * A take that is in neither list once its window is over. The flow post
-     * names only some settlements — measured 2026-09-26 it omitted 711-896 of
-     * them a sweep while voids were nearly all listed — so this is most likely
-     * settled, but it is not proof, and is not counted as one.
-     */
-    if (!t.outcome && t.role !== 'maker' && currentSweep !== null && currentSweep > t.until + 1) t.outcome = 'unlisted';
+    if (t.outcome || currentSweep === null || currentSweep <= t.until + 1) continue;
+    // Neither list, window over: an offer nobody took, or a trade to probe.
+    const text = t.role === 'maker' ? t.takers?.[0]?.text : t.text;
+    if (t.role === 'maker' && !t.takers?.length) t.outcome = 'untaken';
+    else if (text) t.probe = { due: true, text };
+    else t.outcome = 'unlisted';
   }
   return state;
+}
+
+/** Re-post each trade whose outcome only a second copy can reveal. */
+async function probeDue(state, identity, currentSweep) {
+  const due = state.trades.filter((t) => t.probe?.due);
+  if (!due.length) return;
+  const client = new TechnocoreClient({ evidenceDir: path.resolve('data/local/evidence') });
+  for (const t of due) {
+    try {
+      await client.postSignedMessage(ROOM, t.probe.text, identity);
+      t.probe = { sweep: currentSweep, postedAt: new Date().toISOString() };
+      console.log(`${t.id}: re-posted to learn whether it settled`);
+    } catch (err) {
+      console.log(`${t.id}: probe post failed (${err.message}); will retry`);
+    }
+  }
 }
 
 async function main() {
@@ -211,9 +240,11 @@ async function main() {
     console.log(`${t.postedAt}  ${t.role === 'maker' ? 'offer ' : ''}${t.id}  ${t.ourSide} ${t.qty} @ ${t.px} with …${t.maker.slice(-8)}  -> ${t.outcome ?? 'not in the referee flow yet'}${t.sweep ? ` (sweep ${t.sweep})` : ''}`);
   }
   if (checkOnly) return;
+  if (go || make) { await probeDue(state, identity, price.n); fs.writeFileSync(STATE, JSON.stringify(state, null, 2)); }
 
-  const settled = state.trades.filter((t) => t.outcome === 'settled').length;
+  const settled = state.trades.filter((t) => t.outcome?.startsWith('settled')).length;
   if (settled >= MAX_TRADES) { console.log(`${settled} trades settled; that is enough.`); return; }
+  if (state.trades.length >= MAX_ATTEMPTS) { console.log(`${state.trades.length} attempts made; stopping there.`); return; }
   const pending = state.trades.find((t) => !t.outcome);
   if (pending && (go || make)) { console.log(`waiting on ${pending.id} before another`); return; }
   console.log(`reference ${price.ref.px} for sweep ${nextSweep}`);
@@ -245,7 +276,7 @@ async function main() {
   state.trades.push({
     id: pick.terms.id, maker: pick.terms.maker, ourSide, qty: pick.terms.qty, px: pick.terms.px,
     until: pick.terms.until, postedAt: new Date().toISOString(),
-    seq: Number(line?.match(/^\[(\d+)\]/)?.[1]) || null
+    seq: Number(line?.match(/^\[(\d+)\]/)?.[1]) || null, text
   });
   fs.writeFileSync(STATE, JSON.stringify(state, null, 2));
   console.log(`posted; the referee settles it at sweep ${nextSweep} or voids it with a reason`);
@@ -310,7 +341,7 @@ async function makeOffer({ identity, state, price, nextSweep }) {
         if (o?.t !== 'trade' || o.terms?.id !== id || typeof o.taker !== 'string') continue;
         let valid = false;
         try { valid = verifyMessage(takerPayload(terms, o.taker), o.taker_sig, o.taker) && m.from === o.taker; } catch { valid = false; }
-        takers.push({ did: o.taker, seq: m.seq, ts: m.ts, valid });
+        takers.push({ did: o.taker, seq: m.seq, ts: m.ts, valid, text: m.text });
         console.log(`taken by …${o.taker.slice(-8)} at seq ${m.seq}: countersignature ${valid ? 'valid' : 'INVALID'}`);
       }
       if (takers.some((k) => k.valid)) break;
