@@ -262,7 +262,14 @@ async function makeOffer({ identity, state, price, nextSweep }) {
     .reduce((n, t) => n + (t.ourSide === 'buy' ? 1 : -1) * Number(t.qty), 0);
   const side = net > 0 ? 'sell' : 'buy';          // lean back toward flat
   const id = `mfk-${crypto.randomBytes(5).toString('hex')}`;
-  const terms = makerTerms({ did: identity.did, px: price.ref.px, side, until: nextSweep + 2, id });
+  /**
+   * A shade better than the reference for whoever takes it, open for half an
+   * hour. At the bare reference for three sweeps (2026-09-26) nobody took it;
+   * 0.2 % on half a contract is under half a POLF, and the clawback means a
+   * taker who is paid it back at the close gains nothing unfair from it.
+   */
+  const px = Number(price.ref.px) * (side === 'buy' ? 1.002 : 0.998);
+  const terms = makerTerms({ did: identity.did, px, side, until: nextSweep + 6, id });
   if (!terms) throw new Error('our own terms failed the shape check');
   const makerSig = signMessageBase64Url(makerPayload(terms), identity.privateKeyPem);
   const text = JSON.stringify({ t: 'offer', season: SEASON, terms, maker_sig: makerSig });
