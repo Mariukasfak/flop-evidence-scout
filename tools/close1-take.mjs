@@ -1,76 +1,60 @@
 #!/usr/bin/env node
 /**
- * close-1: find a stranger's open offer, check it, countersign it, and see it settle.
+ * close-1 agent run: verify the contest, follow the referee, rebuild our
+ * ledger, alert on changes, and — only with --go and only through the risk
+ * gate — post one offer or one re-post probe.
  *
  * Flop Labs' launch note (2026-09-25) says what close-1 is for: "whether
  * autonomous software can find a counterparty and settle a deal on its own".
- * That is this tool's whole ambition — a few small trades with keys that are
- * not ours, never a farm and never our own two keys on both sides. The score is
- * beside the point: the clawback removes every price edge, so a trade here is
- * worth its evidence, not its PnL.
+ * That is this tool's whole ambition: a few small trades with keys that are not
+ * ours, one owner key, never a farm. The score is beside the point.
  *
- * Signing. We never sign bytes a stranger wrote. An offer's terms are parsed,
- * every field is checked against the rules' shapes, and the string we sign is
- * rebuilt from those checked fields (sorted keys, no spaces, as the rules
- * specify); the maker's signature must verify over that same rebuilt string, so
- * a maker who signed anything else is refused. What we sign always starts
- * `close-1|accept|{`, which cannot be read as a technocore post (`room|nonce|`
- * needs a numeric nonce). See never-sign-text-we-did-not-choose.
+ * Responsibilities live in src/close1/: contest-source (what the rules are),
+ * stream-watcher (the only room reader), evidence-store (append-only raw
+ * records), ledger (what happened, with evidence strength), strategy (pure
+ * decision), risk-gate (every write), executor (the only key holder), runtime
+ * (snapshot + alerts).
  *
- *   node tools/close1-take.mjs            dry run: show the offer it would take
- *   node tools/close1-take.mjs --go       take one, if no earlier trade is unresolved
- *   node tools/close1-take.mjs --check    report every trade we posted and its outcome
- *   node tools/close1-take.mjs --make     dry run of posting our own open offer (--make --go posts it)
+ *   node tools/close1-take.mjs            dry run: verify, rebuild, show what it would do
+ *   node tools/close1-take.mjs --check    report only
+ *   node tools/close1-take.mjs --go       post: due probes first, then one offer if the gate allows
+ *   CLOSE1_ALLOW_OPEN_TAKE=1 … --take     take a stranger's open offer instead (off by default)
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TechnocoreClient } from '../src/technocore-client.mjs';
-import { signMessageBase64Url, verifyMessage } from '../src/identity.mjs';
+import {
+  SEASON, checkedTerms, checkedTrade, makerPayload, takerPayload, tradeText, safeVerify
+} from '../src/close1/protocol.mjs';
+import { buildContestConfig, verifyRefereeMessage, PINNED } from '../src/close1/contest-source.mjs';
+import { EvidenceStore, SIG_STATUS, SOURCE } from '../src/close1/evidence-store.mjs';
+import { RoomStream } from '../src/close1/stream-watcher.mjs';
+import { buildLedger, termsOf, STATUS } from '../src/close1/ledger.mjs';
+import { decide, ACTION } from '../src/close1/strategy.mjs';
+import { approveTrade, approveProbe, DEFAULT_POLICY } from '../src/close1/risk-gate.mjs';
+import { Executor } from '../src/close1/executor.mjs';
+import { buildSnapshot, alertsBetween, deliverAlerts } from '../src/close1/runtime.mjs';
 
-export const SEASON = 'close-1';
-export const REFEREE = 'did:key:z6MkowHQwsx9xr84WbWN3YCnKutyBnBXkT1ChKY4uEAAMzte';
+export { checkedTerms, makerPayload, takerPayload, tradeText, SEASON };
+export const REFEREE = PINNED.refereeDid;
+/** POLICY, not protocol: the rules set no maximum quantity. See risk-gate.mjs. */
+export const MAX_TAKE_QTY = DEFAULT_POLICY.maxTakeQty;
+export const MAX_DRIFT = DEFAULT_POLICY.maxDrift;
+
 const BASE = 'https://technocore.chat';
 const ROOM = 'close1';
+const DIR = path.resolve('data/local/close1');
 const STATE = path.resolve('data/local/close1-trades.json');
+const REGISTRATION = path.resolve('data/local/close1-registration.json');
 const IDENTITY = path.resolve('.secrets/scout-identity.json');
 const SIBLING = path.resolve('.secrets/scribe-identity.json');
+const MAX_PROBES_PER_RUN = 2;
+const HALT = /contest|referee|stream|stale|reference|signature|canonical|not_read/;
 
-/** Never more than this many trades over the season, and each one small. */
-export const MAX_TRADES = 3;
-/** And never more than this many tries in all, settled or not. */
-export const MAX_ATTEMPTS = 20;
-export const MAX_QTY = 10;
-/** Only a price this close to the referee's reference: the clawback makes a far one pointless anyway. */
-export const MAX_DRIFT = 0.005;
-
-const TWO_PLACES = /^[0-9]{1,7}(\.[0-9]{1,2})?$/;
-const TRADE_ID = /^[A-Za-z0-9_-]{1,64}$/;
-const DID = /^did:key:z6Mk[1-9A-HJ-NP-Za-km-z]{40,60}$/;
-
-/** The terms as the rules define them, or null. Only these seven keys, only these shapes. */
-export function checkedTerms(t) {
-  if (!t || typeof t !== 'object' || Array.isArray(t)) return null;
-  const keys = Object.keys(t).sort().join(',');
-  if (keys !== 'id,maker,px,qty,side,taker,until') return null;
-  if (typeof t.id !== 'string' || !TRADE_ID.test(t.id)) return null;
-  if (typeof t.maker !== 'string' || !DID.test(t.maker)) return null;
-  if (typeof t.px !== 'string' || !TWO_PLACES.test(t.px) || !(Number(t.px) > 0)) return null;
-  if (typeof t.qty !== 'string' || !TWO_PLACES.test(t.qty) || !(Number(t.qty) >= 0.1)) return null;
-  if (t.side !== 'buy' && t.side !== 'sell') return null;
-  if (t.taker !== 'any' && !(typeof t.taker === 'string' && DID.test(t.taker))) return null;
-  if (!Number.isInteger(t.until)) return null;
-  return { id: t.id, maker: t.maker, px: t.px, qty: t.qty, side: t.side, taker: t.taker, until: t.until };
-}
-
-/** Sorted keys, no spaces: checkedTerms already returns them in sorted order. */
-export const termsText = (terms) => JSON.stringify(terms);
-export const makerPayload = (terms) => `${SEASON}|terms|${termsText(terms)}`;
-export const takerPayload = (terms, did) => `${SEASON}|accept|${termsText(terms)}|${did}`;
-
-/** An open offer we may take, or the reason we may not. */
-export function judgeOffer(msg, { ours, ref, nextSweep }) {
+/** An open offer we may take, or the reason we may not. Protocol shape first, then our policy. */
+export function judgeOffer(msg, { ours, ref, nextSweep, maxQty = MAX_TAKE_QTY, maxDrift = MAX_DRIFT }) {
   let o;
   try { o = JSON.parse(msg.text); } catch { return { ok: false, why: 'not json' }; }
   if (o?.t !== 'offer' || o.season !== SEASON) return { ok: false, why: 'not an offer' };
@@ -80,279 +64,296 @@ export function judgeOffer(msg, { ours, ref, nextSweep }) {
   if (ours.has(terms.maker)) return { ok: false, why: 'ours' };
   if (terms.taker !== 'any') return { ok: false, why: 'named taker' };
   if (terms.until < nextSweep) return { ok: false, why: 'expires before the next sweep' };
-  if (Number(terms.qty) > MAX_QTY) return { ok: false, why: 'too large' };
-  if (Math.abs(Number(terms.px) / ref - 1) > MAX_DRIFT) return { ok: false, why: 'too far from the reference' };
-  if (typeof o.maker_sig !== 'string') return { ok: false, why: 'unsigned' };
-  let good = false;
-  try { good = verifyMessage(makerPayload(terms), o.maker_sig, terms.maker); } catch { good = false; }
-  if (!good) return { ok: false, why: 'maker signature does not verify over the terms' };
+  if (Number(terms.qty) > maxQty) return { ok: false, why: 'too large' };
+  if (Math.abs(Number(terms.px) / ref - 1) > maxDrift) return { ok: false, why: 'too far from the reference' };
+  if (!safeVerify(makerPayload(terms), o.maker_sig, terms.maker)) return { ok: false, why: 'maker signature does not verify over the terms' };
   return { ok: true, terms, makerSig: o.maker_sig, seq: msg.seq };
 }
 
-export function tradeText(terms, makerSig, did, takerSig) {
-  return JSON.stringify({ t: 'trade', season: SEASON, terms, taker: did, maker_sig: makerSig, taker_sig: takerSig });
+/** Our own offer's terms, canonical. */
+export function makerTerms({ did, px, side, until, id, qty = '0.50' }) {
+  return checkedTerms({ id, maker: did, px: Number(px).toFixed(2), qty, side, taker: 'any', until });
 }
 
-async function json(url) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
-  return r.json();
+const readJson = (f, dflt) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return dflt; } };
+const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); const tmp = `${f}.tmp`; fs.writeFileSync(tmp, JSON.stringify(v, null, 2)); fs.renameSync(tmp, f); };
+
+/** The seed: kept once, re-verified every run by buildContestConfig. */
+async function loadSeed() {
+  const f = path.join(DIR, 'seed.json');
+  const saved = readJson(f, null);
+  if (saved) return saved;
+  const r = await fetch(`${BASE}/r/${PINNED.seedRoom}/export`);
+  if (!r.ok) throw new Error(`seed export: HTTP ${r.status}`);
+  const first = JSON.parse((await r.text()).split('\n')[0]);
+  if (first.seq !== PINNED.seedSeq) throw new Error(`seed export starts at seq ${first.seq}`);
+  writeJson(f, first);
+  return first;
 }
 
-async function refereeLatest(room, limit = 3) {
-  const j = await json(`${BASE}/r/${room}?limit=${limit}&format=json`);
-  return (j.messages || []).filter((m) => m.from === REFEREE).map((m) => JSON.parse(m.text));
+/** First run: the whole referee room from /export, verified, into the evidence store. */
+async function backfill(stream, evidence, room, verify) {
+  if (stream.state[room].cursor > 0) return;
+  const r = await fetch(`${BASE}/r/${room}/export`);
+  if (!r.ok) throw new Error(`${room} export: HTTP ${r.status}`);
+  const msgs = (await r.text()).split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const head = await stream.client.readRoom(room, { limit: 1, format: 'json' });
+  const generation = head.generation ?? null;
+  evidence.append(msgs.map((m) => { const v = verify(m); return evidence.record(room, m, { generation, sigStatus: v.sigStatus, source: v.source }); }));
+  const s = stream.state[room];
+  s.cursor = msgs.at(-1)?.seq ?? 0;
+  s.generation = generation;
+  s.lastOkAt = Date.now();
+  stream.save();
 }
 
-/**
- * The first takeable offer seen while it is still fresh, and not yet taken.
- *
- * Our first race (2026-09-26) picked from a 20-second window and voided as
- * `settled`: someone countersigned first. An open offer here is taken within
- * seconds, so this follows the room and acts on an offer at most FRESH_MS older
- * than the newest record of the same read, skipping any id already seen in a
- * trade.
- */
-const FRESH_MS = 3_000;
-/**
- * A maker who has offered more than an account holds cannot fill them all.
- * Measured 2026-09-26 over 90 s of close1: seven makers posted open offers, one
- * of them 28,064 POLF across nine against a 10,000 mint; our takes from two
- * others both voided on `funds`. So the room is watched before anything is
- * taken, and a maker whose offers seen so far exceed this is passed over.
- */
-const WARM_MS = 45_000;
-const MAX_MAKER_OFFERED = 9_000;
-async function firstFreshOffer(judge, ms) {
-  let last = null;
-  const taken = new Set();
-  const offered = new Map();
-  const refused = {};
-  const warmUntil = Date.now() + WARM_MS;
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    let batch = [];
+/** Verified referee bodies from the evidence store, by sweep. */
+function refereeBodies(evidence, room) {
+  const out = new Map();
+  let latest = null;
+  for (const r of evidence.read(room)) {
+    if (r.source !== SOURCE.REFEREE_SIGNED) continue;
+    let b; try { b = JSON.parse(r.text); } catch { continue; }
+    if (Number.isInteger(b.n)) { out.set(b.n, b); if (!latest || b.n >= latest.body.n) latest = { body: b, ts: r.ts }; }
+  }
+  return { byN: out, latest };
+}
+
+export async function run(argv = process.argv.slice(2)) {
+  const go = argv.includes('--go');
+  const checkOnly = argv.includes('--check');
+  const take = argv.includes('--take');
+  const policy = { ...DEFAULT_POLICY, mode: take ? 'take' : 'make', allowOpenTake: process.env.CLOSE1_ALLOW_OPEN_TAKE === '1' };
+  const nowMs = Date.now();
+  const client = new TechnocoreClient({ evidenceDir: path.resolve('data/local/evidence') });
+  const evidence = new EvidenceStore({ dir: path.join(DIR, 'evidence') });
+  const registration = readJson(REGISTRATION, null);
+  const state = readJson(STATE, { trades: [] });
+  const ourDid = registration?.did ?? null;
+  let writeErrors = 0;
+
+  // 1. The contest, verified from the pinned package and the signed seed.
+  let contest = null; let contestError = null;
+  try { contest = buildContestConfig({ seedMsg: await loadSeed() }); } catch (err) { contestError = `${err.code ?? 'error'}: ${err.message}`; }
+  const refereeDid = PINNED.refereeDid;
+
+  // 2. The referee's rooms, through the one stream reader.
+  const observedAuthors = new Set();
+  let sigFailures = 0;
+  const refVerify = (room) => (m) => {
+    observedAuthors.add(m.from);
+    const v = verifyRefereeMessage(m, room, refereeDid);
+    if (!v.ok && m.from === refereeDid) sigFailures += 1;
+    return v.ok ? { sigStatus: SIG_STATUS.VERIFIED, source: SOURCE.REFEREE_SIGNED, body: v.body }
+      : { sigStatus: m.sig ? SIG_STATUS.INVALID : SIG_STATUS.UNSIGNED, source: SOURCE.UNVERIFIED };
+  };
+  const mine = (m) => Boolean(ourDid) && (m.from === ourDid || String(m.text).includes(ourDid) || state.trades.some((t) => String(m.text).includes(t.id)));
+  const stream = new RoomStream({
+    client, evidence, cursorFile: path.join(DIR, 'cursors.json'),
+    rooms: {
+      'd-close1-price': { wait: 0, verify: refVerify('d-close1-price') },
+      'd-close1-flow': { wait: 0, verify: refVerify('d-close1-flow') },
+      'd-close1-pnl': { wait: 0, verify: refVerify('d-close1-pnl') },
+      [ROOM]: { wait: 0, keep: mine }
+    }
+  });
+  for (const room of ['d-close1-price', 'd-close1-flow']) {
+    try { await backfill(stream, evidence, room, refVerify(room)); } catch (err) { console.log(`${room}: backfill failed (${err.message})`); }
+  }
+  for (const room of ['d-close1-price', 'd-close1-flow', 'd-close1-pnl']) {
+    const r = await stream.poll(room);
+    if (!r.ok) console.log(`${room}: read failed (${r.error})`);
+    if (r.gap) console.log(`${room}: GAP ${JSON.stringify(r.gap)}`);
+  }
+
+  // 3. The ledger, from verified referee posts only.
+  const flows = refereeBodies(evidence, 'd-close1-flow');
+  const prices = refereeBodies(evidence, 'd-close1-price');
+  const pnl = refereeBodies(evidence, 'd-close1-pnl').latest?.body ?? null;
+  const ledger = ourDid ? buildLedger({ trades: state.trades, registration, flows: flows.byN, prices: prices.byN, ourDid, cfg: contest }) : null;
+  if (ledger) for (const t of state.trades) t.resolution = ledger.resolutions.get(t.id);
+  writeJson(STATE, state);
+  const price = prices.latest ? { ...prices.latest.body, postedAt: prices.latest.ts } : null;
+
+  // 4. What the strategy would do, and whether the gate would allow it — computed
+  //    on every run, so the snapshot always says whether writes are open.
+  const ref = Number(price?.ref?.px);
+  const nextSweep = price ? (price.for ?? price.n + 1) : null;
+  const snapIn = {
+    contest: contest ? { verified: true, refereeDid: contest.refereeDid, lockSweep: contest.lockSweep } : { verified: false },
+    observedRefereeDids: [...observedAuthors], refereeSigFailures: sigFailures,
+    streams: stream.stats(), price, ledger, attempts: state.trades.length
+  };
+  let candidate = null;
+  if (!checkOnly && go && ledger && price && policy.mode === 'take' && policy.allowOpenTake) {
+    candidate = await followOffers(stream, { ours: ourKeys(ourDid), ref, nextSweep, state });
+  }
+  const proposal = ledger && price
+    ? decide({ ourDid, ref, nextSweep, netPosition: ledger.replay.netPosition, candidate, idHint: `mfk-${crypto.randomBytes(5).toString('hex')}` }, policy)
+    : { action: ACTION.NO_ACTION, why: contest ? 'no verified reference yet' : 'contest not verified' };
+  const gate = proposal.action === ACTION.NO_ACTION
+    ? { ok: false, reasons: [proposal.why] }
+    : approveTrade(snapIn, proposal, policy, nowMs);
+  if (!contest && !gate.reasons.includes('contest_unverified')) gate.reasons.push('contest_unverified');
+  gate.kind = gate.ok ? 'open' : gate.reasons.some((r) => HALT.test(r)) ? 'halt' : 'hold';
+
+  // 5. Snapshot and alerts.
+  const snapshot = buildSnapshot({ contest, contestError, streams: stream.stats(), price, ledger, pnl, ourDid, trades: state.trades, gate, nowMs, writeErrors5m: writeErrors });
+  const prev = readJson(path.join(DIR, 'runtime.json'), null);
+  const alerts = alertsBetween(prev, snapshot);
+  await deliverAlerts(alerts, { logFile: path.join(DIR, 'alerts.jsonl') });
+  writeJson(path.join(DIR, 'runtime.json'), snapshot);
+  printReport(snapshot, state, ledger, contestError);
+  for (const a of alerts) console.log(`ALERT ${a.kind}: ${a.text}`);
+  if (checkOnly || !go) {
+    if (!checkOnly && gate.ok) console.log(`would: ${proposal.rationale}\ndry run; nothing signed or posted`);
+    return snapshot;
+  }
+
+  // 6. Writes: probes first (they settle what we already did), then at most one new trade.
+  if (!contest || !ledger) { console.log('no writes: contest or ledger unavailable'); return snapshot; }
+  const executor = new Executor({ identityPath: IDENTITY, client, room: ROOM });
+  if (executor.did !== ourDid) throw new Error('the signing key is not the registered owner; refusing to write');
+  let probes = 0;
+  for (const t of state.trades) {
+    if (probes >= MAX_PROBES_PER_RUN || t.resolution?.status !== STATUS.PROBE_DUE) continue;
     try {
-      const q = last === null ? '?limit=200&format=json' : `?since=${last}&limit=200&format=json`;
-      batch = (await json(`${BASE}/r/${ROOM}${q}`)).messages || [];
-      if (batch.length) last = batch.at(-1).seq;
-    } catch { /* a missed read is a second of offers */ }
+      const valid = (t.takers || []).find((k) => k.valid && k.text);
+      const record = t.role === 'maker'
+        ? (valid ? { tradeObj: JSON.parse(valid.text) } : { terms: termsOf(t, ourDid) })
+        : { tradeObj: JSON.parse(t.text) };
+      const p = executor.probeText(record);
+      const ok = approveProbe(snapIn, p, policy, Date.now());
+      if (!ok.ok) { console.log(`${t.id}: probe held (${ok.reasons.join(', ')})`); continue; }
+      const posted = await executor.post(p.text, { ok: true, text: p.text });
+      (t.probes ||= []).push({ sweep: price.n, postedAt: new Date().toISOString(), mode: record.terms ? 'self' : 'rebuilt', seq: posted.seq, signed: [makerPayload(p.terms), takerPayload(p.terms, p.taker)] });
+      probes += 1;
+      console.log(`${t.id}: re-posted after its window to learn its fate`);
+    } catch (err) { writeErrors += 1; console.log(`${t.id}: probe failed (${err.message})`); }
+    writeJson(STATE, state);
+  }
+  if (!gate.ok) { console.log(`no trade: ${gate.reasons.join(', ')}`); return snapshot; }
+  console.log(`proposal: ${proposal.rationale}`);
+  try {
+    if (proposal.action === ACTION.MAKE_OFFER) await makeOffer({ executor, stream, state, proposal });
+    else if (proposal.action === ACTION.TAKE_OFFER) await takeOffer({ executor, state, proposal, ourDid });
+  } catch (err) {
+    await deliverAlerts([{ kind: 'write_failure', text: `close-1 write failed: ${err.message}` }], { logFile: path.join(DIR, 'alerts.jsonl') });
+    throw err;
+  }
+  return snapshot;
+}
+
+function ourKeys(ourDid) {
+  const s = new Set([ourDid]);
+  try { s.add(JSON.parse(fs.readFileSync(SIBLING, 'utf8')).did); } catch { /* no sibling here */ }
+  return s;
+}
+
+/**
+ * Be the maker: post our own offer and watch, through the shared stream, who
+ * countersigns it. Every countersignature is checked the rules' way before it
+ * counts; a key that signs `…|<maker_sig>` instead of `…|<taker did>` (two bots
+ * did, 2026-09-26) is recorded as invalid.
+ */
+async function makeOffer({ executor, stream, state, proposal }) {
+  const { text, makerSig, signed } = executor.signOffer(proposal.terms);
+  await stream.seekHead(ROOM);
+  const posted = await executor.post(text, { ok: true, text });
+  const t = proposal.terms;
+  const rec = {
+    role: 'maker', id: t.id, maker: t.maker, ourSide: proposal.ourSide, qty: t.qty, px: t.px, until: t.until,
+    postedAt: new Date().toISOString(), seq: posted.seq, terms: t, signed: { maker: signed, makerSig }, takers: []
+  };
+  state.trades.push(rec);
+  writeJson(STATE, state);
+  console.log(`offered: we ${proposal.ourSide} ${t.qty} @ ${t.px}, open to anyone through sweep ${t.until}`);
+  const end = Date.now() + 10 * 60_000;
+  let failures = 0;
+  while (Date.now() < end) {
+    const r = await stream.poll(ROOM);
+    if (!r.ok && ++failures >= 10) { console.log('close1 unreadable; stopping the watch (the ledger will probe later)'); break; }
+    for (const m of r.messages || []) {
+      let o; try { o = JSON.parse(m.text); } catch { continue; }
+      if (o?.t !== 'trade' || o.terms?.id !== t.id) continue;
+      const c = checkedTrade(o);
+      const valid = c.ok && m.from === c.taker && JSON.stringify(c.terms) === JSON.stringify(t);
+      rec.takers.push({ did: o.taker, seq: m.seq, ts: m.ts, valid, why: c.ok ? null : c.why, text: m.text });
+      console.log(`taken by …${String(o.taker).slice(-8)} at seq ${m.seq}: countersignature ${valid ? 'valid' : `INVALID (${c.why})`}`);
+    }
+    if (r.gap) rec.watchGaps = (rec.watchGaps || 0) + 1;
+    writeJson(STATE, state);
+    if (rec.takers.some((k) => k.valid)) break;
+    await new Promise((res) => setTimeout(res, 1200));
+  }
+  if (!rec.takers.length) console.log('nobody took it in ten minutes; the ledger will probe after its window');
+}
+
+async function takeOffer({ executor, state, proposal, ourDid }) {
+  const { text, signed } = executor.signAccept(proposal.terms, proposal.makerSig);
+  const posted = await executor.post(text, { ok: true, text });
+  const t = proposal.terms;
+  state.trades.push({
+    id: t.id, maker: t.maker, ourSide: proposal.ourSide, qty: t.qty, px: t.px, until: t.until,
+    postedAt: new Date().toISOString(), seq: posted.seq, text, signed: { taker: signed }, taker: ourDid
+  });
+  writeJson(STATE, state);
+  console.log('posted; the referee settles it at the next sweep or voids it with a reason');
+}
+
+/**
+ * The first fresh, unraced open offer, read through the shared stream. Our
+ * 2026-09-26 races showed an open offer is taken within a second, and a maker
+ * who offers more than its account (28,064 POLF across nine, against 10,000)
+ * voids on `funds` — so the room is watched 45 s first and such makers skipped.
+ */
+async function followOffers(stream, { ours, ref, nextSweep, state }) {
+  const FRESH_MS = 3_000; const WARM_MS = 45_000; const MAX_MAKER_OFFERED = 9_000;
+  const broke = new Set(state.trades.filter((t) => t.resolution?.voidReason === 'funds').map((t) => t.maker));
+  const taken = new Set(); const offered = new Map();
+  await stream.seekHead(ROOM);
+  const warmUntil = Date.now() + WARM_MS; const end = Date.now() + 120_000;
+  while (Date.now() < end) {
+    const r = await stream.poll(ROOM);
+    const batch = r.messages || [];
     for (const m of batch) {
       try {
         const o = JSON.parse(m.text);
         if (o?.t === 'trade' && o.terms?.id) taken.add(o.terms.id);
-        if (o?.t === 'offer' && typeof o.terms?.maker === 'string') {
-          offered.set(o.terms.maker, (offered.get(o.terms.maker) || 0) + Number(o.terms.qty) * Number(o.terms.px) || 0);
-        }
+        if (o?.t === 'offer' && typeof o.terms?.maker === 'string') offered.set(o.terms.maker, (offered.get(o.terms.maker) || 0) + (Number(o.terms.qty) * Number(o.terms.px) || 0));
       } catch { /* chatter */ }
     }
-    if (Date.now() < warmUntil) { await new Promise((r) => setTimeout(r, 700)); continue; }
-    const newest = Math.max(...batch.map((m) => Date.parse(m.ts)).filter(Number.isFinite), 0);
-    for (const m of [...batch].reverse()) {
-      if (newest - Date.parse(m.ts) > FRESH_MS) break;
-      const j = judge(m);
-      if (!j.ok) { if (j.why !== 'not an offer' && j.why !== 'not json') refused[j.why] = (refused[j.why] || 0) + 1; continue; }
-      if (taken.has(j.terms.id)) continue;
-      if ((offered.get(j.terms.maker) || 0) > MAX_MAKER_OFFERED) { refused['maker over-offered'] = (refused['maker over-offered'] || 0) + 1; continue; }
-      return j;
+    if (Date.now() >= warmUntil && r.ok) {
+      const newest = Math.max(...batch.map((m) => Date.parse(m.ts)).filter(Number.isFinite), 0);
+      for (const m of [...batch].reverse()) {
+        if (newest - Date.parse(m.ts) > FRESH_MS) break;
+        const j = judgeOffer(m, { ours, ref, nextSweep });
+        if (!j.ok || taken.has(j.terms.id) || broke.has(j.terms.maker) || (offered.get(j.terms.maker) || 0) > MAX_MAKER_OFFERED) continue;
+        stream.evidence.append([stream.evidence.record(ROOM, m, { sigStatus: SIG_STATUS.VERIFIED, source: SOURCE.PEER_SIGNED })]);
+        return j;
+      }
     }
-    await new Promise((r) => setTimeout(r, 700));
+    await new Promise((res) => setTimeout(res, 700));
   }
-  console.log(`refused: ${JSON.stringify(refused)}`);
   return null;
 }
 
-function loadState() {
-  try { return JSON.parse(fs.readFileSync(STATE, 'utf8')); } catch { return { trades: [] }; }
-}
-
-/** Walk the referee's recent flow posts for each trade we posted. */
-async function resolve(state, currentSweep = null) {
-  const flows = (await json(`${BASE}/r/d-close1-flow?limit=200&format=json`)).messages
-    .filter((m) => m.from === REFEREE).map((m) => JSON.parse(m.text));
+function printReport(s, state, ledger, contestError) {
+  console.log(`contest: ${s.contest_verified ? `verified (package ${String(s.package_sha256).slice(0, 8)}…, referee …${String(s.referee_did).slice(-8)})` : `NOT VERIFIED — ${contestError}`}`);
+  console.log(`sweep ${s.current_sweep ?? '?'}: reference ${s.reference_price ?? '?'} (trade ${s.reference_age_seconds ?? '?'} s old, post ${s.price_post_age_seconds ?? '?'} s old)`);
+  console.log(`owner: ${s.owner_state} (${s.owner_evidence})`);
+  if (ledger) {
+    console.log(`position, trades proven ours only: ${s.net_position} @ ${s.average_entry ?? '-'}; free ${s.free_polf} POLF, fees ${s.fees}${s.fees_exact ? '' : ' (estimated)'}`);
+    console.log(`worst case counting unproven trades: position ${s.exposure_low} … ${s.exposure_high}`);
+    console.log(`score, our replay: ${s.local_replay_score}; official: ${s.official_score ?? s.official_rank_note}`);
+  }
   for (const t of state.trades) {
-    if (t.outcome) continue;
-    if (t.probe?.sweep) {
-      /**
-       * The re-post's verdict. An id settles once and the fold checks
-       * `settled` before `expired`, so a copy posted after the window voids as
-       * `settled` if the original went through and as `expired` if it did not.
-       * Voids are listed almost whole (0-2 omitted a sweep, 2026-09-26), so
-       * this answers what the settled list, 700-1,400 short a sweep, cannot.
-       */
-      for (const f of flows) {
-        if (f.n <= t.probe.sweep) continue;
-        const v = (f.void || []).find(([id]) => id === t.id);
-        if (!v) continue;
-        t.outcome = v[1] === 'settled' ? 'settled (confirmed by re-post)' : v[1] === 'expired' ? 'did not settle' : `void: ${v[1]}`;
-        t.sweep = f.n;
-        break;
-      }
-      continue;
-    }
-    for (const f of flows) {
-      if ((f.settled || []).includes(t.id)) { t.outcome = 'settled'; t.sweep = f.n; break; }
-      const v = (f.void || []).find(([id]) => id === t.id);
-      if (v) { t.outcome = `void: ${v[1]}`; t.sweep = f.n; break; }
-    }
-    if (t.outcome || currentSweep === null || currentSweep <= t.until + 1) continue;
-    // Neither list, window over: an offer nobody took, or a trade to probe.
-    const text = t.role === 'maker' ? t.takers?.[0]?.text : t.text;
-    if (t.role === 'maker' && !t.takers?.length) t.outcome = 'untaken';
-    else if (text) t.probe = { due: true, text };
-    else t.outcome = 'unlisted';
+    const r = t.resolution || {};
+    console.log(`${t.postedAt}  ${t.role === 'maker' ? 'offer' : 'take '}  ${t.id}  ${t.ourSide} ${t.qty} @ ${t.px}  -> ${r.status ?? '?'}${r.voidReason ? ` (${r.voidReason})` : ''} [${r.evidence ?? '?'}${r.attributed ? '' : ', not provably ours'}]${r.sweep ? ` sweep ${r.sweep}` : ''}`);
   }
-  return state;
-}
-
-/** Re-post each trade whose outcome only a second copy can reveal. */
-async function probeDue(state, identity, currentSweep) {
-  const due = state.trades.filter((t) => t.probe?.due);
-  if (!due.length) return;
-  const client = new TechnocoreClient({ evidenceDir: path.resolve('data/local/evidence') });
-  for (const t of due) {
-    try {
-      await client.postSignedMessage(ROOM, t.probe.text, identity);
-      t.probe = { sweep: currentSweep, postedAt: new Date().toISOString() };
-      console.log(`${t.id}: re-posted to learn whether it settled`);
-    } catch (err) {
-      console.log(`${t.id}: probe post failed (${err.message}); will retry`);
-    }
-  }
-}
-
-async function main() {
-  const go = process.argv.includes('--go');
-  const checkOnly = process.argv.includes('--check');
-  const identity = JSON.parse(fs.readFileSync(IDENTITY, 'utf8'));
-  const ours = new Set([identity.did]);
-  try { ours.add(JSON.parse(fs.readFileSync(SIBLING, 'utf8')).did); } catch { /* no sibling key here */ }
-
-  const make = process.argv.includes('--make');
-  const [price] = (await refereeLatest('d-close1-price')).slice(-1);
-  if (!price?.ref?.px) throw new Error('no reference price from the referee');
-  const ref = Number(price.ref.px);
-  const nextSweep = price.for ?? price.n + 1;
-
-  const state = await resolve(loadState(), price.n);
-  fs.writeFileSync(STATE, JSON.stringify(state, null, 2));
-  for (const t of state.trades) {
-    console.log(`${t.postedAt}  ${t.role === 'maker' ? 'offer ' : ''}${t.id}  ${t.ourSide} ${t.qty} @ ${t.px} with …${t.maker.slice(-8)}  -> ${t.outcome ?? 'not in the referee flow yet'}${t.sweep ? ` (sweep ${t.sweep})` : ''}`);
-  }
-  if (checkOnly) return;
-  if (go || make) { await probeDue(state, identity, price.n); fs.writeFileSync(STATE, JSON.stringify(state, null, 2)); }
-
-  const settled = state.trades.filter((t) => t.outcome?.startsWith('settled')).length;
-  if (settled >= MAX_TRADES) { console.log(`${settled} trades settled; that is enough.`); return; }
-  if (state.trades.length >= MAX_ATTEMPTS) { console.log(`${state.trades.length} attempts made; stopping there.`); return; }
-  const pending = state.trades.find((t) => !t.outcome);
-  if (pending && (go || make)) { console.log(`waiting on ${pending.id} before another`); return; }
-  console.log(`reference ${price.ref.px} for sweep ${nextSweep}`);
-
-  if (make) return makeOffer({ identity, state, price, nextSweep });
-
-  /**
-   * A maker whose trade with us voided on `funds` has spent its account, and
-   * says nothing about us: the fold checks `not_owner` first, so reaching
-   * `funds` proves both keys are minted owners. Our first take (2026-09-26,
-   * 0.10 contract, ~22 POLF against our 10,000) voided exactly that way.
-   */
-  const broke = new Set(state.trades.filter((t) => t.outcome === 'void: funds').map((t) => t.maker));
-  const judge = (m) => {
-    const j = judgeOffer(m, { ours, ref, nextSweep });
-    return j.ok && broke.has(j.terms.maker) ? { ok: false, why: 'maker ran out of funds before' } : j;
-  };
-  const pick = await firstFreshOffer(judge, 120_000);
-  if (!pick) { console.log('no fresh takeable offer in two minutes'); return; }
-  const ourSide = pick.terms.side === 'buy' ? 'sell' : 'buy';
-  console.log(`would take ${pick.terms.id}: we ${ourSide} ${pick.terms.qty} @ ${pick.terms.px} from …${pick.terms.maker.slice(-8)}`);
-  if (!go) { console.log('dry run; nothing signed or posted'); return; }
-
-  const takerSig = signMessageBase64Url(takerPayload(pick.terms, identity.did), identity.privateKeyPem);
-  const text = tradeText(pick.terms, pick.makerSig, identity.did, takerSig);
-  const client = new TechnocoreClient({ evidenceDir: path.resolve('data/local/evidence') });
-  const res = await client.postSignedMessage(ROOM, text, identity);
-  const line = String(res.raw).split('\n').find((l) => l.includes(pick.terms.id));
-  state.trades.push({
-    id: pick.terms.id, maker: pick.terms.maker, ourSide, qty: pick.terms.qty, px: pick.terms.px,
-    until: pick.terms.until, postedAt: new Date().toISOString(),
-    seq: Number(line?.match(/^\[(\d+)\]/)?.[1]) || null, text
-  });
-  fs.writeFileSync(STATE, JSON.stringify(state, null, 2));
-  console.log(`posted; the referee settles it at sweep ${nextSweep} or voids it with a reason`);
-}
-
-/**
- * Be the maker instead: post our own open offer at the reference and let
- * whoever wants it countersign. Taking an open offer is a race — our second
- * try (2026-09-26) voided as `settled`, somebody faster had countersigned — and
- * a maker races nobody. The terms are ours end to end, so is every byte signed.
- */
-export function makerTerms({ did, px, side, until, id }) {
-  return checkedTerms({ id, maker: did, px: Number(px).toFixed(2), qty: '0.50', side, taker: 'any', until });
-}
-
-async function makeOffer({ identity, state, price, nextSweep }) {
-  const net = state.trades.filter((t) => t.outcome === 'settled')
-    .reduce((n, t) => n + (t.ourSide === 'buy' ? 1 : -1) * Number(t.qty), 0);
-  const side = net > 0 ? 'sell' : 'buy';          // lean back toward flat
-  const id = `mfk-${crypto.randomBytes(5).toString('hex')}`;
-  /**
-   * A shade better than the reference for whoever takes it, open for half an
-   * hour. At the bare reference for three sweeps (2026-09-26) nobody took it;
-   * 0.2 % on half a contract is under half a POLF, and the clawback means a
-   * taker who is paid it back at the close gains nothing unfair from it.
-   */
-  const px = Number(price.ref.px) * (side === 'buy' ? 1.002 : 0.998);
-  const terms = makerTerms({ did: identity.did, px, side, until: nextSweep + 6, id });
-  if (!terms) throw new Error('our own terms failed the shape check');
-  const makerSig = signMessageBase64Url(makerPayload(terms), identity.privateKeyPem);
-  const text = JSON.stringify({ t: 'offer', season: SEASON, terms, maker_sig: makerSig });
-  if (!process.argv.includes('--go')) { console.log(`would post: ${text}`); console.log('dry run; add --go to post'); return; }
-  const client = new TechnocoreClient({ evidenceDir: path.resolve('data/local/evidence') });
-  const res = await client.postSignedMessage(ROOM, text, identity);
-  const line = String(res.raw).split('\n').find((l) => l.includes(id));
-  state.trades.push({
-    role: 'maker', id, maker: identity.did, ourSide: side, qty: terms.qty, px: terms.px, until: terms.until,
-    postedAt: new Date().toISOString(), seq: Number(line?.match(/^\[(\d+)\]/)?.[1]) || null
-  });
-  fs.writeFileSync(STATE, JSON.stringify(state, null, 2));
-  console.log(`offered: we ${side} ${terms.qty} @ ${terms.px}, open to anyone through sweep ${terms.until}`);
-
-  /**
-   * Watch who takes it, and check their countersignature ourselves.
-   *
-   * Our first taken offer (2026-09-26, mfk-e233c29e72) was countersigned in
-   * 1.3 s by a key that signs `close-1|accept|<terms>|<maker_sig>` instead of
-   * the rules' `…|<taker did:key>` — 3 of its 3 trades that minute, against
-   * 364 of 402 trades that followed the rules. The referee drops what does not
-   * verify without listing it, so only our own check can tell the two apart.
-   */
-  const takers = [];
-  let last = res.raw ? Number(line?.match(/^\[(\d+)\]/)?.[1]) || null : null;
-  const end = Date.now() + 10 * 60_000;
-  while (Date.now() < end) {
-    try {
-      const q = last === null ? '?limit=200&format=json' : `?since=${last}&limit=200&format=json`;
-      const batch = (await json(`${BASE}/r/${ROOM}${q}`)).messages || [];
-      if (batch.length) last = batch.at(-1).seq;
-      for (const m of batch) {
-        let o; try { o = JSON.parse(m.text); } catch { continue; }
-        if (o?.t !== 'trade' || o.terms?.id !== id || typeof o.taker !== 'string') continue;
-        let valid = false;
-        try { valid = verifyMessage(takerPayload(terms, o.taker), o.taker_sig, o.taker) && m.from === o.taker; } catch { valid = false; }
-        takers.push({ did: o.taker, seq: m.seq, ts: m.ts, valid, text: m.text });
-        console.log(`taken by …${o.taker.slice(-8)} at seq ${m.seq}: countersignature ${valid ? 'valid' : 'INVALID'}`);
-      }
-      if (takers.some((k) => k.valid)) break;
-    } catch { /* one missed read */ }
-    await new Promise((r) => setTimeout(r, 1200));
-  }
-  state.trades.at(-1).takers = takers;
-  fs.writeFileSync(STATE, JSON.stringify(state, null, 2));
-  if (!takers.length) console.log('nobody took it in ten minutes');
+  console.log(`gate: ${s.gate?.kind ?? '?'}${s.gate?.ok ? '' : ` — ${(s.gate?.reasons || []).join(', ')}`}`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
-  main().catch((err) => { console.error(err.message); process.exitCode = 1; });
+  run().catch((err) => { console.error(err.message); process.exitCode = 1; });
 }

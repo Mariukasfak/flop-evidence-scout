@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { generateIdentity, signMessageBase64Url, verifyMessage } from '../src/identity.mjs';
-import { checkedTerms, judgeOffer, makerPayload, takerPayload, tradeText, makerTerms, MAX_QTY } from '../tools/close1-take.mjs';
+import { checkedTerms, judgeOffer, makerPayload, takerPayload, tradeText, makerTerms, MAX_TAKE_QTY } from '../tools/close1-take.mjs';
 
 test('our own offer passes the same checks we hold strangers to, and a stranger could take it', () => {
   const t = makerTerms({ did: me.did, px: '224.4', side: 'buy', until: 252, id: 'mfk-0a1b2c3d4e' });
@@ -41,7 +41,7 @@ test('refused: our own key, a named taker, an extra field, a far price, too larg
   assert.equal(judgeOffer(offer({ taker: me.did }), ctx).why, 'named taker');
   assert.equal(judgeOffer(offer({ note: 'hi' }), ctx).why, 'shape');
   assert.equal(judgeOffer(offer({ px: '240.00' }), ctx).why, 'too far from the reference');
-  assert.equal(judgeOffer(offer({ qty: String(MAX_QTY + 1) }), ctx).why, 'too large');
+  assert.equal(judgeOffer(offer({ qty: String(MAX_TAKE_QTY + 1) }), ctx).why, 'too large');
   assert.equal(judgeOffer(offer({ until: 249 }), ctx).why, 'expires before the next sweep');
   const other = generateIdentity();
   assert.match(judgeOffer(offer({}, { signer: other }), ctx).why, /signature/);
