@@ -158,7 +158,9 @@ export function resolveTrade(t, { flows, latest, ourDid, cfg = null }) {
     // Some copy of this id settled, ours or the one that beat it; a probe would only repeat that.
     return { ...base, status: STATUS.VOID, evidence: EVIDENCE.OFFICIAL, basis: 'FLOW_VOID', voidReason: 'settled', sweep: official.n };
   }
-  if (probes.length < MAX_PROBES && probeReady) {
+  // A take from before we kept its signed text cannot be rebuilt, so it cannot be probed.
+  const probeable = t.role === 'maker' || typeof t.text === 'string';
+  if (probeable && probes.length < MAX_PROBES && probeReady) {
     return { ...base, status: STATUS.PROBE_DUE, evidence: official ? EVIDENCE.OFFICIAL : EVIDENCE.UNKNOWN,
       basis: official ? 'FLOW_VOID' : 'UNLISTED', voidReason: official?.reason ?? null, sweep: official?.n ?? null, probesLost: lost };
   }

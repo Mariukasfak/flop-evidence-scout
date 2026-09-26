@@ -232,6 +232,7 @@ export async function run(argv = process.argv.slice(2)) {
     } catch (err) { writeErrors += 1; console.log(`${t.id}: probe failed (${err.message})`); }
     writeJson(STATE, state);
   }
+  if (writeErrors) await deliverAlerts([{ kind: 'write_failure', text: `close-1: ${writeErrors} probe write(s) failed` }], { logFile: path.join(DIR, 'alerts.jsonl') });
   if (!gate.ok) { console.log(`no trade: ${gate.reasons.join(', ')}`); return snapshot; }
   console.log(`proposal: ${proposal.rationale}`);
   try {

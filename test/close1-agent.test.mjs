@@ -245,6 +245,9 @@ test('a take of an open offer is never attributed from an id-level listing; an e
   assert.deepEqual([lost.status, lost.voidReason, lost.attributed], [STATUS.VOID, 'settled', false]);
   const expired = resolveTrade({ ...t, probes: [{ sweep: 25 }] }, { flows: flowsOf(flow(26, { voids: [['open1', 'expired']] }), flow(30)), latest: 30, ourDid: OUR });
   assert.deepEqual([expired.status, expired.attributed], [STATUS.NOT_SETTLED, true]);
+  const { text: _gone, ...old } = t;   // a take from before we stored its text
+  const noText = resolveTrade(old, { flows: flowsOf(flow(10, { voids: [['open1', 'funds']] }), flow(30)), latest: 30, ourDid: OUR });
+  assert.deepEqual([noText.status, noText.voidReason, noText.attributed], [STATUS.VOID, 'funds', false]);
   const named = resolveTrade(takeOf('named1', 10, { taker: OUR }), { flows: flowsOf(flow(10, { settled: ['named1'] }), flow(30)), latest: 30, ourDid: OUR });
   assert.equal(named.attributed, true);
 });
