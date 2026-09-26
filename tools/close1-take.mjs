@@ -176,7 +176,11 @@ async function resolve(state, currentSweep = null) {
       if (v) { t.outcome = `void: ${v[1]}`; t.sweep = f.n; break; }
     }
     // An offer of ours nobody took never reaches the flow at all.
-    if (!t.outcome && t.role === 'maker' && currentSweep !== null && currentSweep > t.until) t.outcome = 'untaken';
+    if (!t.outcome && t.role === 'maker' && currentSweep !== null && currentSweep > t.until + 1) {
+      const good = (t.takers || []).filter((k) => k.valid);
+      t.outcome = good.length ? 'unlisted'
+        : (t.takers || []).length ? 'taken only with a bad signature' : 'untaken';
+    }
     /**
      * A take that is in neither list once its window is over. The flow post
      * names only some settlements — measured 2026-09-26 it omitted 711-896 of
@@ -283,6 +287,39 @@ async function makeOffer({ identity, state, price, nextSweep }) {
   });
   fs.writeFileSync(STATE, JSON.stringify(state, null, 2));
   console.log(`offered: we ${side} ${terms.qty} @ ${terms.px}, open to anyone through sweep ${terms.until}`);
+
+  /**
+   * Watch who takes it, and check their countersignature ourselves.
+   *
+   * Our first taken offer (2026-09-26, mfk-e233c29e72) was countersigned in
+   * 1.3 s by a key that signs `close-1|accept|<terms>|<maker_sig>` instead of
+   * the rules' `…|<taker did:key>` — 3 of its 3 trades that minute, against
+   * 364 of 402 trades that followed the rules. The referee drops what does not
+   * verify without listing it, so only our own check can tell the two apart.
+   */
+  const takers = [];
+  let last = res.raw ? Number(line?.match(/^\[(\d+)\]/)?.[1]) || null : null;
+  const end = Date.now() + 10 * 60_000;
+  while (Date.now() < end) {
+    try {
+      const q = last === null ? '?limit=200&format=json' : `?since=${last}&limit=200&format=json`;
+      const batch = (await json(`${BASE}/r/${ROOM}${q}`)).messages || [];
+      if (batch.length) last = batch.at(-1).seq;
+      for (const m of batch) {
+        let o; try { o = JSON.parse(m.text); } catch { continue; }
+        if (o?.t !== 'trade' || o.terms?.id !== id || typeof o.taker !== 'string') continue;
+        let valid = false;
+        try { valid = verifyMessage(takerPayload(terms, o.taker), o.taker_sig, o.taker) && m.from === o.taker; } catch { valid = false; }
+        takers.push({ did: o.taker, seq: m.seq, ts: m.ts, valid });
+        console.log(`taken by …${o.taker.slice(-8)} at seq ${m.seq}: countersignature ${valid ? 'valid' : 'INVALID'}`);
+      }
+      if (takers.some((k) => k.valid)) break;
+    } catch { /* one missed read */ }
+    await new Promise((r) => setTimeout(r, 1200));
+  }
+  state.trades.at(-1).takers = takers;
+  fs.writeFileSync(STATE, JSON.stringify(state, null, 2));
+  if (!takers.length) console.log('nobody took it in ten minutes');
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
