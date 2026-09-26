@@ -102,21 +102,43 @@ async function refereeLatest(room, limit = 3) {
   return (j.messages || []).filter((m) => m.from === REFEREE).map((m) => JSON.parse(m.text));
 }
 
-/** Follow `close1` for a while; its newest 200 records are only a few seconds of it. */
-async function follow(ms) {
-  const seen = new Map();
+/**
+ * The first takeable offer seen while it is still fresh, and not yet taken.
+ *
+ * Our first race (2026-09-26) picked from a 20-second window and voided as
+ * `settled`: someone countersigned first. An open offer here is taken within
+ * seconds, so this follows the room and acts on an offer at most FRESH_MS older
+ * than the newest record of the same read, skipping any id already seen in a
+ * trade.
+ */
+const FRESH_MS = 3_000;
+async function firstFreshOffer(judge, ms) {
   let last = null;
+  const taken = new Set();
+  const refused = {};
   const end = Date.now() + ms;
   while (Date.now() < end) {
+    let batch = [];
     try {
       const q = last === null ? '?limit=200&format=json' : `?since=${last}&limit=200&format=json`;
-      const j = await json(`${BASE}/r/${ROOM}${q}`);
-      for (const m of j.messages || []) seen.set(m.seq, m);
-      if (j.messages?.length) last = j.messages.at(-1).seq;
-    } catch { /* one missed read is a few seconds of offers, not a failure */ }
-    await new Promise((r) => setTimeout(r, 1500));
+      batch = (await json(`${BASE}/r/${ROOM}${q}`)).messages || [];
+      if (batch.length) last = batch.at(-1).seq;
+    } catch { /* a missed read is a second of offers */ }
+    for (const m of batch) {
+      try { const o = JSON.parse(m.text); if (o?.t === 'trade' && o.terms?.id) taken.add(o.terms.id); } catch { /* chatter */ }
+    }
+    const newest = Math.max(...batch.map((m) => Date.parse(m.ts)).filter(Number.isFinite), 0);
+    for (const m of [...batch].reverse()) {
+      if (newest - Date.parse(m.ts) > FRESH_MS) break;
+      const j = judge(m);
+      if (!j.ok) { if (j.why !== 'not an offer' && j.why !== 'not json') refused[j.why] = (refused[j.why] || 0) + 1; continue; }
+      if (taken.has(j.terms.id)) continue;
+      return j;
+    }
+    await new Promise((r) => setTimeout(r, 700));
   }
-  return [...seen.values()].sort((a, b) => b.seq - a.seq);   // newest first
+  console.log(`refused: ${JSON.stringify(refused)}`);
+  return null;
 }
 
 function loadState() {
@@ -136,6 +158,13 @@ async function resolve(state, currentSweep = null) {
     }
     // An offer of ours nobody took never reaches the flow at all.
     if (!t.outcome && t.role === 'maker' && currentSweep !== null && currentSweep > t.until) t.outcome = 'untaken';
+    /**
+     * A take that is in neither list once its window is over. The flow post
+     * names only some settlements — measured 2026-09-26 it omitted 711-896 of
+     * them a sweep while voids were nearly all listed — so this is most likely
+     * settled, but it is not proof, and is not counted as one.
+     */
+    if (!t.outcome && t.role !== 'maker' && currentSweep !== null && currentSweep > t.until + 1) t.outcome = 'unlisted';
   }
   return state;
 }
@@ -168,7 +197,6 @@ async function main() {
 
   if (make) return makeOffer({ identity, state, price, nextSweep });
 
-  const msgs = await follow(20_000);
   /**
    * A maker whose trade with us voided on `funds` has spent its account, and
    * says nothing about us: the fold checks `not_owner` first, so reaching
@@ -176,19 +204,12 @@ async function main() {
    * 0.10 contract, ~22 POLF against our 10,000) voided exactly that way.
    */
   const broke = new Set(state.trades.filter((t) => t.outcome === 'void: funds').map((t) => t.maker));
-  const judged = msgs.map((m) => {
+  const judge = (m) => {
     const j = judgeOffer(m, { ours, ref, nextSweep });
     return j.ok && broke.has(j.terms.maker) ? { ok: false, why: 'maker ran out of funds before' } : j;
-  });
-  const offers = judged.filter((j) => j.ok);
-  const reasons = {};
-  for (const j of judged) if (!j.ok && j.why !== 'not an offer' && j.why !== 'not json') reasons[j.why] = (reasons[j.why] || 0) + 1;
-  console.log(`${msgs.length} records, ${offers.length} takeable offers; refused: ${JSON.stringify(reasons)}`);
-  if (!offers.length) return;
-
-  // Smallest first, then the newest: least at stake, and least likely already taken.
-  offers.sort((a, b) => Number(a.terms.qty) - Number(b.terms.qty) || b.seq - a.seq);
-  const pick = offers[0];
+  };
+  const pick = await firstFreshOffer(judge, 120_000);
+  if (!pick) { console.log('no fresh takeable offer in two minutes'); return; }
   const ourSide = pick.terms.side === 'buy' ? 'sell' : 'buy';
   console.log(`would take ${pick.terms.id}: we ${ourSide} ${pick.terms.qty} @ ${pick.terms.px} from …${pick.terms.maker.slice(-8)}`);
   if (!go) { console.log('dry run; nothing signed or posted'); return; }
