@@ -1,0 +1,41 @@
+name: Contribution Proof Conformance
+
+on:
+  pull_request:
+    paths:
+      - "docs/contributions.json"
+      - ".github/workflows/contribution-proof-conformance.yml"
+  push:
+    branches: [main]
+    paths:
+      - "docs/contributions.json"
+      - ".github/workflows/contribution-proof-conformance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-contributions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Wrap published proofs without modifying them
+        shell: bash
+        run: |
+          mkdir -p .flop
+          node -e 'const fs=require("fs"); const proofs=JSON.parse(fs.readFileSync("docs/contributions.json","utf8")); fs.writeFileSync(".flop/contribution-profile.json",JSON.stringify({implementation:"Mariukasfak/flop-evidence-scout",revision:process.env.GITHUB_SHA,proofs},null,2)+"\n")'
+      - name: Verify published contribution proofs independently
+        id: flop
+        uses: retardio73-boop/flop-conformance-lab@167a5e1f4e33a6fb03e6947e6fa821bbd7c54311
+        with:
+          profile: technocore-contribution-proof
+          input: .flop/contribution-profile.json
+          out: .flop/contribution-conformance-report.json
+          artifact-name: technocore-contribution-conformance
+      - name: Require portable PASS
+        shell: bash
+        run: test "${{ steps.flop.outputs.result }}" = "PASS"
