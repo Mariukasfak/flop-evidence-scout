@@ -162,7 +162,17 @@ async function main() {
   console.log(`reference ${price.ref.px} for sweep ${nextSweep}`);
 
   const msgs = await follow(20_000);
-  const judged = msgs.map((m) => judgeOffer(m, { ours, ref, nextSweep }));
+  /**
+   * A maker whose trade with us voided on `funds` has spent its account, and
+   * says nothing about us: the fold checks `not_owner` first, so reaching
+   * `funds` proves both keys are minted owners. Our first take (2026-09-26,
+   * 0.10 contract, ~22 POLF against our 10,000) voided exactly that way.
+   */
+  const broke = new Set(state.trades.filter((t) => t.outcome === 'void: funds').map((t) => t.maker));
+  const judged = msgs.map((m) => {
+    const j = judgeOffer(m, { ours, ref, nextSweep });
+    return j.ok && broke.has(j.terms.maker) ? { ok: false, why: 'maker ran out of funds before' } : j;
+  });
   const offers = judged.filter((j) => j.ok);
   const reasons = {};
   for (const j of judged) if (!j.ok && j.why !== 'not an offer' && j.why !== 'not json') reasons[j.why] = (reasons[j.why] || 0) + 1;
