@@ -77,7 +77,7 @@ describe('tclk payee lane: accepting', () => {
 
     assert.equal(result.action, 'offer_accepted');
     assert.equal(result.payer, payer.did);
-    assert.equal(venue.posts.length, 1);
+    assert.equal(venue.posts.length, 2, 'accept plus the payee heartbeat');
     assert.equal(venue.posts[0].room, OFFER_ROOM);
     assert.equal(venue.posts[0].did, me.did, 'signed by Scout');
 
@@ -87,6 +87,11 @@ describe('tclk payee lane: accepting', () => {
     const expected = contractId(offer, { from: me.did, ref: offer.id, statement: accept.statement, paymentKey: undefined, nonce: accept.nonce });
     assert.equal(accept.contract, expected, 'both sides must derive the same contract');
     assert.equal(result.room, dealRoom(expected));
+    const heartbeat = decodeFrame(venue.posts[1].text);
+    assert.equal(venue.posts[1].room, result.room);
+    assert.ok(heartbeat, `heartbeat did not decode: ${venue.posts[1].text}`);
+    assert.equal(heartbeat.type, 'heartbeat');
+    assert.equal(heartbeat.contract, expected);
 
     const state = engine.load();
     assert.equal(state.deal.status, 'accepted');
@@ -94,6 +99,26 @@ describe('tclk payee lane: accepting', () => {
     assert.equal(venue.posts[0].text.includes(state.deal.secret), false, 'the secret never goes on the tape at accept');
     assert.equal(publicDealView(state).contract, expected);
     assert.equal('secret' in publicDealView(state), false);
+  });
+
+  test('preflights deliverability before signing and skips an unanswerable newer offer', async () => {
+    const venue = makeVenue(); const me = generateIdentity();
+    const good = generateIdentity(); const bad = generateIdentity(); const seen = [];
+    const goodOffer = payerOffer(good, { job: { proto: 'a2a', id: 'good-task', context: 'Explain the exact protocol rule from the supplied fixture.' } });
+    const badOffer = payerOffer(bad, { job: { proto: 'a2a', id: 'bad-task', context: 'Produce an unavailable external artifact.' }, nonce: 'bb11bb22cc33dd44' });
+    venue.say(OFFER_ROOM, good.did, encodeFrame(goodOffer));
+    venue.say(OFFER_ROOM, bad.did, encodeFrame(badOffer));
+    venue.preflightUsefulWork = async ({ job, context }) => {
+      seen.push({ id: job.id, context });
+      return { allow: job.id === 'good-task', reason: job.id === 'good-task' ? 'ready' : 'unsupported' };
+    };
+
+    const result = await engineFor(venue, me).runTurn();
+
+    assert.equal(result.action, 'offer_accepted');
+    assert.equal(result.payer, good.did);
+    assert.deepEqual(seen.map((x) => x.id), ['bad-task', 'good-task']);
+    assert.equal(venue.posts.filter((p) => decodeFrame(p.text)?.type === 'accept').length, 1);
   });
 
   test('refuses a payer the room has already watched walk away, before we ever meet them', async () => {
@@ -327,7 +352,8 @@ describe('tclk payee lane: lock, verify, reveal', () => {
     assert.ok(reveal, 'the reveal is on the board, not in a room that cannot be opened');
     assert.equal(opensStatement(reveal.secret, deal.statement), true);
     assert.equal(ours.map(decodeFrame).find((f) => f?.type === 'receipt')?.outcome, 'claimed');
-    assert.equal((venue.rooms.get(deal.room) || []).length, 0, 'and nothing was written into the deal room at all');
+    const dealRoomFrames = (venue.rooms.get(deal.room) || []).map((m) => decodeFrame(m.text)).filter(Boolean);
+    assert.deepEqual(dealRoomFrames.map((f) => f.type), ['heartbeat'], 'the coordination heartbeat is the only deal-room frame');
     assert.equal(engine.load().completed.length, 1);
   });
 
@@ -372,21 +398,18 @@ describe('tclk payee lane: lock, verify, reveal', () => {
   });
 
   /**
-   * A deal room nobody has written into does not exist, and writing `cancel`
-   * into it opens one for the sole purpose of saying nothing happened. That is
-   * what our new-room budget was actually being spent on: measured 2026-09-03,
-   * every deal room this lane has named since 2026-09-02 12:39Z reads back
-   * empty, because the server refused every one of those writes.
-   *
-   * With no lock and no room there is nothing to withdraw. The offer's own
-   * claimByMs says the same thing at no cost, and our acceptance is already on
-   * the tape in tclk-offers, where the payer is looking.
+   * The accept-time heartbeat now deliberately materializes the deal room when
+   * the venue permits it. Once that happened, a later cancel belongs there too;
+   * if heartbeat creation was refused in production, `roomSeen` remains false
+   * and the cancel is still suppressed rather than opening a room by itself.
    */
-  test('a cancel is not worth opening a room for', async () => {
+  test('a heartbeat-materialized room receives the later cancel', async () => {
     const { venue, engine, deal, tick } = await acceptedDeal();
     tick(HOUR);
-    await engine.runTurn();
-    assert.equal((venue.rooms.get(deal.room) || []).length, 0, 'nothing was written into a room nobody used');
+    const result = await engine.runTurn();
+    assert.equal(result.announced, true);
+    const frames = (venue.rooms.get(deal.room) || []).map((m) => decodeFrame(m.text)).filter(Boolean);
+    assert.deepEqual(frames.map((f) => f.type), ['heartbeat', 'cancel']);
   });
 
   test('but a room the payer has already written into does get the cancel', async () => {
@@ -737,11 +760,11 @@ describe('tclk payee lane: a payer who does not lock loses the slot', () => {
     assert.equal(done.action, 'deal_cancelled');
     assert.match(done.reason, /did not lock within/);
     assert.ok(deal.offer.claimByMs - T0 > 30 * 60_000, 'and claimBy was still far away');
-    // Not announced, and deliberately: see 'a cancel is not worth opening a
-    // room for'. Nobody has written into this room, so it does not exist, and
-    // the payer learns the same thing from claimByMs passing.
-    assert.equal(done.announced, false);
-    assert.equal((venue.rooms.get(deal.room) || []).length, 0);
+    // The accept-time heartbeat materialized the derived room, so the later
+    // cancel is announced there rather than creating a room solely for cancel.
+    assert.equal(done.announced, true);
+    const frames = (venue.rooms.get(deal.room) || []).map((m) => decodeFrame(m.text)).filter(Boolean);
+    assert.deepEqual(frames.map((f) => f.type), ['heartbeat', 'cancel']);
     assert.equal(engine.load().deal, null, 'the lane is free for a live offer');
   });
 

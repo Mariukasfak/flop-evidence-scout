@@ -206,24 +206,15 @@ export class TclkEngine {
   }
 
   /**
-   * Why the payee needs no room budget of its own to accept.
+   * Room-creation pressure is not an acceptance gate.
    *
-   * A deal lives in `mb-p-tclk-<contract>`, and that room does not exist until
-   * one of the two parties writes into it. Measured 2026-09-03: every write of
-   * ours into a deal room since 2026-09-02 12:39Z was refused with the server's
-   * `room limit reached` message, and every deal room we have named since then
-   * reads back empty -- eight of them, probed one by one.
-   *
-   * But the party that opens that room is the *payer*, with the lock. The payee
-   * writes nothing into it until there is a lock to answer, so our reveal and
-   * receipt land in a room the counterparty already paid for; and the one write
-   * that would have opened a room of our own -- the `cancel` for a payer who
-   * never locked -- is already gated on `deal.roomSeen`.
-   *
-   * So a refusal against our own room budget is no reason to stop accepting.
-   * The gate that used to stand here stood down this lane for the whole of
-   * 2026-09-03 over rooms it was never going to ask for. The budget is still
-   * recorded on refusal (see `#noteRefusal`) because the payer lane reads it.
+   * After accepting we make one best-effort heartbeat write to the derived
+   * `mb-p-tclk-<contract>` room. If the venue lets that write land, the room is
+   * materialized and later cancel/reveal/receipt traffic can use it. If room
+   * creation is refused, the acceptance is still valid: payers in the measured
+   * deployment also post locks on `tclk-offers`, and this lane explicitly scans
+   * that fallback. A coordination heartbeat must therefore never turn room
+   * budget into a reason to reject otherwise valid work.
    */
 
   #noteRefusal(err) {
@@ -442,7 +433,37 @@ export class TclkEngine {
       const job = Number(Boolean(b.frame.job)) - Number(Boolean(a.frame.job));
       return job !== 0 ? job : (b.seq ?? 0) - (a.seq ?? 0);
     });
-    const offer = candidates[0].frame;
+    let selected = candidates[0];
+    if (typeof this.client.preflightUsefulWork === 'function') {
+      selected = null;
+      for (const candidate of candidates) {
+        const { text: context, source } = await this.#jobText(candidate.frame.job);
+        let verdict;
+        try {
+          verdict = await this.client.preflightUsefulWork({
+            offer: candidate.frame, job: candidate.frame.job, context, source
+          });
+        } catch (err) {
+          verdict = { allow: false, reason: `preflight_error:${err.message}` };
+        }
+        if (!verdict?.allow) continue;
+
+        const checkedAt = this.now();
+        if (!validateDeadlines(candidate.frame, checkedAt).ok
+          || (candidate.frame.claimByMs - checkedAt) < this.minClaimWindowMs) continue;
+        if (typeof this.client.offerStillOpen === 'function') {
+          let open = false;
+          try { open = await this.client.offerStillOpen(candidate.frame); } catch { open = false; }
+          if (!open) continue;
+        }
+        selected = candidate;
+        break;
+      }
+      if (!selected) {
+        return { action: 'no_preflightable_offer', offers: candidates.length };
+      }
+    }
+    const offer = selected.frame;
 
     const { secret, statement } = generateHashLock();
     const accept = acceptFrameFor(offer, { from: this.identity.did, statement });
@@ -463,7 +484,7 @@ export class TclkEngine {
       statement,
       contract: accept.contract,
       room: dealRoom(accept.contract),
-      acceptedAt: now,
+      acceptedAt: this.now(),
       railRecord: null
     };
     this.save();

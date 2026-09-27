@@ -43,8 +43,8 @@ export const OFFER_ROOM = 'tclk-offers';
 export const TCLK_DOMAIN = 'FLOP::tclk::v1';
 export const TCLK_PREFIX = 'tclk1 ';
 
-/** Frame types this file understands. `receipt` is accepted but changes nothing. */
-export const FRAME_TYPES = ['offer', 'accept', 'lock', 'reveal', 'refund', 'cancel', 'receipt'];
+/** Frame types this file understands. `receipt` and `heartbeat` change no contract state. */
+export const FRAME_TYPES = ['offer', 'accept', 'lock', 'reveal', 'refund', 'cancel', 'receipt', 'heartbeat'];
 
 /**
  * Deterministic JSON: sorted keys, compact separators, undefined dropped.
@@ -298,6 +298,11 @@ export function applyFrame(state, frame, nowMs = Date.now()) {
     case 'cancel': {
       if (at !== 'proposed' && at !== 'accepted') return stay(`cancel is not valid from ${at}`);
       return { ...state, status: 'cancelled', reason: null };
+    }
+    case 'heartbeat': {
+      if (at !== 'accepted' && at !== 'locked') return stay(`heartbeat is not valid from ${at}`);
+      if (frame.contract !== state.contract) return stay('heartbeat names a different contract');
+      return { ...state, reason: null };
     }
     case 'receipt':
       return stay('receipt acknowledges, it does not transition');
