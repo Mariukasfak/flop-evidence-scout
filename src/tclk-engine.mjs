@@ -30,6 +30,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomBytes } from 'node:crypto';
 
 import {
   OFFER_ROOM, decodeFrame, encodeFrame, offerIdMatches, validateDeadlines,
@@ -431,6 +432,8 @@ export class TclkEngine {
       return Boolean(at && (now - at) <= LOCK_RECENCY_MS);
     };
     candidates.sort((a, b) => {
+      const economic = Number(this.client.offerPriority?.(b.frame) ?? 0) - Number(this.client.offerPriority?.(a.frame) ?? 0);
+      if (economic !== 0) return economic;
       const recent = Number(locksRecently(b.frame.from)) - Number(locksRecently(a.frame.from));
       if (recent !== 0) return recent;
       const trust = Number(isTrusted(this.payerRep, b.frame.from))
@@ -464,6 +467,22 @@ export class TclkEngine {
       railRecord: null
     };
     this.save();
+
+    // BlockRewards/TCLK jobs use a payee heartbeat to materialize the derived
+    // deal room before the payer lock. It is a coordination record, not work
+    // evidence and not settlement evidence.
+    try {
+      const heartbeat = encodeFrame({
+        type: 'heartbeat', from: this.identity.did, contract: accept.contract,
+        nonce: randomBytes(8).toString('hex')
+      });
+      await this.client.postMessage(this.state.deal.room, heartbeat, this.identity);
+      this.state.deal.roomSeen = true;
+      this.state.deal.heartbeatPostedAt = this.now();
+      this.save();
+    } catch (err) {
+      sayOnce('tclk:heartbeat', `[tclk] deal heartbeat failed: ${err.message}`);
+    }
 
     // The coordination pointer is a courtesy, not a record. Never let it fail the turn.
     try {
@@ -648,6 +667,10 @@ export class TclkEngine {
     // 133 get a line that says so, because a reveal with no work behind it is
     // exactly what the spec warns the payer about, and we will not dress it up.
     const work = await this.#work(deal, { backend, real, ledgerPath });
+    if (process.env.USEFUL_WORK_FAIL_CLOSED === '1' && /rehearsal on the paper rail|could not be answered|not offered as proof of any delivery/i.test(String(work || ''))) {
+      this.#close(deal, 'abandoned', 'work generation failed validation');
+      return { action: 'work_unavailable', contract: deal.contract, reason: 'no_valid_delivery' };
+    }
     // Where the lock was found, which is the deal room when the venue could
     // open one and `tclk-offers` when it could not. Older deals in flight
     // across this change carry no `lockRoom`, and for them the deal room is
@@ -853,6 +876,18 @@ export class TclkEngine {
   async #work(deal, { backend, real, ledgerPath }) {
     const job = deal.offer.job;
     const { text: context, source } = await this.#jobText(job);
+    if (real && typeof this.client.executeUsefulWork === 'function' && context.length >= 20) {
+      try {
+        const specialized = await this.client.executeUsefulWork({ deal, job, context, source });
+        const answer = String(specialized?.text ?? specialized ?? '').trim();
+        if (answer.length >= 16) return `tclk-work | ${deal.contract} | job ${job.proto}:${job.id} (${source}) | ${answer}`;
+      } catch (err) {
+        sayOnce('tclk:specialized-work', `[tclk] specialized work failed: ${err.message}`);
+        if (String(err?.message || err).startsWith('UNSUPPORTED_DELIVERABLE:')) {
+          return `tclk-work | ${deal.contract} | job ${job.proto}:${job.id} task (${source}) could not be answered. This reveal is not offered as proof of any delivery.`;
+        }
+      }
+    }
     if (real && backend && context.length >= 40) {
       try {
         const task = buildTask('kibble-answer', { category: 'explain', title: String(job.id || 'tclk job'), body: context, facts: this.#facts(context) });
