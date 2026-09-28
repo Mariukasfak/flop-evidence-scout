@@ -354,11 +354,12 @@ test('the gate opens only when everything checks out', () => {
   assert.deepEqual(g, { ok: true, reasons: [] });
 });
 
-test('the gate halts: stale reference, unverified contest, changed referee, gap, dead read', () => {
+test('the gate halts: referee silent, unverified contest, changed referee, gap, dead read', () => {
   const s = healthy();
   const reasons = (snap) => approveTrade(snap, proposalFor(), DEFAULT_POLICY, NOW).reasons;
-  assert.ok(reasons({ ...s, price: { ...s.price, postedAt: iso(NOW - 20 * 60_000) } }).includes(REASON.REFERENCE_STALE));
-  assert.ok(reasons({ ...s, price: { ...s.price, ref: { px: '224.00', time: iso(NOW - 3600_000) } } }).includes(REASON.REFERENCE_STALE));
+  assert.ok(reasons({ ...s, price: { ...s.price, postedAt: iso(NOW - 20 * 60_000) } }).includes(REASON.PRICE_POST_STALE));
+  // An old trade behind a FRESH post is rule 11 working, not a halt (close-call #9).
+  assert.deepEqual(reasons({ ...s, price: { ...s.price, ref: { px: '224.00', time: iso(NOW - 3600_000) } } }), []);
   assert.ok(reasons({ ...s, contest: { verified: false } }).includes(REASON.CONTEST_UNVERIFIED));
   assert.ok(reasons({ ...s, observedRefereeDids: [referee.did, stranger.did] }).includes(REASON.REFEREE_DID_CHANGED));
   assert.ok(reasons({ ...s, streams: { ...s.streams, 'd-close1-flow': { lastOkAt: iso(NOW), lastGap: { at: iso(NOW - 60_000) } } } }).includes(REASON.STREAM_GAP));
@@ -420,15 +421,16 @@ test('alerts fire on changes only; a healthy unchanged run sends nothing', () =>
   assert.deepEqual(alertsBetween(null, snap), [], 'first run is a baseline');
   assert.deepEqual(alertsBetween(snap, snap), []);
   assert.deepEqual(alertsBetween(snap, { ...snap, contest_verified: false, contest_error: 'package_hash' }).map((a) => a.kind), ['contest_verification_failed']);
-  assert.deepEqual(alertsBetween(snap, { ...snap, gate: { ok: false, kind: 'halt', reasons: ['reference_stale'] } }).map((a) => a.kind).sort(), ['referee_stale', 'risk_gate_halt']);
+  assert.deepEqual(alertsBetween(snap, { ...snap, gate: { ok: false, kind: 'halt', reasons: ['price_post_stale'] } }).map((a) => a.kind).sort(), ['referee_stale', 'risk_gate_halt']);
   const idSettled = { ...snap, trades: [{ id: 'mfk-a', status: STATUS.ID_SETTLED, evidence: 'INFERRED_PROBE', ownership: 'UNPROVEN', terminal: true }] };
   const a = alertsBetween(snap, idSettled);
   assert.deepEqual(a.map((x) => x.kind), ['trade_resolved']);
   assert.match(a[0].text, /not proven/);
-  assert.deepEqual(alertsBetween(snap, { ...snap, official_rank: 2 }).map((x) => x.kind), ['entered_top3']);
+  assert.deepEqual(alertsBetween(snap, { ...snap, leaderboard_display_row: 2, prize_places: [1, 2, 3], prize_confidence: 'PROVISIONAL' }), [], 'a display row is never announced as a place');
   for (const key of ['contest_verified', 'package_sha256', 'referee_did', 'current_sweep', 'reference_price', 'reference_age_seconds',
     'stream_cursor_by_room', 'stream_gap_by_room', 'owner_state', 'free_polf', 'collateral', 'net_position', 'proven_position', 'average_entry', 'fees',
-    'official_score', 'local_replay_score', 'official_rank', 'pending_trades', 'open_offers', 'settled_count', 'settled_proven_count', 'void_count_by_reason',
+    'official_score', 'local_replay_score', 'leaderboard_display_row', 'tie_score', 'tie_visible_count', 'tie_complete', 'prize_place_status', 'prize_places', 'prize_confidence',
+    'reference_age_at_post_seconds', 'reference_stale_by_market_time', 'price_post_age_seconds', 'archive', 'pending_trades', 'open_offers', 'settled_count', 'settled_proven_count', 'void_count_by_reason',
     'flow_counts', 'evidence_confidence', 'latest_trade', 'balance_provable', 'polf_balance',
     'maker_fill_latency_ms', 'read_errors_5m', 'write_errors_5m', 'last_successful_referee_read']) assert.ok(key in snap, key);
 });
@@ -441,13 +443,15 @@ test('alerts: a second seed record, or a foreign author or bad signature in a re
 });
 
 const PIN = { packageSha256: PINNED.packageSha256 };
+const W10 = 'flop-labs/technocore-close-call-challenge#10';
 const obs = (over = {}) => ({
   treeSha: 't1', files: { 'contest.json': 'a', 'manifest.json': 'b' }, manifestSha256: PINNED.packageSha256, manifestStatus: 'draft', rulesVersion: '0.1-draft',
-  headCommit: { sha: '66c1da3653', title: 'Rules' }, issues: { 10: { title: 'Mint flow stalled', state: 'open', comments: 2 } },
-  watched: { 10: { state: 'open', comments: 2, latest: [] } }, ...over
+  headCommit: { sha: '66c1da3653', title: 'Rules' }, issues: { 10: { title: 'Mint flow stalled', state: 'open', comments: 2, author: 'ktrxktr' } },
+  watched: { [W10]: { repo: 'flop-labs/technocore-close-call-challenge', n: 10, priority: 'HIGH', topic: 'mint flow', state: 'open', comments: 2, lastCommentId: 2 } }, ...over
 });
+const withComment = (c, over = {}) => obs({ watched: { [W10]: { ...obs().watched[W10], comments: 3, lastCommentId: 3, newSince: [{ id: 3, at: 'x', ...c }], ...over } } });
 
-test('upstream: quiet when nothing changed; alerts on rules, draft status, launch record, issue #10', () => {
+test('upstream: quiet when nothing changed; alerts on rules, draft status, launch record', () => {
   assert.deepEqual(upstreamAlerts(null, obs(), PIN), [], 'first look at an unchanged repo');
   assert.deepEqual(upstreamAlerts(obs(), obs(), PIN), []);
   const kinds = (next) => upstreamAlerts(obs(), next, PIN).map((a) => a.kind).sort();
@@ -455,25 +459,47 @@ test('upstream: quiet when nothing changed; alerts on rules, draft status, launc
   assert.deepEqual(kinds(obs({ manifestStatus: 'final' })), ['package_not_draft']);
   assert.deepEqual(kinds(obs({ rulesVersion: '1.0' })), ['rules_version_final']);
   assert.deepEqual(kinds(obs({ treeSha: 't3', files: { ...obs().files, 'launch-record.json.sig': 'f' } })), ['launch_record_published', 'rules_repo_changed']);
-  const reply = obs({ issues: { 10: { title: 'x', state: 'open', comments: 3 } }, watched: { 10: { state: 'open', comments: 3, latest: [{ author: 'ktrxktr', text: '5/5 settled' }] } } });
-  const a = upstreamAlerts(obs(), reply, PIN);
-  assert.deepEqual(a.map((x) => x.kind), ['watched_issue_update']);
-  assert.match(a[0].text, /ktrxktr: 5\/5 settled/);
-  assert.deepEqual(kinds(obs({ issues: { ...obs().issues, 11: { title: 'new', state: 'open', comments: 0 } } })), ['new_issue']);
 });
 
-test('upstream: an unchanged tree reuses the last manifest read; comments are fetched only when the count moves', async () => {
+test('upstream: a maintainer answer or a state change alerts; community comments and issues do not', () => {
+  const kinds = (next) => upstreamAlerts(obs(), next, PIN).map((a) => a.kind);
+  assert.deepEqual(kinds(withComment({ author: 'ktrxktr', association: 'NONE', text: 'five 0.1 links, all expired unread; details below in full' })), [], 'community comment: recorded, not sent');
+  const a = upstreamAlerts(obs(), withComment({ author: 'sv', association: 'NONE', text: 'Confirmed. When the referee fell behind on day 1, the last reference stood, as rule 11 provides.' }), PIN);
+  assert.deepEqual(a.map((x) => x.kind), ['maintainer_reply']);
+  assert.match(a[0].text, /HIGH .*#10 .*sv wrote: Confirmed/);
+  assert.deepEqual(kinds(withComment({ author: 'someone', association: 'MEMBER', text: 'x'.repeat(60) })), ['maintainer_reply'], 'org members count as maintainers');
+  assert.deepEqual(kinds(withComment({ author: 'sv', association: 'MEMBER', text: 'thanks' })), [], 'a one-word reply is not substantive');
+  assert.deepEqual(kinds(obs({ watched: { [W10]: { ...obs().watched[W10], state: 'closed' } } })), ['watched_issue_state']);
+  assert.deepEqual(kinds(obs({ issues: { ...obs().issues, 11: { title: 'new', state: 'open', comments: 0, author: 'stranger' } } })), [], 'a community issue is not news');
+  assert.deepEqual(kinds(obs({ issues: { ...obs().issues, 18: { title: 'lock notice', state: 'open', comments: 0, author: 'sv' } } })), ['new_issue']);
+  const yp = { repo: 'flop-labs/yellowpaper', n: 90, priority: 'HIGH', topic: 'airdrop decision E.38/E.40/E.44', title: 'E.44 credit eligibility', byTitle: true, state: 'open', comments: 0 };
+  assert.deepEqual(kinds(obs({ watched: { ...obs().watched, 'flop-labs/yellowpaper#90': yp } })), ['new_watched_issue']);
+  const gone = { repo: 'flop-labs/flop-core', n: 1796, priority: 'P2', unavailable: true };
+  assert.deepEqual(kinds(obs({ watched: { ...obs().watched, 'flop-labs/flop-core#1796': gone } })), [], 'a private repo is not an alert');
+});
+
+test('upstream: an unchanged tree reuses the last manifest read; comments are fetched only when a count moves', async () => {
   const calls = [];
+  const issue = (n, repo, comments = 1) => ({ number: n, title: `issue ${n}`, state: 'open', comments, updated_at: 'x', user: { login: 'a' }, author_association: 'NONE', repo });
   const fetchFn = async (url) => {
     calls.push(url);
-    const body = url.includes('/git/trees/') ? { sha: 't1', tree: [{ type: 'blob', path: 'manifest.json', sha: 'b' }] }
-      : url.includes('/issues?') ? [{ number: 10, title: 'Mint flow stalled', state: 'open', comments: 2, updated_at: 'x' }]
-        : null;
-    return { ok: true, json: async () => body, text: async () => '' };
+    let body = null; let status = 200;
+    if (url.includes('/git/trees/')) body = { sha: 't1', tree: [{ type: 'blob', path: 'manifest.json', sha: 'b' }] };
+    else if (url.includes('close-call-challenge/issues?')) body = [6, 8, 9, 10, 12, 15, 17].map((n) => issue(n));
+    else if (url.includes('yellowpaper/issues?')) body = [32, 31, 76, 71].map((n) => issue(n));
+    else if (url.includes('/comments')) body = [{ id: 7, user: { login: 'sv' }, author_association: 'NONE', created_at: 'x', body: 'first look' }];
+    else if (url.includes('technocore-chat/issues/937')) body = { ...issue(937), pull_request: {} };
+    else status = 404;
+    return { ok: status === 200, status, json: async () => body, text: async () => '' };
   };
-  const next = await observeUpstream({ prev: obs(), fetchFn, nowMs: NOW });
-  assert.equal(calls.length, 2, calls.join('\n'));
-  assert.equal(next.manifestSha256, PINNED.packageSha256);
+  const first = await observeUpstream({ prev: obs(), fetchFn, nowMs: NOW, env: {} });
+  assert.equal(first.manifestSha256, PINNED.packageSha256, 'unchanged tree: manifest not re-read');
+  assert.ok(first.watched['flop-labs/flop-core#1796'].unavailable, 'a 404 marks the issue unavailable, not an error');
+  assert.equal(upstreamAlerts(obs(), first, PIN).length, 0, 'a first look at newly watched issues is a baseline');
+  calls.length = 0;
+  const again = await observeUpstream({ prev: first, fetchFn, nowMs: NOW, env: {} });
+  assert.ok(!calls.some((u) => u.includes('/comments')), `no comment reads when counts are unchanged:\n${calls.join('\n')}`);
+  assert.deepEqual(upstreamAlerts(first, again, PIN), []);
 });
 
 test('the dashboard section shows proven vs possible, listed vs omitted, and escapes what it prints', () => {
@@ -496,4 +522,22 @@ test('the close-1 timer is a real unit, installed and enabled by the updater, at
   const installer = fs.readFileSync('deploy/reinstall-units.sh', 'utf8');
   assert.match(installer, /close1-take.service close1-take.timer/);
   assert.match(installer, /enable --now close1-take.timer/);
+});
+
+test('upstream: issues outside the listed repos are fetched at most hourly (no token: 60 requests an hour)', async () => {
+  const calls = [];
+  const fetchFn = async (url) => {
+    calls.push(url);
+    const body = url.includes('/git/trees/') ? { sha: 't1', tree: [] } : url.includes('/issues?') ? [] : null;
+    return { ok: body !== null, status: body !== null ? 200 : 404, json: async () => body, text: async () => '' };
+  };
+  const first = await observeUpstream({ prev: obs(), fetchFn, nowMs: NOW, env: {} });
+  const singles = calls.filter((u) => /\/issues\/\d+$/.test(u)).length;
+  assert.ok(singles > 0);
+  calls.length = 0;
+  await observeUpstream({ prev: first, fetchFn, nowMs: NOW + 20 * 60_000, env: {} });
+  assert.equal(calls.filter((u) => /\/issues\/\d+$/.test(u)).length, 0, 'twenty minutes later: none');
+  calls.length = 0;
+  await observeUpstream({ prev: first, fetchFn, nowMs: NOW + 61 * 60_000, env: {} });
+  assert.equal(calls.filter((u) => /\/issues\/\d+$/.test(u)).length, singles, 'an hour later: all again');
 });

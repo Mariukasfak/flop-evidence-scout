@@ -32,6 +32,13 @@
  * settled and `expired` if it never did; it can never itself settle. A listed
  * `expired` is therefore proof that NO copy settled — ours included — whoever
  * posted the copy that was listed. A listed `settled` is id-level only.
+ *
+ * The official archive (archive.mjs, since 2026-09-28) is the first source of
+ * copy provenance: a sweep record whose bytes hash to the `file` the referee
+ * signed names the maker and countersigner of every trade. Only such a
+ * VERIFIED_FULL record may decide a status here (evidence OFFICIAL_ARCHIVE);
+ * redacted or missing records leave every conservative state as it was and
+ * are carried along as `archiveObservations`, for people to read.
  */
 import { MINT, FEE_RATE, sweepFor } from './protocol.mjs';
 
@@ -48,10 +55,12 @@ export const STATUS = Object.freeze({
 
 export const EVIDENCE = Object.freeze({
   OFFICIAL: 'OFFICIAL',
+  OFFICIAL_ARCHIVE: 'OFFICIAL_ARCHIVE',   // a VERIFIED_FULL archive record: bytes hash to the referee-signed `file`
   CRYPTO_VERIFIED: 'CRYPTO_VERIFIED',
   LOCAL_REPLAY: 'LOCAL_REPLAY',
   INFERRED_PROBE: 'INFERRED_PROBE',
   INFERRED_FOLD_ORDER: 'INFERRED_FOLD_ORDER',
+  INFERRED_OWNER_FROM_ROOM_LISTING: 'INFERRED_OWNER_FROM_ROOM_LISTING', // our signed t:room listed in a signed flow `rooms`
   UNKNOWN_OMITTED: 'UNKNOWN_OMITTED', // the referee counted activity it did not list; ours may be in it
   UNKNOWN: 'UNKNOWN'
 });
@@ -132,9 +141,41 @@ function provenanceOf(t, provenance, ourDid) {
  * One record's resolution.
  * @param flows       Map<n, verified flow body>
  * @param latest      the newest sweep with a verified flow post
- * @param provenance  Map<id, {sweep, maker, countersigner, source}> from verified referee records (empty today)
+ * @param provenance  Map<id, {sweep, maker, countersigner, source}> from verified referee records
+ * @param archive     Map<id, archiveVerdict()> from the official archive (archive.mjs)
  */
-export function resolveTrade(t, { flows, latest, ourDid, cfg = null, provenance = new Map() }) {
+export function resolveTrade(t, { flows, latest, ourDid, cfg = null, provenance = new Map(), archive = new Map() }) {
+  const res = resolveFromReferee(t, { flows, latest, ourDid, cfg, provenance });
+  const a = archive.get(t.id);
+  if (!a) return res;
+  const withObs = {
+    ...res, archiveObservations: a.observations || [],
+    archiveGaps: a.verdict ? null : { window: a.window, missing: a.missing, redacted: a.redacted, unanchored: a.unanchored, mismatched: a.mismatched }
+  };
+  if (!a.verdict) return withObs;
+  const proven = { ...withObs, evidence: EVIDENCE.OFFICIAL_ARCHIVE, sweep: a.sweep, archiveVerdict: a.verdict, superseded: { status: res.status, evidence: res.evidence, basis: res.basis } };
+  // A verified record that contradicts an earlier inference is flagged; the record bound to the signed hash wins.
+  const contradicts = (a.verdict === 'NOT_SETTLED' && [STATUS.ID_SETTLED, STATUS.SETTLED_PROVEN].includes(res.status))
+    || (a.verdict !== 'NOT_SETTLED' && res.status === STATUS.NOT_SETTLED);
+  if (contradicts) proven.archiveConflict = true;
+  if (a.verdict === 'SETTLED_OURS') {
+    return {
+      ...proven, status: STATUS.SETTLED_PROVEN, ownership: OWNERSHIP.PROVEN, basis: 'ARCHIVE_SETTLED_OUR_COPY', voidReason: null,
+      provenance: { sweep: a.sweep, maker: a.maker, countersigner: a.countersigner, source: 'OFFICIAL_ARCHIVE', ours: true }, archiveFee: a.fee ?? null
+    };
+  }
+  if (a.verdict === 'SETTLED_NOT_OURS') {
+    return {
+      ...proven, status: STATUS.NOT_OURS, ownership: OWNERSHIP.PROVEN, voidReason: a.voidReason ?? null,
+      basis: a.maker ? 'ARCHIVE_SETTLED_OTHER_COPY' : 'ARCHIVE_OUR_COPY_VOID_SETTLED',
+      provenance: a.maker ? { sweep: a.sweep, maker: a.maker, countersigner: a.countersigner, source: 'OFFICIAL_ARCHIVE', ours: false } : undefined
+    };
+  }
+  return { ...proven, status: STATUS.NOT_SETTLED, ownership: OWNERSHIP.NOT_APPLICABLE, basis: 'ARCHIVE_NO_SETTLEMENT', voidReason: a.voidReason ?? null };
+}
+
+/** The resolution from signed referee posts and probes alone: the pre-archive ledger, unchanged. */
+function resolveFromReferee(t, { flows, latest, ourDid, cfg, provenance }) {
   const from = postSweepOf(t, cfg);
   const last = t.role === 'maker' ? Math.max(t.until, from) : from + 1;
   const counts = [];
@@ -264,12 +305,25 @@ export function ourFee({ side, qty, px, close, feeRate = FEE_RATE }) {
  * only we generate (our random `mfk-` offer ids), which rests on the stated
  * assumption that nobody else posts a copy with our id.
  */
-export function ownerState({ registration, resolutions, trades, flows, ourDid, latest, cfg = null }) {
+export function ownerState({ registration, resolutions, trades, flows, ourDid, latest, cfg = null, archiveMint = null, roomPosts = [] }) {
   if (!registration) return { state: OWNER.UNREGISTERED, evidence: EVIDENCE.UNKNOWN };
   const regSweep = sweepFor(Date.parse(registration.postedAt), cfg);
   if (latest < regSweep) return { state: OWNER.REGISTRATION_POSTED, evidence: EVIDENCE.UNKNOWN, regSweep };
   let proof = null;
   for (const [n, f] of flows) if ((f.mints || []).includes(ourDid)) { proof = { evidence: EVIDENCE.OFFICIAL, basis: 'FLOW_MINTS', sweep: n }; break; }
+  if (!proof && archiveMint?.verified) proof = { evidence: EVIDENCE.OFFICIAL_ARCHIVE, basis: 'ARCHIVE_MINTED', sweep: archiveMint.verified.sweep };
+  // docs/close-1-referee.md: a room message lists a room only when it comes from an owner. Not a mints[] proof,
+  // and it rests on nobody else registering the same room name, so it is its own evidence class.
+  for (const p of proof ? [] : roomPosts) {
+    const from = sweepFor(Date.parse(p.postedAt), cfg);
+    for (const [n, f] of flows) {
+      if (n >= from && (f.rooms || []).includes(p.room)) {
+        proof = { evidence: EVIDENCE.INFERRED_OWNER_FROM_ROOM_LISTING, basis: 'FLOW_ROOMS', sweep: n, room: p.room, assumption: 'ROOM_NAME_UNIQUE_TO_US' };
+        break;
+      }
+    }
+    if (proof) break;
+  }
   if (!proof) {
     for (const t of trades) {
       if (t.role !== 'maker') continue;
@@ -288,10 +342,12 @@ export function ownerState({ registration, resolutions, trades, flows, ourDid, l
  * The whole ledger. `prices` is Map<n, verified price body>; the close of
  * sweep n is the `ref.px` of the price post whose `n` is n.
  */
-export function buildLedger({ trades, registration, flows, prices, ourDid, cfg = null, mint = MINT, provenance = new Map() }) {
+export function buildLedger({
+  trades, registration, flows, prices, ourDid, cfg = null, mint = MINT, provenance = new Map(), archive = new Map(), archiveMint = null, roomPosts = []
+}) {
   const latest = Math.max(0, ...flows.keys());
   const resolutions = new Map();
-  for (const t of trades) resolutions.set(t.id, resolveTrade(t, { flows, latest, ourDid, cfg, provenance }));
+  for (const t of trades) resolutions.set(t.id, resolveTrade(t, { flows, latest, ourDid, cfg, provenance, archive }));
 
   const fills = [];
   let lo = 0; let hi = 0; let uncertainCollateral = 0; let uncertainFees = 0; let uncertainCount = 0;
@@ -304,7 +360,7 @@ export function buildLedger({ trades, registration, flows, prices, ourDid, cfg =
     if (effect === 'SETTLED') {
       const sweep = res.sweep;
       const close = sweep != null && prices.get(sweep)?.ref?.px != null ? Number(prices.get(sweep).ref.px) : null;
-      const { fee, exact } = ourFee({ side, qty: q, px, close });
+      const { fee, exact } = res.archiveFee != null ? { fee: Number(res.archiveFee), exact: true } : ourFee({ side, qty: q, px, close });
       fills.push({ id: t.id, side, qty: q, px, fee, feeExact: exact, sweep });
     } else if (effect === 'UNCERTAIN') {
       uncertainCount += 1;
@@ -324,9 +380,9 @@ export function buildLedger({ trades, registration, flows, prices, ourDid, cfg =
   const latestPrice = prices.get(Math.max(0, ...prices.keys()));
   const mark = latestPrice?.ref?.px != null ? Number(latestPrice.ref.px) : null;
   const value = mark == null ? null : acct.cash + acct.lots.reduce((v, [q, p]) => v + (q > 0 ? q * mark : -q * (2 * p - mark)), 0);
-  const owner = ownerState({ registration, resolutions, trades, flows, ourDid, latest, cfg });
-  // A balance is PROVEN only on an official mint and no trade of unknown effect.
-  const balanceProvable = owner.evidence === EVIDENCE.OFFICIAL && uncertainCount === 0;
+  const owner = ownerState({ registration, resolutions, trades, flows, ourDid, latest, cfg, archiveMint, roomPosts });
+  // A balance is PROVEN only on an official mint (listed, or in a verified archive record) and no trade of unknown effect.
+  const balanceProvable = [EVIDENCE.OFFICIAL, EVIDENCE.OFFICIAL_ARCHIVE].includes(owner.evidence) && uncertainCount === 0;
 
   const voidCounts = {};
   for (const r of resolutions.values()) for (const v of r.listedVoids || []) voidCounts[v.reason] = (voidCounts[v.reason] || 0) + 1;
@@ -364,6 +420,7 @@ export function buildLedger({ trades, registration, flows, prices, ourDid, cfg =
     openOffers,
     settledCount: [...resolutions.values()].filter((r) => effectOf(r) === 'SETTLED').length,
     settledProvenCount: [...resolutions.values()].filter((r) => r.status === STATUS.SETTLED_PROVEN).length,
+    archiveConflicts: [...resolutions.values()].filter((r) => r.archiveConflict).map((r) => r.id),
     idSettledCount: [...resolutions.values()].filter((r) => r.status === STATUS.ID_SETTLED).length,
     voidCounts
   };

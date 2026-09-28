@@ -10,6 +10,24 @@ const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const age = (s) => (s == null ? '?' : s < 120 ? `${s} s` : `${Math.round(s / 60)} min`);
 
 const GATE_COLOR = { open: '#34d399', hold: '#fbbf24', halt: '#f87171' };
+const ARCHIVE_COLOR = { CURRENT: '#34d399', LAGGING: '#fbbf24', UNAVAILABLE: '#f87171' };
+
+/** The board row is display order; a place is shown only when the whole tie is visible. */
+function standingLine(s) {
+  if (!s.leaderboard_display_row) return `not in the ${esc(s.leaderboard_rows_visible ?? 0)} rows the referee shows · place unknown`;
+  const tie = `score ${esc(s.official_score)} · display row ${esc(s.leaderboard_display_row)} (DID order, not a rank) · tie of ${esc(s.tie_visible_count)} visible`;
+  if (!s.tie_complete) return `${tie}, <strong>may continue past the list</strong> · prize place UNKNOWN`;
+  const places = (s.prize_places || []).length ? `places ${esc(s.prize_places.join(', '))} shared by ${esc(s.prize_sharing)}` : 'no prize place';
+  return `${tie}, complete · ${places} (${esc(s.prize_confidence)}: live mark, not final)`;
+}
+
+function archiveLine(a) {
+  if (!a) return 'not checked yet';
+  const lag = a.archive_lag_sweeps != null ? ` · ${esc(a.archive_lag_sweeps)} sweeps behind the referee (${esc(a.live_latest_sweep)})` : '';
+  const cls = Object.entries(a.records_by_class || {}).map(([k, v]) => `${esc(k.replace('ARCHIVE_', '').toLowerCase())} ${esc(v)}`).join(', ') || 'none';
+  return `<span style="color:${ARCHIVE_COLOR[a.archive_status] || '#94a3b8'}">${esc(a.archive_status)}</span> · ends at sweep ${esc(a.archive_latest_sweep ?? '?')}${lag}`
+    + ` · our sweeps checked ${esc(a.checked_sweeps ?? 0)}/${esc(a.needed_sweeps ?? 0)} (${cls})${a.mismatch_sweeps?.length ? ` · <span style="color:#f87171">hash mismatch at ${esc(a.mismatch_sweeps.join(', '))}</span>` : ''}`;
+}
 
 export function renderClose1Section(s) {
   if (!s) return '';
@@ -18,7 +36,8 @@ export function renderClose1Section(s) {
   const conf = s.evidence_confidence || {};
   const last = s.latest_trade;
   const offers = (s.open_offers || []).map((o) => `${esc(o.id)}: ${esc(o.side)} ${esc(o.qty)} @ ${esc(o.px)} until sweep ${esc(o.until)}`).join('<br>') || 'none';
-  const rows = (s.trades || []).slice(-8).reverse().map((t) => `<tr><td><code>${esc(t.id)}</code></td><td>${esc(t.status)}${t.void_reason ? ` (${esc(t.void_reason)})` : ''}</td><td>${esc(t.evidence)}</td><td>${esc(t.ownership)}</td></tr>`).join('');
+  const hint = (t) => (t.archive_observations || []).map((o) => `${esc(o.outcome)}@${esc(o.sweep)}${o.our_copy ? ' (our copy)' : ''}`).join(', ');
+  const rows = (s.trades || []).slice(-8).reverse().map((t) => `<tr><td><code>${esc(t.id)}</code></td><td>${esc(t.status)}${t.void_reason ? ` (${esc(t.void_reason)})` : ''}</td><td>${esc(t.evidence)}</td><td>${esc(t.ownership)}</td><td>${hint(t) ? `<span title="redacted record: not proof">${hint(t)} ⚠︎</span>` : ''}</td></tr>`).join('');
   const verified = s.contest_verified
     ? `<span style="color:#34d399">verified</span> · package <code>${esc(String(s.package_sha256).slice(0, 12))}…</code>`
     : `<span style="color:#f87171">NOT VERIFIED</span> — ${esc(s.contest_error)}`;
@@ -38,7 +57,7 @@ export function renderClose1Section(s) {
       <div class="card">
         <h3>Referee</h3>
         <div class="val" style="font-size:1.1rem">sweep ${esc(s.current_sweep ?? '?')}</div>
-        <div class="sub">price post ${age(s.price_post_age_seconds)} old · ref trade ${age(s.reference_age_seconds)} old · ref ${esc(s.reference_price)}</div>
+        <div class="sub">price post ${age(s.price_post_age_seconds)} old · ref trade ${age(s.reference_age_seconds)} old${s.reference_warning ? ' (old trade; still the published reference, rule 11)' : ''} · ref ${esc(s.reference_price)}</div>
       </div>
       <div class="card">
         <h3>Gate</h3>
@@ -50,9 +69,11 @@ export function renderClose1Section(s) {
       <div>🔏 <strong>Contest:</strong> ${verified} · owner <strong>${esc(s.owner_state)}</strong> (${esc(s.owner_evidence)}${conf.owner_assumption ? `, assumes ${esc(conf.owner_assumption)}` : ''})</div>
       <div>📊 <strong>Flow ${esc(c?.n ?? '?')}:</strong> listed settled ${esc(c?.listed.settled)} / void ${esc(c?.listed.void)} / mints ${esc(c?.listed.mints)} · <strong>omitted</strong> settled ${esc(c?.omitted.settled)} / void ${esc(c?.omitted.void)} / mints ${esc(c?.omitted.mints)}${c?.missed ? ` · missed ranges ${esc(c.missed)}` : ''} — an empty list is not an empty sweep</div>
       <div>🧾 <strong>Evidence confidence:</strong> ${esc(conf.overall)} · position ${esc(conf.position)} · settlements proven ours ${esc(s.settled_proven_count)}, id-only ${esc(s.id_settled_count)}</div>
+      <div>🏁 <strong>Board:</strong> ${standingLine(s)}</div>
+      <div>🗄️ <strong>Official archive:</strong> ${archiveLine(s.archive)} — a redacted record never proves a trade or its absence</div>
       <div>🟢 <strong>Open offers:</strong> ${offers}</div>
       <div>🕒 <strong>Latest trade:</strong> ${last ? `<code>${esc(last.id)}</code> ${esc(last.status)} · ${esc(last.evidence)} · ownership ${esc(last.ownership)}` : 'none'}</div>
-      ${rows ? `<table style="width:100%;margin-top:10px;font-size:0.8rem"><thead><tr><th align="left">trade</th><th align="left">status</th><th align="left">evidence</th><th align="left">ours?</th></tr></thead><tbody>${rows}</tbody></table>` : ''}
+      ${rows ? `<table style="width:100%;margin-top:10px;font-size:0.8rem"><thead><tr><th align="left">trade</th><th align="left">status</th><th align="left">evidence</th><th align="left">ours?</th><th align="left">archive (unverified)</th></tr></thead><tbody>${rows}</tbody></table>` : ''}
       <div style="color:var(--text-muted);margin-top:8px">Snapshot ${esc(s.generated_at)}. "ID_SETTLED" means the referee settled that trade id — not that the settling copy was ours.</div>
     </div>`;
 }

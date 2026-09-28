@@ -13,7 +13,8 @@
  * stream-watcher (the only room reader), evidence-store (append-only raw
  * records), ledger (what happened, with evidence strength), strategy (pure
  * decision), risk-gate (every write), executor (the only key holder), runtime
- * (snapshot + alerts).
+ * (snapshot + alerts), archive (the official per-sweep records, trusted only
+ * where their bytes hash to what the referee signed).
  *
  *   node tools/close1-take.mjs            dry run: verify, rebuild, show what it would do
  *   node tools/close1-take.mjs --check    report only
@@ -26,7 +27,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TechnocoreClient } from '../src/technocore-client.mjs';
 import {
-  SEASON, checkedTerms, checkedTrade, makerPayload, takerPayload, tradeText, safeVerify
+  SEASON, checkedTerms, checkedTrade, makerPayload, takerPayload, tradeText, safeVerify, sweepFor
 } from '../src/close1/protocol.mjs';
 import { buildContestConfig, verifyRefereeMessage, PINNED } from '../src/close1/contest-source.mjs';
 import { EvidenceStore, SIG_STATUS, SOURCE } from '../src/close1/evidence-store.mjs';
@@ -37,6 +38,7 @@ import { approveTrade, approveProbe, DEFAULT_POLICY } from '../src/close1/risk-g
 import { Executor } from '../src/close1/executor.mjs';
 import { buildSnapshot, alertsBetween, deliverAlerts } from '../src/close1/runtime.mjs';
 import { observeUpstream, upstreamAlerts } from '../src/close1/upstream.mjs';
+import { reconcileArchive, archiveVerdict, archiveMint } from '../src/close1/archive.mjs';
 
 export { checkedTerms, makerPayload, takerPayload, tradeText, SEASON };
 export const REFEREE = PINNED.refereeDid;
@@ -171,7 +173,31 @@ export async function run(argv = process.argv.slice(2)) {
   const flows = refereeBodies(evidence, 'd-close1-flow');
   const prices = refereeBodies(evidence, 'd-close1-price');
   const pnl = refereeBodies(evidence, 'd-close1-pnl').latest?.body ?? null;
-  const ledger = ourDid ? buildLedger({ trades: state.trades, registration, flows: flows.byN, prices: prices.byN, ourDid, cfg: contest }) : null;
+  const prev = readJson(path.join(DIR, 'runtime.json'), null);
+
+  // 3a. The official archive: only the sweeps our trades and mint need, each checked against the signed `file`.
+  let archiveHealth = null; const verdicts = new Map(); let mintEvidence = null;
+  if (ourDid) {
+    try {
+      const signedFiles = new Map();
+      for (const [n, b] of prices.byN) if (typeof b.file === 'string') signedFiles.set(n, b.file);
+      for (const [n, b] of flows.byN) if (typeof b.file === 'string') signedFiles.set(n, b.file);
+      const a = await reconcileArchive({
+        trades: state.trades, registration, ourDid, signedFiles, liveLatest: prices.latest?.body.n ?? null,
+        cacheDir: path.join(DIR, 'archive'), cfg: contest, prevHealth: prev?.archive ?? null, nowMs
+      });
+      archiveHealth = a.health;
+      for (const t of state.trades) verdicts.set(t.id, archiveVerdict(t, { records: a.records, ourDid, cfg: contest }));
+      mintEvidence = archiveMint({ records: a.records, regSweep: sweepFor(Date.parse(registration.postedAt), contest) });
+      archiveHealth.mint = { verified: mintEvidence.verified, observed: mintEvidence.observed };
+    } catch (err) {
+      archiveHealth = { archive_status: 'UNAVAILABLE', archive_error: String(err.message).slice(0, 200), archive_last_success: prev?.archive?.archive_last_success ?? null };
+    }
+  }
+  const ledger = ourDid ? buildLedger({
+    trades: state.trades, registration, flows: flows.byN, prices: prices.byN, ourDid, cfg: contest,
+    archive: verdicts, archiveMint: mintEvidence, roomPosts: state.roomPosts ?? []
+  }) : null;
   if (ledger) for (const t of state.trades) t.resolution = ledger.resolutions.get(t.id);
   writeJson(STATE, state);
   const price = prices.latest ? { ...prices.latest.body, postedAt: prices.latest.ts } : null;
@@ -219,8 +245,7 @@ export async function run(argv = process.argv.slice(2)) {
   gate.kind = gate.ok ? 'open' : gate.reasons.some((r) => HALT.test(r)) ? 'halt' : 'hold';
 
   // 5. Snapshot and alerts.
-  const snapshot = buildSnapshot({ contest, contestError, streams: stream.stats(), price, ledger, pnl, ourDid, trades: state.trades, gate, nowMs, writeErrors5m: writeErrors, upstream, upstreamError, integrity });
-  const prev = readJson(path.join(DIR, 'runtime.json'), null);
+  const snapshot = buildSnapshot({ contest, contestError, streams: stream.stats(), price, ledger, pnl, ourDid, trades: state.trades, gate, nowMs, writeErrors5m: writeErrors, upstream, upstreamError, integrity, archive: archiveHealth });
   const alerts = [...alertsBetween(prev, snapshot), ...upstreamNotes];
   await deliverAlerts(alerts, { logFile: path.join(DIR, 'alerts.jsonl') });
   writeJson(path.join(DIR, 'runtime.json'), snapshot);
@@ -372,13 +397,17 @@ function printReport(s, state, ledger, contestError) {
   if (ledger) {
     console.log(`proven position: ${s.proven_position}; possible range ${s.exposure_low} … ${s.exposure_high}; proven-ours settlements ${s.settled_proven_count}, id-only settlements ${s.id_settled_count}`);
     console.log(`POLF balance: ${s.balance_provable ? s.polf_balance : `not provable (worst-case free ${s.free_polf_worst_case})`}`);
-    console.log(`official score: ${s.official_score ?? s.official_rank_note}`);
+    console.log(`board: ${s.official_score != null ? `score ${s.official_score}, display row ${s.leaderboard_display_row} (DID order), tie of ${s.tie_visible_count} visible, ${s.tie_complete ? 'complete' : 'may continue past the list'}; prize place ${s.prize_place_status}${s.prize_places ? ` [${s.prize_places.join(', ')}]` : ''}` : s.official_score_note}`);
   }
   for (const t of state.trades) {
     const r = t.resolution || {};
-    console.log(`${t.postedAt}  ${t.role === 'maker' ? 'offer' : 'take '}  ${t.id}  ${t.ourSide} ${t.qty} @ ${t.px}  -> ${r.status ?? '?'}${r.voidReason ? ` (${r.voidReason})` : ''} [evidence ${r.evidence ?? '?'}, ownership ${r.ownership ?? '?'}]${r.sweep ? ` sweep ${r.sweep}` : ''}`);
+    const obs = (r.archiveObservations || []).map((o) => `${o.outcome}@${o.sweep}${o.ours ? '(our copy)' : ''}`).join(' ');
+    console.log(`${t.postedAt}  ${t.role === 'maker' ? 'offer' : 'take '}  ${t.id}  ${t.ourSide} ${t.qty} @ ${t.px}  -> ${r.status ?? '?'}${r.voidReason ? ` (${r.voidReason})` : ''} [evidence ${r.evidence ?? '?'}, ownership ${r.ownership ?? '?'}]${r.sweep ? ` sweep ${r.sweep}` : ''}${obs ? `  archive(redacted, not proof): ${obs}` : ''}`);
   }
-  if (s.upstream) console.log(`upstream: manifest ${String(s.upstream.manifest_sha256).slice(0, 8)}… (${s.upstream.manifest_status}), rules ${s.upstream.rules_version}, #10 comments ${s.upstream.watched?.[10]?.comments ?? '?'}`);
+  const a = s.archive;
+  if (a) console.log(`archive: ${a.archive_status}, ends at sweep ${a.archive_latest_sweep ?? '?'} (referee ${a.live_latest_sweep ?? '?'}, ${a.archive_lag_sweeps ?? '?'} behind); our sweeps checked ${a.checked_sweeps ?? 0}/${a.needed_sweeps ?? 0} ${JSON.stringify(a.records_by_class || {})}${a.pending_sweeps ? `, ${a.pending_sweeps} still to fetch` : ''}${a.archive_error ? ` — ${a.archive_error}` : ''}`);
+  if (s.reference_warning) console.log(`reference: ${s.reference_warning} (trade ${s.reference_age_at_post_seconds} s old at the post; the published reference still stands, rule 11)`);
+  if (s.upstream) console.log(`upstream: manifest ${String(s.upstream.manifest_sha256).slice(0, 8)}… (${s.upstream.manifest_status}), rules ${s.upstream.rules_version}, watched issues ${Object.keys(s.upstream.watched || {}).length}`);
   if (s.upstream_error) console.log(`upstream check failed: ${s.upstream_error}`);
   console.log(`gate: ${s.gate?.kind ?? '?'}${s.gate?.ok ? '' : ` — ${(s.gate?.reasons || []).join(', ')}`}`);
 }

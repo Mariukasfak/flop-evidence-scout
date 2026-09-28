@@ -245,6 +245,31 @@ export function isEvidenceOfWork(receipt) {
     && typeof receipt?.signature === 'string';
 }
 
+/**
+ * What a receipt would still lack if agent-leg credit becomes "work-settled".
+ *
+ * FLOP Labs' review pack prefers it (yellowpaper#32, comment 5862003169, sv,
+ * 2026-09-28): credit from verified work inside SETTLED sessions, Σ G_n × rate,
+ * not idle reservations. That is a preference, not a ratified rule — so this
+ * only reports gaps. It never scores, farms, spends or reserves anything, and a
+ * receipt that fails isEvidenceOfWork is never ready, whatever else it holds.
+ */
+export function workSettledReadiness(receipt) {
+  const has = {
+    evidence_of_work: isEvidenceOfWork(receipt),
+    session_id: typeof receipt?.requestId === 'string',
+    canonical_receipt_signed: typeof receipt?.signature === 'string' && typeof receipt?.did === 'string',
+    metering_input_measured: receipt?.result?.flopsEstimated === false && Number.isFinite(receipt?.result?.gN),
+    settlement_evidence: Boolean(receipt?.settlement?.sessionSettled),
+    spend_fee_evidence: Number.isFinite(receipt?.request?.feeFlop) && Boolean(receipt?.settlement?.feePaid),
+    model_backend_identity: Boolean(receipt?.result?.modelId) && Boolean(receipt?.result?.backend),
+    not_simulated: receipt?.simulated === false,
+    timestamps: typeof receipt?.at === 'string' && Number.isFinite(receipt?.result?.latencyMs)
+  };
+  const missing = Object.entries(has).filter(([, v]) => !v).map(([k]) => k);
+  return { ready: missing.length === 0, missing, has };
+}
+
 /** Running totals across a set of receipts — the number the airdrop is scored on. */
 export function summariseReceipts(receipts = []) {
   const real = receipts.filter(isEvidenceOfWork);

@@ -438,3 +438,14 @@ test('api configuration reads the environment first, then the secrets file, then
   assert.equal(loadApiConfig({ env: {}, secretsPath: file }), null);
   assert.equal(loadApiConfig({ env: {}, secretsPath: 'missing.json' }), null);
 });
+
+test('work-settled readiness only reports gaps; a simulated receipt is never ready', async () => {
+  const { workSettledReadiness } = await import('../src/inference.mjs');
+  const real = { requestId: 'r1', did: 'did:key:z', signature: 's', simulated: false, at: '2026-09-28T00:00:00Z', request: { feeFlop: 1 }, result: { ok: true, modelId: 'qwen2.5:3b', backend: 'ollama', latencyMs: 900, flopsEstimated: true } };
+  const r = workSettledReadiness(real);
+  assert.equal(r.ready, false);
+  assert.deepEqual(r.missing, ['metering_input_measured', 'settlement_evidence', 'spend_fee_evidence'], 'what no FLOP session can give us yet');
+  const sim = workSettledReadiness({ ...real, simulated: true, result: { ...real.result, gN: 1, flopsEstimated: false }, settlement: { sessionSettled: true, feePaid: true } });
+  assert.equal(sim.ready, false);
+  assert.ok(sim.missing.includes('evidence_of_work') && sim.missing.includes('not_simulated'));
+});

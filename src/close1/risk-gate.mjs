@@ -7,6 +7,16 @@
  * Protocol limits (what the referee would accept) and policy limits (what we
  * choose to risk) are kept apart: the rules have no maximum quantity at all,
  * so MAX_TAKE_QTY is ours, sized for an evidence-collecting agent, not a trader.
+ *
+ * Two different kinds of "stale", kept apart since 2026-09-28:
+ *   PRICE_POST_STALE      the referee itself stopped posting sweeps. HARD HALT.
+ *   REFERENCE_TRADE_OLD   the post is fresh but Hyperliquid's last trade behind
+ *                         it is old. Rule 11: "If the referee can't read a fresh
+ *                         trade, the last reference stands and the price room
+ *                         says how old it is" — confirmed by FLOP Labs in
+ *                         close-call #9 (comment 5862711805). The published
+ *                         reference is still the protocol's reference, so this
+ *                         is reported (referenceStatus), never a halt.
  */
 import { LIMIT_WINDOW, checkedTerms, makerPayload, takerPayload, safeVerify } from './protocol.mjs';
 import { OWNER } from './ledger.mjs';
@@ -23,8 +33,8 @@ export const DEFAULT_POLICY = Object.freeze({
   maxAbsPosition: 10,         // POLICY: worst-case |position| including trades whose fate is unknown
   maxSettled: 3,
   maxAttempts: 20,
-  maxPricePostAgeS: 480,      // the referee posts every 300 s; allow one late post
-  maxRefTradeAgeS: 900,       // Hyperliquid's last trade behind the reference
+  maxPricePostAgeS: 480,      // the referee posts every 300 s; allow one late post (HALT beyond)
+  refTradeWarnAgeS: 900,      // POLICY warning only: an old reference trade is still the published reference
   lockMarginSweeps: 12,       // stop an hour before the lock
   requiredRooms: ['d-close1-price', 'd-close1-flow'],
   maxReadAgeS: 600,
@@ -38,7 +48,7 @@ export const REASON = Object.freeze({
   STREAM_GAP: 'stream_gap_in_required_room',
   READ_STALE: 'required_room_not_read_recently',
   REFERENCE_MISSING: 'reference_missing',
-  REFERENCE_STALE: 'reference_stale',
+  PRICE_POST_STALE: 'price_post_stale',
   MINT_NOT_CONFIRMED: 'owner_mint_not_confirmed',
   FUNDS: 'insufficient_free_polf',
   PENDING_TRADE: 'another_trade_unresolved',
@@ -68,13 +78,34 @@ function commonChecks(snap, policy, nowMs) {
   return reasons;
 }
 
+/** Only the referee's own silence halts; the age of the trade behind a fresh post does not. */
 function referenceChecks(snap, policy, nowMs) {
   const p = snap.price;
   if (!p?.ref?.px || !p.postedAt) return [REASON.REFERENCE_MISSING];
-  const reasons = [];
-  if (nowMs - Date.parse(p.postedAt) > policy.maxPricePostAgeS * 1000) reasons.push(REASON.REFERENCE_STALE);
-  else if (p.ref.time && nowMs - Date.parse(p.ref.time) > policy.maxRefTradeAgeS * 1000) reasons.push(REASON.REFERENCE_STALE);
-  return reasons;
+  const postAge = nowMs - Date.parse(p.postedAt);
+  if (!Number.isFinite(postAge) || postAge > policy.maxPricePostAgeS * 1000) return [REASON.PRICE_POST_STALE];
+  return [];
+}
+
+/**
+ * How old the reference is, for people and for strategy: never a gate reason.
+ * `age_s` is what the referee's price post itself states (top-level in live
+ * posts; `ref.age_s` accepted too), measured at the post.
+ */
+export function referenceStatus(price, policy = DEFAULT_POLICY, nowMs = Date.now()) {
+  if (!price) return { reference_age_seconds: null, reference_age_at_post_seconds: null, reference_stale_by_market_time: null, price_post_age_seconds: null, reference_warning: null };
+  const stated = Number.isFinite(price.age_s) ? price.age_s : Number.isFinite(price.ref?.age_s) ? price.ref.age_s : null;
+  const refTime = price.ref?.time ? Date.parse(price.ref.time) : NaN;
+  const age = Number.isFinite(refTime) ? Math.round((nowMs - refTime) / 1000) : null;
+  const atPost = stated ?? (Number.isFinite(refTime) && price.postedAt ? Math.round((Date.parse(price.postedAt) - refTime) / 1000) : null);
+  const old = atPost != null && atPost > policy.refTradeWarnAgeS;
+  return {
+    reference_age_seconds: age,
+    reference_age_at_post_seconds: atPost,
+    reference_stale_by_market_time: atPost == null ? null : old,
+    price_post_age_seconds: price.postedAt ? Math.round((nowMs - Date.parse(price.postedAt)) / 1000) : null,
+    reference_warning: old ? 'REFERENCE_TRADE_OLD' : null
+  };
 }
 
 /**
