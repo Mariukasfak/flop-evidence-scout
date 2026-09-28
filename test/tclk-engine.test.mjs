@@ -67,6 +67,48 @@ function engineFor(venue, identity, { otherDids = [], now = () => T0, ...rest } 
 }
 
 describe('tclk payee lane: accepting', () => {
+  test('state save retries transient Windows rename contention', () => {
+    const venue = makeVenue(); const me = generateIdentity();
+    const engine = engineFor(venue, me);
+    engine.state = { deal: null, completed: [], abandoned: [], noLockCooldowns: {}, payerLockSeenAt: {} };
+    const originalRename = fs.renameSync;
+    let calls = 0;
+    fs.renameSync = (...args) => {
+      calls += 1;
+      if (calls === 1) throw Object.assign(new Error('transient lock'), { code: 'EPERM' });
+      return originalRename(...args);
+    };
+    try { engine.save(); } finally { fs.renameSync = originalRename; }
+    assert.equal(calls, 2);
+    assert.equal(JSON.parse(fs.readFileSync(engine.statePath, 'utf8')).deal, null);
+  });
+
+  test('persistent Windows contention preserves committed state and fails closed', { skip: process.platform !== 'win32' }, () => {
+    const venue = makeVenue(); const me = generateIdentity();
+    const engine = engineFor(venue, me);
+    engine.state = { deal: null, completed: [{ marker: 'before' }], abandoned: [], noLockCooldowns: {}, noLockCooldownsMigrated: true, payerLockSeenAt: {} };
+    engine.save();
+    engine.state.completed = [{ marker: 'after' }];
+    const originalRename = fs.renameSync;
+    fs.renameSync = () => { throw Object.assign(new Error('persistent lock'), { code: 'EPERM' }); };
+    try { assert.throws(() => engine.save(), { code: 'EPERM' }); } finally { fs.renameSync = originalRename; }
+    assert.equal(JSON.parse(fs.readFileSync(engine.statePath, 'utf8')).completed[0].marker, 'before');
+  });
+
+  test('requires reconciliation instead of automatically replaying a stale backup', () => {
+    const venue = makeVenue(); const me = generateIdentity();
+    const engine = engineFor(venue, me);
+    engine.state = { deal: null, completed: [{ marker: 'backup' }], abandoned: [], noLockCooldowns: {}, noLockCooldownsMigrated: true, payerLockSeenAt: {} };
+    engine.save();
+    fs.copyFileSync(engine.statePath, engine.statePath + '.bak');
+    fs.writeFileSync(engine.statePath, '{corrupt');
+    const recovered = new TclkEngine({ identity: me, client: venue, statePath: engine.statePath, now: () => T0 });
+    assert.throws(() => recovered.load(), /TCLK_STATE_RECONCILIATION_REQUIRED/);
+    assert.equal(recovered.state, null);
+    assert.equal(fs.readFileSync(engine.statePath, 'utf8'), '{corrupt');
+    assert.equal(JSON.parse(fs.readFileSync(engine.statePath + '.bak', 'utf8')).completed[0].marker, 'backup');
+  });
+
   test('accepts a valid paper hash-lock offer from a stranger, and the contract id is the reference one', async () => {
     const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
     const offer = payerOffer(payer, { job: { proto: 'a2a', id: 'task-7' } });
@@ -207,6 +249,37 @@ describe('tclk payee lane: accepting', () => {
     const engine = engineFor(venue, me);
 
     assert.equal((await engine.runTurn()).action, 'no_acceptable_offer');
+  });
+
+
+
+  test('a BlockRewards client can extend the offer freshness window without changing the default lane', async () => {
+    const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity(); const other = generateIdentity();
+    const offer = payerOffer(payer, { job: { proto: 'blockrewards', id: 'task-live', context: 'Return the exact supplied protocol fact.' } });
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(offer));
+    const [older] = venue.rooms.get(OFFER_ROOM);
+    older.ts = new Date(Date.parse(older.ts) - 10_000).toISOString();
+    venue.say(OFFER_ROOM, other.did, 'chatter');
+    venue.offerFreshnessMs = (frame) => frame.job?.proto === 'blockrewards' ? 30_000 : 2_000;
+
+    const result = await engineFor(venue, me).runTurn();
+    assert.equal(result.action, 'offer_accepted');
+    assert.equal(result.payer, payer.did);
+  });
+
+  test('BlockRewards remains eligible after another transport-verified accept', async () => {
+    const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity(); const rival = generateIdentity();
+    const offer = payerOffer(payer, { job: { proto: 'blockrewards', id: 'task-multi', context: 'Return the requested validation result.' } });
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(offer));
+    venue.say(OFFER_ROOM, rival.did, encodeFrame({
+      type:'accept', from:rival.did, ref:offer.id, statement:'0x' + '1'.repeat(64),
+      nonce:'0000000000000000', contract:'0x' + '2'.repeat(64)
+    }));
+
+    const result = await engineFor(venue, me).runTurn();
+    assert.equal(result.action, 'offer_accepted');
+    const ours = venue.posts.map((p) => decodeFrame(p.text)).find((f) => f?.type === 'accept');
+    assert.equal(ours.ref, offer.id);
   });
 
   test('refuses an offer that names no protocol, however new it is', async () => {
@@ -821,6 +894,29 @@ describe('tclk payee lane: a payer who does not lock loses the slot', () => {
 describe('tclk payee lane: no-lock cooldown survives bounded history', () => {
   const DAY = 24 * HOUR;
 
+  test('a protocol-specific seconds timeout still creates cooldown even when history is bypassed', async () => {
+    const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
+    const statePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tclk-cooldown-')), 'tclk-state.json');
+    let clock = T0;
+    venue.offerBypassesHistory = () => true;
+    venue.noLockWaitMs = () => 90_000;
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer, {
+      nonce: 'seconds-timeout-0001', claimByMs: clock + HOUR, expiresMs: clock + HOUR, refundAfterMs: clock + 2 * HOUR
+    })));
+    const engine = new TclkEngine({ identity: me, client: venue, statePath, now: () => clock });
+    assert.equal((await engine.runTurn()).action, 'offer_accepted');
+    clock += 91_000;
+    const cancelled = await engine.runTurn();
+    assert.equal(cancelled.action, 'deal_cancelled');
+    assert.match(cancelled.reason, /within 90 sec/);
+    assert.equal(engine.load().noLockCooldowns[payer.did] > clock, true);
+
+    venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer, {
+      nonce: 'seconds-timeout-0002', claimByMs: clock + HOUR, expiresMs: clock + HOUR, refundAfterMs: clock + 2 * HOUR
+    })));
+    assert.equal((await engine.runTurn()).action, 'no_acceptable_offer');
+  });
+
   test('a payer remains blocked after its abandonment falls out of the last 50 records', async () => {
     const venue = makeVenue(); const me = generateIdentity(); const target = generateIdentity();
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tclk-cooldown-'));
@@ -880,6 +976,19 @@ describe('tclk payee lane: no-lock cooldown survives bounded history', () => {
     venue.say(OFFER_ROOM, payer.did, encodeFrame(payerOffer(payer, { nonce: 'other-reason-0001' })));
 
     assert.equal((await engine.runTurn()).action, 'offer_accepted');
+  });
+
+  test('v2 migration imports seconds-based no-lock records even when v1 was already marked complete', async () => {
+    const venue = makeVenue(); const me = generateIdentity(); const payer = generateIdentity();
+    const statePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tclk-cooldown-')), 'tclk-state.json');
+    fs.writeFileSync(statePath, JSON.stringify({
+      deal: null, completed: [],
+      abandoned: [{ contract: '0xseconds', room: 'seconds-room', payer: payer.did, acceptedAt: T0 - 100_000, closedAt: T0 - 1_000, reason: 'payer did not lock within 90 sec' }],
+      noLockCooldowns: {}, noLockCooldownsMigrated: true
+    }));
+    const engine = new TclkEngine({ identity: me, client: venue, statePath, now: () => T0 });
+    assert.equal(engine.load().noLockCooldowns[payer.did], T0 - 1_000 + DAY);
+    assert.equal(engine.load().noLockCooldownsMigratedV2, true);
   });
 
   test('a recent legacy no-lock abandonment is migrated once into the durable cooldown', async () => {

@@ -39,7 +39,7 @@ import {
 } from './tclk.mjs';
 import { sayOnce } from './log-once.mjs';
 import {
-  loadBudget, saveBudget, recordRefusal, isRoomCreationRefusal, minutesBlocked
+  loadBudget, saveBudget, recordRefusal, isRoomCreationRefusal, minutesBlocked, canOpenRoom
 } from './room-budget.mjs';
 import {
   loadReputation, saveReputation, recordOutcome, isBurned, isTrusted, offerLooksAlive
@@ -78,12 +78,53 @@ export const NO_LOCK_COOLDOWN_MS = 24 * 60 * 60_000;
 
 const LOST_RACE_REASON = 'payer locked with another payee';
 
+export function parseHarnessVerdictMessage(message, { payer, contract }) {
+  const from = String(message?.from || '');
+  const text = String(message?.text ?? message?.content ?? '');
+  if (from !== String(payer || '')) return null;
+  if (!text.toLowerCase().includes(String(contract || '').toLowerCase())) return null;
+  if (!/\bjudge\s*=\s*sandbox\b/i.test(text)) return null;
+  const hit = text.match(/\bverdict\s+(PASS|FAIL)\b/i);
+  return hit ? { verdict: hit[1].toUpperCase(), text, from } : null;
+}
+
 function isNoLockReason(reason) {
-  return reason === 'payer never locked before claimByMs'
-    || reason === `payer did not lock within ${Math.round(NO_LOCK_MS / 60_000)} min`;
+  const text=String(reason||'');
+  return text === 'payer never locked before claimByMs'
+    || /^payer did not lock within \d+(?:\.\d+)? (?:sec|min)$/.test(text);
 }
 
 const READ_LIMIT = 200;
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function atomicReplaceJson(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const payload = JSON.stringify(value, null, 2);
+  const temp = `${filePath}.tmp-${process.pid}-${Date.now()}-${randomBytes(4).toString('hex')}`;
+  fs.writeFileSync(temp, payload);
+  let lastError = null;
+  try {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      try {
+        fs.renameSync(temp, filePath);
+        return;
+      } catch (err) {
+        lastError = err;
+        if (!['EPERM', 'EBUSY', 'EACCES'].includes(err?.code)) throw err;
+        if (attempt < 5) sleepSync(Math.min(250, 20 * (2 ** attempt)));
+      }
+    }
+    // Preserve the committed destination when replacement cannot be published.
+    throw lastError;
+  } finally {
+    if (fs.existsSync(temp)) {
+      try { fs.unlinkSync(temp); } catch {}
+    }
+  }
+}
 
 /**
  * Only accept an offer this young, measured against the newest record in the
@@ -232,40 +273,69 @@ export class TclkEngine {
   load() {
     if (this.state) return this.state;
     const empty = {
-      deal: null, completed: [], abandoned: [], noLockCooldowns: {}, noLockCooldownsMigrated: false,
-      payerLockSeenAt: {}
+      deal: null, completed: [], abandoned: [], noLockCooldowns: {},
+      noLockCooldownsMigrated: false, noLockCooldownsMigratedV2: false, payerLockSeenAt: {}
     };
     let hadFile = false;
     let parsed = null;
+    let recoveredFromBackup = false;
     try {
       parsed = JSON.parse(fs.readFileSync(this.statePath, 'utf8'));
       hadFile = true;
     } catch (err) {
-      if (err.code !== 'ENOENT') {
-        // A corrupt file is a fault, not a first run, and starting over on
-        // top of a deal in flight would strand a counterparty. Say so.
-        sayOnce('tclk:state', `[tclk] state file unreadable (${err.message}); starting empty`);
+      const backupPath = `${this.statePath}.bak`;
+      try {
+        parsed = JSON.parse(fs.readFileSync(backupPath, 'utf8'));
+        hadFile = true;
+        recoveredFromBackup = true;
+      } catch (backupErr) {
+        if (err.code !== 'ENOENT') {
+          throw new Error('TCLK_STATE_UNREADABLE: refusing to start empty', { cause: err });
+        }
+        if (backupErr.code !== 'ENOENT') {
+          throw new Error('TCLK_STATE_BACKUP_UNREADABLE: refusing to start empty', { cause: backupErr });
+        }
       }
     }
-    this.state = { ...empty, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
+    if (hadFile && (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))) {
+      if (!recoveredFromBackup) {
+        try {
+          const backup = JSON.parse(fs.readFileSync(`${this.statePath}.bak`, 'utf8'));
+          if (!backup || typeof backup !== 'object' || Array.isArray(backup)) throw new Error('backup is not a state object');
+          parsed = backup;
+          recoveredFromBackup = true;
+        } catch (backupErr) {
+          throw new Error('TCLK_STATE_INVALID: primary and backup are unusable', { cause: backupErr });
+        }
+      } else {
+        throw new Error('TCLK_STATE_INVALID: backup is not a state object');
+      }
+    }
+    if (recoveredFromBackup) {
+      throw new Error('TCLK_STATE_RECONCILIATION_REQUIRED: backup may precede external effects');
+    }
+    this.state = { ...empty, ...(parsed ?? {}) };
     if (!this.state.noLockCooldowns || typeof this.state.noLockCooldowns !== 'object'
       || Array.isArray(this.state.noLockCooldowns)) this.state.noLockCooldowns = {};
     if (!this.state.payerLockSeenAt || typeof this.state.payerLockSeenAt !== 'object'
       || Array.isArray(this.state.payerLockSeenAt)) this.state.payerLockSeenAt = {};
+    let persistRecoveredState = recoveredFromBackup;
     if (this.state.noLockCooldownsMigrated !== true) {
       this.#migrateLegacyNoLockCooldowns();
       this.state.noLockCooldownsMigrated = true;
-      // Persist the migration marker and any recovered cooldowns once.
-      if (hadFile) this.save();
+      if (hadFile) persistRecoveredState = true;
     }
+    if (this.state.noLockCooldownsMigratedV2 !== true) {
+      this.#migrateLegacyNoLockCooldowns();
+      this.state.noLockCooldownsMigratedV2 = true;
+      if (hadFile) persistRecoveredState = true;
+    }
+    if (persistRecoveredState) this.save();
     return this.state;
   }
 
   save() {
-    fs.mkdirSync(path.dirname(this.statePath), { recursive: true });
-    const temp = `${this.statePath}.tmp`;
-    fs.writeFileSync(temp, JSON.stringify(this.state, null, 2));
-    fs.renameSync(temp, this.statePath);
+    atomicReplaceJson(this.statePath, this.state);
   }
 
   /* ------------------------------------------------------------- turn --- */
@@ -299,6 +369,11 @@ export class TclkEngine {
 
     const frames = this.#framesIn(messages);
     const accepted = new Set(frames.filter(({ frame }) => frame.type === 'accept').map(({ frame }) => frame.ref));
+    const oursAccepted = new Set(frames
+      .filter(({ frame }) => frame.type === 'accept' && this.ours.has(frame.from))
+      .map(({ frame }) => frame.ref));
+    const closedOfferIds = new Set([...(this.state.completed || []), ...(this.state.abandoned || [])]
+      .map((record) => record?.offerId).filter(Boolean));
     const now = this.now();
     const noLockCooldowns = this.#cooldownPayers(now);
 
@@ -357,21 +432,29 @@ export class TclkEngine {
     // Unknown stamps (a record without `ts`) are not a reason to refuse; see FRESH_OFFER_MS.
     const stamps = (messages || []).map((m) => Date.parse(m.ts)).filter(Number.isFinite);
     const readAt = stamps.length ? Math.max(...stamps) : null;
-    const fresh = (at) => readAt === null || !Number.isFinite(at) || (readAt - at) <= FRESH_OFFER_MS;
+    const fresh = (frame, at) => {
+      const clientWindow = Number(this.client.offerFreshnessMs?.(frame));
+      const windowMs = Number.isFinite(clientWindow) && clientWindow >= 0 ? clientWindow : FRESH_OFFER_MS;
+      return readAt === null || !Number.isFinite(at) || (readAt - at) <= windowMs;
+    };
 
     const candidates = frames
       .filter(({ frame }) => frame.type === 'offer')
-      .filter(({ at }) => fresh(at))             // a race we can still be first in
+      .filter(({ frame, at }) => fresh(frame, at)) // protocol-aware race window when the client has stronger semantics
+      .filter(({ frame }) => typeof this.client.offerEligible !== 'function' || this.client.offerEligible(frame))
       .filter(({ frame: o }) =>
         o.role === 'payer'                       // we are the payee, the side that reveals last
         && o.lock === 'hash'                     // never the unaudited point path
         && o.rails.includes('paper')             // the only rail that exists
         && !this.ours.has(o.from)                // not ours, not our sibling key's
-        && !noLockCooldowns.has(o.from)          // a precise no-lock cooldown, independent of history
-        && !isBurned(this.payerRep, o.from)      // and the room says the same about them
-        && (!repUsable || isTrusted(this.payerRep, o.from))   // and has finished one before
+        && (this.client.offerBypassesNoLockCooldown?.(o) === true || !noLockCooldowns.has(o.from))
+        && (this.client.offerBypassesHistory?.(o) === true || !isBurned(this.payerRep, o.from))
+        && (this.client.offerBypassesHistory?.(o) === true || !repUsable || isTrusted(this.payerRep, o.from))
         && offerLooksAlive(o)                    // a shape that has never once settled
-        && !accepted.has(o.id)                   // first accept wins; a second is noise
+        && !closedOfferIds.has(o.id)              // never retry a deal this lane already closed
+        && !oursAccepted.has(o.id)               // never accept the same offer twice with our own DID
+        && (!accepted.has(o.id) || String(o.job?.proto || '').toLowerCase() === 'blockrewards')
+                                                   // BlockRewards explicitly permits multiple accepts
         && offerIdMatches(o)                     // a frame that lies about its own id is not an offer
         && validateDeadlines(o, now).ok
         && (o.claimByMs - now) >= this.minClaimWindowMs);
@@ -425,8 +508,13 @@ export class TclkEngine {
     candidates.sort((a, b) => {
       const economic = Number(this.client.offerPriority?.(b.frame) ?? 0) - Number(this.client.offerPriority?.(a.frame) ?? 0);
       if (economic !== 0) return economic;
+      const aProto = String(a.frame?.job?.proto || '').toLowerCase();
+      const bProto = String(b.frame?.job?.proto || '').toLowerCase();
       const recent = Number(locksRecently(b.frame.from)) - Number(locksRecently(a.frame.from));
       if (recent !== 0) return recent;
+      if (aProto === 'blockrewards' && bProto === 'blockrewards' && (a.seq ?? 0) !== (b.seq ?? 0)) {
+        return (b.seq ?? 0) - (a.seq ?? 0);
+      }
       const trust = Number(isTrusted(this.payerRep, b.frame.from))
                   - Number(isTrusted(this.payerRep, a.frame.from));
       if (trust !== 0) return trust;
@@ -437,6 +525,10 @@ export class TclkEngine {
     if (typeof this.client.preflightUsefulWork === 'function') {
       selected = null;
       for (const candidate of candidates) {
+        if (this.client.deferPreflightUntilLock?.(candidate.frame) === true) {
+          selected = candidate;
+          break;
+        }
         const { text: context, source } = await this.#jobText(candidate.frame.job);
         let verdict;
         try {
@@ -492,17 +584,24 @@ export class TclkEngine {
     // BlockRewards/TCLK jobs use a payee heartbeat to materialize the derived
     // deal room before the payer lock. It is a coordination record, not work
     // evidence and not settlement evidence.
-    try {
-      const heartbeat = encodeFrame({
-        type: 'heartbeat', from: this.identity.did, contract: accept.contract,
-        nonce: randomBytes(8).toString('hex')
-      });
-      await this.client.postMessage(this.state.deal.room, heartbeat, this.identity);
-      this.state.deal.roomSeen = true;
-      this.state.deal.heartbeatPostedAt = this.now();
-      this.save();
-    } catch (err) {
-      sayOnce('tclk:heartbeat', `[tclk] deal heartbeat failed: ${err.message}`);
+    if (canOpenRoom(this.budget, this.now())) {
+      try {
+        const heartbeat = encodeFrame({
+          type: 'heartbeat', from: this.identity.did, contract: accept.contract,
+          nonce: randomBytes(8).toString('hex')
+        });
+        await this.client.postMessage(this.state.deal.room, heartbeat, this.identity);
+        this.state.deal.roomSeen = true;
+        this.state.deal.heartbeatPostedAt = this.now();
+        this.save();
+      } catch (err) {
+        this.#noteRefusal(err);
+        sayOnce('tclk:heartbeat', `[tclk] deal heartbeat failed: ${err.message}`);
+        if (String(offer?.job?.proto || '').toLowerCase() === 'flop-harness') {
+          this.#close(this.state.deal, 'abandoned', `harness deal-room unavailable: ${err.message}`);
+          return { action:'harness_room_unavailable', contract:accept.contract, room:dealRoom(accept.contract), error:err.message };
+        }
+      }
     }
 
     // The coordination pointer is a courtesy, not a record. Never let it fail the turn.
@@ -528,7 +627,7 @@ export class TclkEngine {
     const now = this.now();
 
     if (deal.status === 'accepted') return this.#awaitLock(deal, now);
-    if (deal.status === 'locked') return this.#reveal(deal, now, { backend, real, ledgerPath });
+    if (deal.status === 'locked' || deal.status === 'harness_delivered') return this.#reveal(deal, now, { backend, real, ledgerPath });
 
     // Anything else is a state this file never writes; do not act on it.
     this.#close(deal, 'abandoned', `unknown status ${deal.status}`);
@@ -537,7 +636,9 @@ export class TclkEngine {
 
   async #awaitLock(deal, now) {
     const waited = now - deal.acceptedAt;
-    const giveUp = now >= deal.offer.claimByMs || waited >= NO_LOCK_MS;
+    const clientWait = Number(this.client.noLockWaitMs?.(deal.offer));
+    const noLockMs = Number.isFinite(clientWait) && clientWait > 0 ? clientWait : NO_LOCK_MS;
+    const giveUp = now >= deal.offer.claimByMs || waited >= noLockMs;
     if (giveUp) {
       // The payer never locked. Cancel is valid before any lock exists, from
       // either side; posting it frees the room's record and us.
@@ -552,7 +653,9 @@ export class TclkEngine {
         ? LOST_RACE_REASON
         : now >= deal.offer.claimByMs
           ? 'payer never locked before claimByMs'
-          : `payer did not lock within ${Math.round(NO_LOCK_MS / 60_000)} min`;
+          : noLockMs === NO_LOCK_MS
+            ? `payer did not lock within ${Math.round(NO_LOCK_MS / 60_000)} min`
+            : `payer did not lock within ${Math.round(noLockMs / 1000)} sec`;
       /**
        * Only announce a cancel where there is something to withdraw.
        *
@@ -677,27 +780,80 @@ export class TclkEngine {
     return { action: 'lock_verified', contract: deal.contract };
   }
 
+  async #harnessVerdict(deal) {
+    let messages;
+    try {
+      ({ messages } = await this.client.readRoom('tclk-deliveries', { limit: READ_LIMIT, format: 'json' }));
+    } catch (err) {
+      return { error: err.message };
+    }
+    const expected = { payer: deal.offer?.from, contract: deal.contract };
+    for (const m of [...(messages || [])].reverse()) {
+      const parsed = parseHarnessVerdictMessage(m, expected);
+      if (parsed) return parsed;
+    }
+    return null;
+  }
+
   async #reveal(deal, now, { backend, real, ledgerPath }) {
     if (now >= deal.offer.refundAfterMs) {
       this.#close(deal, 'abandoned', 'refund window opened before reveal');
       return { action: 'deal_expired', contract: deal.contract };
     }
 
-    // The work, such as it is. An offer that carries a task we can read gets a
-    // real answer from a real model; the rehearsal offers that make up 111 of
-    // 133 get a line that says so, because a reveal with no work behind it is
-    // exactly what the spec warns the payer about, and we will not dress it up.
-    const work = await this.#work(deal, { backend, real, ledgerPath });
-    if (process.env.USEFUL_WORK_FAIL_CLOSED === '1' && /rehearsal on the paper rail|could not be answered|not offered as proof of any delivery/i.test(String(work || ''))) {
-      this.#close(deal, 'abandoned', 'work generation failed validation');
-      return { action: 'work_unavailable', contract: deal.contract, reason: 'no_valid_delivery' };
-    }
-    // Where the lock was found, which is the deal room when the venue could
-    // open one and `tclk-offers` when it could not. Older deals in flight
-    // across this change carry no `lockRoom`, and for them the deal room is
-    // what both sides already meant.
     const room = deal.lockRoom || deal.room;
-    await this.#post(room, null, work);
+    const isHarness = String(deal?.offer?.job?.proto || '').toLowerCase() === 'flop-harness';
+    let work = '';
+
+    if (isHarness && deal.status === 'harness_delivered') {
+      const verdict = await this.#harnessVerdict(deal);
+      if (verdict?.error) return { action:'harness_verdict_read_failed', contract:deal.contract, error:verdict.error };
+      if (!verdict) return { action:'waiting_for_harness_verdict', contract:deal.contract, room:deal.room };
+      deal.harnessVerdict = verdict;
+      deal.harnessVerdictAt = now;
+      this.save();
+      if (verdict.verdict === 'FAIL') {
+        this.#close(deal, 'abandoned', 'harness judge FAIL; secret not revealed',
+          { kind:'harness', verdict:'FAIL', judge:'sandbox' });
+        return { action:'harness_judge_failed', contract:deal.contract, verdict:verdict.text };
+      }
+      work = 'harness patch judged PASS';
+    } else {
+      // Generate work only before delivery. Harness stores no secret on the
+      // tape until the external sandbox has returned PASS.
+      work = await this.#work(deal, { backend, real, ledgerPath });
+      if (process.env.USEFUL_WORK_FAIL_CLOSED === '1' && /rehearsal on the paper rail|could not be answered|not offered as proof of any delivery/i.test(String(work || ''))) {
+        this.#close(deal, 'abandoned', 'work generation failed validation');
+        return { action: 'work_unavailable', contract: deal.contract, reason: 'no_valid_delivery' };
+      }
+
+      if (isHarness) {
+        const patch = String(work || '');
+        if (room !== deal.room) {
+          this.#close(deal, 'abandoned', 'harness lock not in derived deal room');
+          return { action:'harness_wrong_lock_room', contract:deal.contract, room };
+        }
+        if (!patch.startsWith('diff --git ')) {
+          this.#close(deal, 'abandoned', 'harness deliverable is not a unified diff');
+          return { action:'harness_invalid_deliverable', contract:deal.contract };
+        }
+        if (patch.length > 4000 || Buffer.byteLength(patch, 'utf8') > 4000) {
+          this.#close(deal, 'abandoned', 'harness unified diff exceeds one-message transport budget');
+          return { action:'harness_transport_too_large', contract:deal.contract, chars:patch.length };
+        }
+        const posted = await this.#post(room, null, patch);
+        if (!posted) return { action:'post_failed', contract:deal.contract, step:'harness_patch' };
+        deal.status = 'harness_delivered';
+        deal.harnessPatchPostedAt = now;
+        deal.harnessDeliveryChunks = 1;
+        deal.harnessPatchBytes = Buffer.byteLength(patch, 'utf8');
+        this.save();
+        return { action:'harness_patch_posted', contract:deal.contract, room, patchBytes:deal.harnessPatchBytes };
+      }
+
+      const posted = await this.#post(room, null, work);
+      if (!posted) return { action:'post_failed', contract:deal.contract, step:'work' };
+    }
 
     const revealed = await this.#post(room, {
       type: 'reveal', from: this.identity.did, contract: deal.contract, secret: deal.secret
@@ -736,11 +892,17 @@ export class TclkEngine {
      * kind of thing this lane exists not to do.
      */
     const settled = await this.#railStatus(deal.contract);
+    let receiptPosted = false;
     if (settled === 'claimed') {
-      await this.#post(room, {
-        type: 'receipt', from: this.identity.did, contract: deal.contract, outcome: 'claimed',
-        rail: 'paper', ref: deal.railRef || deal.contract
-      });
+      // Harness assigns the terminal receipt to the payer/program after the
+      // judged reveal. Generic TCLK work keeps the legacy payee courtesy receipt.
+      if (!isHarness) {
+        await this.#post(room, {
+          type: 'receipt', from: this.identity.did, contract: deal.contract, outcome: 'claimed',
+          rail: 'paper', ref: deal.railRef || deal.contract
+        });
+        receiptPosted = true;
+      }
       try {
         const { ns, key } = statePointer(deal.contract);
         await this.client.setKv(ns, key, stateNoteValue('claimed', 'paper'));
@@ -750,14 +912,17 @@ export class TclkEngine {
         `[tclk] receipt withheld: the rail reads ${settled ?? 'unreadable'}, not claimed — the reveal stands on its own`);
     }
 
-    this.#close(deal, 'completed', railClaimed ? 'claimed' : 'claimed (rail CAS lost)',
-      { kind: 'paper', status: settled ?? 'unreadable' });
+    this.#close(deal, 'completed', isHarness
+      ? 'harness judged PASS; reveal published; payer receipt pending'
+      : (railClaimed ? 'claimed' : 'claimed (rail CAS lost)'),
+      { kind: isHarness ? 'harness' : 'paper', status: settled ?? 'unreadable', verdict: isHarness ? 'PASS' : undefined });
     return {
-      action: 'deal_claimed',
+      action: isHarness ? 'harness_revealed_after_pass' : 'deal_claimed',
       contract: deal.contract,
       room,
       railClaimed,
-      receipt: settled === 'claimed',
+      receipt: receiptPosted,
+      payerReceiptExpected: isHarness,
       work: work.slice(0, 120)
     };
   }
@@ -901,7 +1066,13 @@ export class TclkEngine {
       try {
         const specialized = await this.client.executeUsefulWork({ deal, job, context, source });
         const answer = String(specialized?.text ?? specialized ?? '').trim();
-        if (answer.length >= 16) return `tclk-work | ${deal.contract} | job ${job.proto}:${job.id} (${source}) | ${answer}`;
+        if (specialized?.deliveryMode === 'raw') {
+          if (!answer.startsWith('diff --git ')) throw new Error('RAW_DELIVERABLE_INVALID_PREFIX');
+          if (answer.length > 4000 || Buffer.byteLength(answer, 'utf8') > 4000) throw new Error('RAW_DELIVERABLE_TRANSPORT_TOO_LARGE');
+          return answer;
+        }
+        const minAnswerLength = String(job?.proto || '').toLowerCase() === 'blockrewards' ? 1 : 16;
+        if (answer.length >= minAnswerLength) return `tclk-work | ${deal.contract} | job ${job.proto}:${job.id} (${source}) | ${answer}`;
       } catch (err) {
         sayOnce('tclk:specialized-work', `[tclk] specialized work failed: ${err.message}`);
         if (String(err?.message || err).startsWith('UNSUPPORTED_DELIVERABLE:')) {
@@ -962,7 +1133,7 @@ export class TclkEngine {
   #close(deal, bucket, reason, rail = null) {
     const closedAt = this.now();
     const record = {
-      contract: deal.contract, room: deal.room, payer: deal.offer.from,
+      contract: deal.contract, room: deal.room, payer: deal.offer.from, offerId: deal.offer.id,
       job: deal.offer.job ? `${deal.offer.job.proto}:${deal.offer.job.id}` : null,
       acceptedAt: deal.acceptedAt, closedAt, reason,
       railKind: rail ? rail.kind : null,

@@ -482,6 +482,13 @@ export async function runScoutDaemon(options = {}) {
    */
   const readOnly = config.readOnly ?? config.dryRun;
   const client = new TechnocoreClient({ baseUrl: config.serverUrl, readOnly, evidenceDir: config.evidenceDir });
+  // BlockRewards is a funded multi-accept lane. Detect it from the signed offer
+  // itself; never depend on a secondary open.json watcher to decide eligibility.
+  const isBlockRewards = (offer) => String(offer?.job?.proto || '').toLowerCase() === 'blockrewards';
+  client.offerFreshnessMs = (offer) => isBlockRewards(offer) ? 30_000 : 2_000;
+  client.offerBypassesHistory = (offer) => isBlockRewards(offer);
+  client.offerPriority = (offer) => isBlockRewards(offer) ? 1_000_000 + Number(offer?.amount || 0) : Number(offer?.amount || 0);
+  client.noLockWaitMs = (offer) => isBlockRewards(offer) ? 90_000 : undefined;
   if (readOnly) console.log('[Dry Run] Reads only — every write will be refused.');
   const scoutGuardrails = new Guardrails({ maxPerHour: 2, minCooldownMs: 60_000 });
   const scribeGuardrails = new Guardrails({ maxPerHour: 2, minCooldownMs: 60_000 });
