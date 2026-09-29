@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { effectOf, isTerminal, STATUS, EVIDENCE } from './ledger.mjs';
 import { referenceStatus } from './risk-gate.mjs';
+import { publicationTransition } from './publication.mjs';
 
 export const PRIZE_PLACES = 3;
 export const PRIZE_STATUS = Object.freeze({
@@ -236,9 +237,16 @@ export function archiveAlerts(prev, next, { dropSweeps = ARCHIVE_LAG_DROP_SWEEPS
   const add = (kind, text) => out.push({ kind, text });
   const was = prev.archive_status; const now = next.archive_status;
   const moved = next.archive_latest_sweep != null && prev.archive_latest_sweep != null && next.archive_latest_sweep > prev.archive_latest_sweep;
-  if (now === 'LAGGING' && was === 'CURRENT') add('archive_lagging', `close-1 archive stalled: ends at sweep ${next.archive_latest_sweep}, referee at ${next.live_latest_sweep} (${next.archive_lag_sweeps} sweeps, ~${next.archive_lag_minutes} min behind)`);
-  if (now === 'CURRENT' && was && was !== 'CURRENT') add('archive_current', `close-1 archive caught up: sweep ${next.archive_latest_sweep} (referee ${next.live_latest_sweep})`);
-  else if (moved) {
+  // With publication history, a lag under/over one threshold is not news (it flipped every cycle around 12 sweeps):
+  // the meaningful events are the publication state transitions.
+  const usePublication = Boolean(prev.publication?.state && next.publication?.state);
+  if (usePublication) {
+    const t = publicationTransition(prev.publication, next.publication);
+    if (t) add('publication_transition', t);
+  }
+  if (!usePublication && now === 'LAGGING' && was === 'CURRENT') add('archive_lagging', `close-1 archive stalled: ends at sweep ${next.archive_latest_sweep}, referee at ${next.live_latest_sweep} (${next.archive_lag_sweeps} sweeps, ~${next.archive_lag_minutes} min behind)`);
+  if (usePublication) { /* handled above */ } else if (now === 'CURRENT' && was && was !== 'CURRENT') add('archive_current', `close-1 archive caught up: sweep ${next.archive_latest_sweep} (referee ${next.live_latest_sweep})`);
+  else if (moved && !usePublication) {
     const stalledFor = prev.archive_latest_changed_at ? Date.parse(next.archive_latest_changed_at) - Date.parse(prev.archive_latest_changed_at) : 0;
     const drop = (prev.archive_lag_sweeps ?? 0) - (next.archive_lag_sweeps ?? 0);
     if (stalledFor >= ARCHIVE_STALL_MS || drop > dropSweeps) {

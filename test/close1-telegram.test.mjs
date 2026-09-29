@@ -167,7 +167,7 @@ test('T11b. the console source has no route to the executor, the signer, the loc
   const raw = fs.readFileSync(path.join(here, '../src/close1/telegram-bot.mjs'), 'utf8');
   const src = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, ''); // code only, not comments
   const imports = [...src.matchAll(/^import .* from '(.*)';$/gm)].map((m) => m[1]);
-  assert.deepEqual(imports.sort(), ['./risk-gate.mjs', 'node:fs', 'node:path']);
+  assert.deepEqual(imports.sort(), ['./publication.mjs', './risk-gate.mjs', 'node:fs', 'node:path']);
   assert.doesNotMatch(src, /child_process|executor|signOffer|operator-lock|operator-mode\.json'|host-role/);
 });
 

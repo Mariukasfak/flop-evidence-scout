@@ -41,6 +41,7 @@
  * Freshness (#15): the index stopped at sweep 766 (Last-Modified 2026-09-28
  * 04:15Z) while the referee kept posting. Missing is unpublished, not empty.
  */
+import { publicationHealth, WINDOW_SWEEPS } from './publication.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -62,7 +63,7 @@ const LEGACY_CLASS = {
 /** Evidence a corroboration carries: officially published, hash-checked against the index, not referee-bound. */
 export const CORROBORATION = 'OFFICIAL_REDACTED_CORROBORATION';
 /** An hour of sweeps: the archive publishes in batches, so a small lag is not news. */
-export const LAG_TOLERANCE_SWEEPS = 12;
+export const LAG_TOLERANCE_SWEEPS = WINDOW_SWEEPS;
 export const MAX_FETCH_PER_RUN = 24;
 
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -101,7 +102,9 @@ export function archiveHealth({ index, error = null, liveLatest, prev = null, no
     archive_last_success: error ? (prev?.archive_last_success ?? null) : new Date(nowMs).toISOString(),
     archive_error: error ? String(error).slice(0, 200) : null,
     archive_full_count: entries.filter((e) => e.status === 'full').length,
-    archive_redacted_count: entries.filter((e) => e.status === 'redacted').length
+    archive_redacted_count: entries.filter((e) => e.status === 'redacted').length,
+    // Did it merely catch up once, or does it publish regularly? (see publication.mjs)
+    publication: publicationHealth(prev?.publication, { latest, live: liveLatest ?? null, lag, lastModified: lastModified ?? prev?.archive_index_last_modified ?? null, nowMs, error })
   };
 }
 

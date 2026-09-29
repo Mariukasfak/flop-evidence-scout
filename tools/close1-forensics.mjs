@@ -24,6 +24,7 @@ import { corroboratedAccount, compareAccounts, CORROBORATED_LABEL } from '../src
 import { standingOf } from '../src/close1/runtime.mjs';
 import { DEFAULT_POLICY } from '../src/close1/risk-gate.mjs';
 import { sweepFor } from '../src/close1/protocol.mjs';
+import { PUBLICATION, STABLE_MAX_LAG } from '../src/close1/publication.mjs';
 import { refereeBodies } from './close1-take.mjs';
 
 const DIR = path.resolve('data/local/close1');
@@ -107,9 +108,15 @@ export function decide({ rows, ledger, comparison, archive, attempts, policy = D
   // Funds and exposure limits permitting a trade is never a reason to resume (operator, 2026-09-29):
   // only better evidence is. Each improvement is listed; only the ones that also make a NEW trade
   // checkable — an archive covering current sweeps, or an official signed lookup — can lift the mode.
-  const covering = archive?.archive_status === 'CURRENT' && !(archive.our_missing_sweeps || []).length;
+  // Not one cycle's small lag: the archive must be STABLE (several independent, regular advances since a stall),
+  // every record we need fetched and checked, none of ours missing, and the lag still within two batches.
+  const pub = archive?.publication ?? null;
+  const publishing = pub ? pub.state === PUBLICATION.STABLE : archive?.archive_status === 'CURRENT';
+  const auditable = !(archive?.our_missing_sweeps || []).length && (archive?.pending_sweeps ?? 0) === 0 && !(archive?.mismatch_sweeps || []).length
+    && archive?.archive_cache_valid !== false && (archive?.archive_lag_sweeps == null || archive.archive_lag_sweeps <= STABLE_MAX_LAG);
+  const covering = Boolean(publishing && auditable);
   const improvements = [];
-  if (covering) improvements.push('the archive covers current sweeps');
+  if (covering) improvements.push('the archive publishes regularly and covers current sweeps');
   if (officialLookup) improvements.push('FLOP Labs publishes a signed per-owner/per-trade lookup');
   if (tally.proven_settled_ours > 0) improvements.push(`${tally.proven_settled_ours} trade(s) have copy-level settlement provenance`);
   if (tally.unknown === 0) improvements.push('no trade remains unknown');
@@ -117,7 +124,9 @@ export function decide({ rows, ledger, comparison, archive, attempts, policy = D
   let mode = covering || officialLookup ? MODE.SAFE_RESUME_CANDIDATE : MODE.EVIDENCE_ONLY;
   if (comparison.conflicts.length) { mode = MODE.HOLD; reasons.push('the proven, corroborated and board views disagree'); }
   if (!covering) {
-    reasons.push(`the archive is ${archive?.archive_status ?? 'unknown'} (${archive?.archive_lag_sweeps ?? '?'} sweeps behind): a new trade now would land in a sweep with no record, and the flow post omits most outcomes, so it would most likely end UNKNOWN like the last ones`);
+    reasons.push(pub && !publishing
+      ? `archive publication is ${pub.state} (${pub.reason}); latest ${archive?.archive_latest_sweep ?? '?'}, ${archive?.archive_lag_sweeps ?? '?'} sweeps behind: one catch-up batch is not proof that a new trade would later be auditable, and the flow post omits most outcomes, so it would most likely end UNKNOWN like the last ones`
+      : `the archive is ${archive?.archive_status ?? 'unknown'} (${archive?.archive_lag_sweeps ?? '?'} sweeps behind): a new trade now would land in a sweep with no record, and the flow post omits most outcomes, so it would most likely end UNKNOWN like the last ones`);
   }
   if (!covering && !officialLookup && improvements.length) reasons.push(`improved (${improvements.join('; ')}), but a new trade still could not be checked`);
   if (tally.proven_settled_ours === 0) reasons.push('no trade is proven ours yet, so the ledger still carries every unknown at worst case');

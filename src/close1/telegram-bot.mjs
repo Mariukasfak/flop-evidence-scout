@@ -14,6 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_POLICY } from './risk-gate.mjs';
+import { lastModifiedAgeMin, MIN_INDEPENDENT_ADVANCES } from './publication.mjs';
 
 const CAP = DEFAULT_POLICY.maxAttempts; // display only; this file never changes it
 
@@ -84,7 +85,7 @@ export const IMPORTANT_KINDS = Object.freeze(new Set([
   'evidence_report', 'archive_our_sweeps', 'archive_current', 'archive_advanced', 'unknown_resolved', 'corroboration_changed',
   'settled_proven', 'trade_resolved', 'owner_stronger', 'mint_confirmed', 'proven_exposure_changed', 'mode_changed',
   'maintainer_reply', 'new_watched_issue', 'watched_issue_state', 'github_watch_blind', 'github_watch_restored',
-  'prize_place_proven', 'updater_blocked', 'write_failure', 'archive_lagging', 'contest_verification_failed',
+  'prize_place_proven', 'publication_transition', 'updater_blocked', 'write_failure', 'archive_lagging', 'contest_verification_failed',
   'contest_verification_restored', 'referee_stale', 'risk_gate_halt', 'package_changed_upstream', 'package_not_draft',
   'rules_repo_changed', 'rules_version_final', 'seed_changed', 'launch_record_published'
 ]));
@@ -243,15 +244,22 @@ export function fmtUnknown(snap, forensics) {
 export function fmtArchive(snap, nowMs) {
   const a = snap?.archive;
   if (!a) return '🟡 Archyvo duomenų dar nėra.';
-  return [
-    `${a.archive_status === 'CURRENT' ? '🟢' : '🟡'} ARCHYVAS: ${a.archive_status}`,
+  const p = a.publication;
+  const lmAge = lastModifiedAgeMin(a.archive_index_last_modified, nowMs);
+  const dur = (m) => (m == null ? '?' : m < 90 ? `${m} min` : `${Math.round(m / 60)} val`);
+  const lines = [
+    `${p?.state === 'STABLE' ? '🟢' : '🟡'} ARCHYVAS: ${a.archive_status}`,
+    `Publication: ${p?.state ?? 'nėra duomenų'}${p?.reason ? ` (${p.reason})` : ''}`,
     `Latest: ${a.archive_latest_sweep ?? '?'} · live: ${a.live_latest_sweep ?? '?'} · lag: ${a.archive_lag_sweeps ?? '?'} sweep (~${a.archive_lag_minutes ?? '?'} min)`,
-    `Last-Modified: ${a.archive_index_last_modified ?? '?'}`,
+    `Last-Modified: ${a.archive_index_last_modified ?? '?'} (amžius ${dur(lmAge)})`,
+    `Last archive advance: ${p?.last_advance_at ? `${ago(p.last_advance_at, nowMs)} (${p.last_advance_from} → ${p.last_advance_to}, +${p.last_advance_jump})` : 'nematytas'}`,
+    `Recovery evidence: ${p ? `${p.independent_advances ?? 0}/${MIN_INDEPENDENT_ADVANCES} nepriklausomų advance'ų po atsigavimo (iš eilės ${p.consecutive_advances ?? 0})` : '?'}`,
     `Cache: ${a.archive_cache_present ?? '?'}/${a.archive_cache_required ?? '?'} · valid: ${yn(a.archive_cache_valid)}`,
     `Hash mismatches: ${(a.mismatch_sweeps || []).length}`,
     `Mūsų trūkstami sweep'ai: ${(a.our_missing_sweeps || []).length}`,
-    a.archive_status !== 'CURRENT' ? `Archive stalled: ${a.archive_latest_changed_at ? `nesikeitė ${ago(a.archive_latest_changed_at, nowMs).replace('prieš ', '')}` : 'nesikeičia'} (tai laukiama būsena, ne pranešimas)` : ''
-  ].filter(Boolean).join('\n');
+    p?.state === 'STALLED' ? `Archive stalled: nesikeitė ${dur(Math.round((nowMs - Date.parse(a.archive_latest_changed_at)) / 60000))} (tai laukiama būsena, ne pranešimas)` : ''
+  ];
+  return lines.filter(Boolean).join('\n');
 }
 
 export function fmtGithub(snap, nowMs) {
