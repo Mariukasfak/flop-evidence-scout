@@ -264,7 +264,7 @@ const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true })
  */
 export async function reconcileArchive({
   trades, registration, ourDid, signedFiles, liveLatest, cacheDir, cfg = null,
-  prevHealth = null, nowMs = Date.now(), fetchFn = fetch, maxFetch = MAX_FETCH_PER_RUN, base = ARCHIVE_BASE
+  prevHealth = null, nowMs = Date.now(), fetchFn = fetch, maxFetch = MAX_FETCH_PER_RUN, base = ARCHIVE_BASE, revalidate = false
 }) {
   const meta = readJson(path.join(cacheDir, 'index-meta.json'), null);
   let index = null; let error = null; let lastModified = meta?.lastModified ?? null;
@@ -289,6 +289,7 @@ export async function reconcileArchive({
   const records = new Map();
   const mismatches = [];
   let fetched = 0; let pending = 0;
+  const differs = []; let compared = 0;
   const archiveLatest = index ? Math.max(...index.keys()) : null;
   const wanted = wantedSweeps({ trades, registration, cfg });
   const need = wanted.filter((n) => archiveLatest != null && n <= archiveLatest);
@@ -299,9 +300,13 @@ export async function reconcileArchive({
     const key = `${entry.status}:${entry.file}:${entry.sha256 ?? ''}:${signedFile ?? ''}`;
     const f = path.join(cacheDir, 'records', `${n}.json`);
     let rec = readJson(f, null);
+    // revalidate: whatever is cached (a copy from another host, say) is derived data, not authority.
+    // It is fetched and hashed again; the cached copy only serves as a cross-check.
+    const cached = revalidate ? rec : null;
+    if (revalidate) rec = null;
     if (rec?.key !== key) rec = null;   // a new trade's id cannot appear in a sweep before it was posted
     if (!rec && !error) {
-      if (fetched >= maxFetch) { pending += 1; continue; }
+      if (!revalidate && fetched >= maxFetch) { pending += 1; continue; }
       try {
         const r = await fetchFn(`${base}${entry.path}`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -314,6 +319,11 @@ export async function reconcileArchive({
         }
         rec = { n, key, cls, integrity, sha256: c.sha256, why, extract, checkedAt: new Date(nowMs).toISOString() };
         writeJson(f, rec);
+        if (cached) {
+          compared += 1;
+          const norm = (r) => JSON.stringify({ k: r.key, c: LEGACY_CLASS[r.cls] ?? r.cls, s: r.sha256 ?? null, e: r.extract ?? null });
+          if (norm(cached) !== norm(rec)) differs.push(n);
+        }
       } catch (err) { pending += 1; health.archive_fetch_error = `sweep ${n}: ${err.message}`.slice(0, 200); continue; }
     }
     if (!rec) { pending += 1; continue; }
@@ -325,11 +335,14 @@ export async function reconcileArchive({
   const byCls = {};
   for (const r of records.values()) byCls[r.cls] = (byCls[r.cls] || 0) + 1;
   const ourMissing = wanted.filter((n) => !records.has(n));
+  const cacheOk = pending === 0 && mismatches.length === 0 && records.size === need.length;
   if (ourMissing.length) byCls[RECORD.MISSING] = ourMissing.length;
   return {
     health: {
       ...health, needed_sweeps: wanted.length, checked_sweeps: records.size, pending_sweeps: pending, fetched_this_run: fetched,
-      records_by_class: byCls, mismatch_sweeps: mismatches.map((m) => m.n), our_missing_sweeps: ourMissing
+      records_by_class: byCls, mismatch_sweeps: mismatches.map((m) => m.n), our_missing_sweeps: ourMissing,
+      archive_cache_required: need.length, archive_cache_present: records.size, archive_cache_valid: cacheOk,
+      ...(revalidate ? { revalidated: { fetched, compared_with_cache: compared, differs_from_cache: differs } } : {})
     },
     records,
     mismatches

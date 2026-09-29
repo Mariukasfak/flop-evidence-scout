@@ -21,6 +21,15 @@ function standingLine(s) {
   return `${tie}, complete · ${places} (${esc(s.prize_confidence)}: live mark, not final)`;
 }
 
+/** Which machine runs close-1, under what lock, and what it has actually written. */
+function hostLine(s) {
+  if (s.active_runtime_host === undefined) return '';
+  const evidence = s.evidence_baseline_ready === false ? `<strong>BACKFILLING</strong> (${esc(s.evidence_status_why ?? '')}) — evidence alerts held` : 'baseline ready';
+  const cache = s.archive_cache_required != null ? `archive cache ${esc(s.archive_cache_present)}/${esc(s.archive_cache_required)} (${s.archive_cache_valid ? 'valid' : 'incomplete'})` : 'archive cache ?';
+  return `<div>🖥 <strong>Runtime host:</strong> ${esc(s.active_runtime_host)} · commit ${esc(String(s.runtime_commit ?? '?').slice(0, 7))} · operator <strong>${esc(s.operator_mode ?? s.operator_mode_status)}</strong> · writes allowed ${esc(s.writes_allowed)} · last write attempt ${esc(s.last_write_attempt ?? 'never')}, last actual write ${esc(s.last_actual_write ?? 'never')} (total ${esc(s.writes_actual_total ?? 0)})</div>
+      <div>🧭 <strong>Evidence:</strong> ${evidence} · ${cache} · telegram ${esc(s.telegram_status)} · updater ${esc(s.updater_status)} (remote ${esc(String(s.remote_head ?? '?').slice(0, 7))}, active ${esc(String(s.active_head ?? '?').slice(0, 7))}) · last cycle ${esc(s.last_close1_cycle ?? '?')}, last successful ${esc(s.last_successful_cycle ?? 'never')}</div>`;
+}
+
 /** The corroborated account, fenced off: it is never what the gate reads. */
 function corroboratedBlock(s) {
   const c = s.corroborated_account;
@@ -80,6 +89,7 @@ export function renderClose1Section(s) {
       <div>🧾 <strong>Evidence confidence:</strong> ${esc(conf.overall)} · position ${esc(conf.position)} · settlements proven ours ${esc(s.settled_proven_count)}, id-only ${esc(s.id_settled_count)}</div>
       <div>🏁 <strong>Board:</strong> ${standingLine(s)}</div>
       <div>🗄️ <strong>Official archive:</strong> ${archiveLine(s.archive)} — only REFEREE_HASH_VERIFIED_FULL may change a status; OFFICIAL_INDEX_VERIFIED_REDACTED corroborates, never proves</div>
+      ${hostLine(s)}
       <div>🐙 <strong>GitHub watcher:</strong> ${esc(s.github_watch_status ?? '?')} · remaining ${esc(s.github_remaining ?? '?')} · resets ${esc(s.github_reset_at ?? '?')} · last success ${esc(s.github_last_success ?? 'never')}${s.github_authenticated ? '' : ' · no token'}</div>
       ${corroboratedBlock(s)}
       <div>🟢 <strong>Open offers:</strong> ${offers}</div>

@@ -72,7 +72,7 @@ function confidence(ledger) {
 export function buildSnapshot({
   contest, contestError = null, streams, price, ledger, pnl, ourDid, trades, gate, nowMs,
   writeErrors5m = 0, upstream = null, upstreamError = null, integrity = {}, archive = null,
-  corroborated = null, comparison = null, decision = null, operatorMode = null
+  corroborated = null, comparison = null, decision = null, host = null
 }) {
   const res = ledger ? [...ledger.resolutions.values()] : [];
   const cRows = new Map((corroborated?.rows || []).map((x) => [x.id, x]));
@@ -155,7 +155,8 @@ export function buildSnapshot({
       recommended_next_mode: decision.recommended_next_mode, tally: decision.tally, exposure: decision.exposure,
       evidence_improvements: decision.evidence_improvements ?? [], reasons: decision.reasons
     } : null,
-    operator_mode: operatorMode,
+    // Host health: which machine is the runtime, what lock it is under, and what it has written.
+    ...(host || {}),
     archive_conflicts: ledger?.archiveConflicts ?? [],
     gate: gate ?? null,
     trades: res.map((r) => ({
@@ -282,6 +283,33 @@ export function evidenceAlerts(prev, next) {
   const mode = (s) => s?.evidence_summary?.recommended_next_mode;
   if (mode(prev) && mode(next) && mode(prev) !== mode(next)) add('mode_changed', `close-1 RECOMMENDED_NEXT_MODE ${mode(prev)} → ${mode(next)}: ${(next.evidence_summary.reasons || []).join('; ')}`);
   return out;
+}
+
+/**
+ * A fresh host has no archive cache, and a half-filled cache shows fewer
+ * corroborated outcomes than the archive really holds. Until every published
+ * sweep we need has been fetched and checked, there is no baseline, and a
+ * "change" would only be the cache filling up. The first complete snapshot IS
+ * the baseline; only changes after it may alert.
+ */
+export function baselineStatus(archive) {
+  const a = archive || {};
+  if (a.archive_latest_sweep == null) return { ready: false, status: 'BACKFILLING', why: 'the archive index has not been read' };
+  if ((a.pending_sweeps ?? 1) > 0) return { ready: false, status: 'BACKFILLING', why: `${a.pending_sweeps ?? '?'} needed sweeps not yet fetched and checked` };
+  if ((a.mismatch_sweeps || []).length) return { ready: false, status: 'BACKFILLING', why: `hash mismatch in sweep(s) ${a.mismatch_sweeps.join(', ')}` };
+  return { ready: true, status: 'BASELINE_READY', why: null };
+}
+
+/** Evidence transitions: what a cache filling up would fake. Integrity, lock, GitHub and contest alerts are not among them. */
+export const EVIDENCE_TRANSITION_KINDS = Object.freeze(new Set([
+  'trade_resolved', 'settled_proven', 'unknown_resolved', 'corroboration_changed', 'owner_stronger', 'mint_confirmed',
+  'proven_exposure_changed', 'mode_changed', 'archive_our_sweeps', 'account_conflict', 'prize_place_proven'
+]));
+
+/** Without a baseline on BOTH sides of the comparison, evidence transitions are logged, not sent. */
+export function gateEvidenceAlerts(prev, next, alerts) {
+  if (prev?.evidence_baseline_ready === true && next?.evidence_baseline_ready === true) return alerts;
+  return alerts.map((a) => (EVIDENCE_TRANSITION_KINDS.has(a.kind) ? { ...a, logOnly: true, suppressed: next?.evidence_baseline_ready ? 'BASELINE_JUST_ESTABLISHED' : 'BACKFILLING' } : a));
 }
 
 /** Kinds that are folded into one evidence report instead of being sent one by one. */

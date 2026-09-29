@@ -6,7 +6,9 @@
  *
  *   node tools/close1-forensics.mjs          table + accounts + recommendation (markdown)
  *   node tools/close1-forensics.mjs --json   the same as JSON
- *   node tools/close1-forensics.mjs --quiet  write the files only (the agent calls this on an evidence change)
+ *   node tools/close1-forensics.mjs --revalidate  fetch and hash every needed record again, ignoring the cache
+ *                                            (a cache copied from another host is derived data, not authority)
+ *   node tools/close1-forensics.mjs --quiet write the files only (the agent calls this on an evidence change)
  *
  * Reads the evidence store, our trade records and the archive cache (the only
  * network read is the archive's index.json, to know what is published). It
@@ -152,7 +154,7 @@ export async function run(argv = process.argv.slice(2)) {
   for (const [n, b] of prices.byN) if (typeof b.file === 'string') signedFiles.set(n, b.file);
   for (const [n, b] of flows.byN) if (typeof b.file === 'string') signedFiles.set(n, b.file);
   const prev = readJson(path.join(DIR, 'runtime.json'), null);
-  const a = await reconcileArchive({ trades: state.trades, registration, ourDid, signedFiles, liveLatest: prices.latest?.body.n ?? null, cacheDir: path.join(DIR, 'archive'), prevHealth: prev?.archive ?? null, maxFetch: 0 });
+  const a = await reconcileArchive({ trades: state.trades, registration, ourDid, signedFiles, liveLatest: prices.latest?.body.n ?? null, cacheDir: path.join(DIR, 'archive'), prevHealth: prev?.archive ?? null, maxFetch: 0, revalidate: argv.includes('--revalidate') });
   const verdicts = new Map(state.trades.map((t) => [t.id, archiveVerdict(t, { records: a.records, ourDid })]));
   const mint = archiveMint({ records: a.records, regSweep: sweepFor(Date.parse(registration.postedAt)) });
   const ledger = buildLedger({ trades: state.trades, registration, flows: flows.byN, prices: prices.byN, ourDid, archive: verdicts, archiveMint: mint, roomPosts: state.roomPosts ?? [] });
@@ -179,6 +181,7 @@ export async function run(argv = process.argv.slice(2)) {
   if (argv.includes('--json')) console.log(JSON.stringify(report, null, 2));
   else {
     console.log(markdown(report));
+    if (a.health.revalidated) console.log(`\nrevalidated: fetched ${a.health.revalidated.fetched}, compared with cache ${a.health.revalidated.compared_with_cache}, differs from cache in sweeps [${a.health.revalidated.differs_from_cache.join(', ')}]; cache valid ${a.health.archive_cache_valid}`);
     console.log(`\nowner: ${report.owner.state} ${report.owner.evidence} confidence ${report.owner.confidence}`);
     console.log(`A proven: ${JSON.stringify(report.accounts.A_proven)}`);
     const B = report.accounts.B_corroborated;

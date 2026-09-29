@@ -36,7 +36,9 @@ import { buildLedger, termsOf, STATUS } from '../src/close1/ledger.mjs';
 import { decide, ACTION } from '../src/close1/strategy.mjs';
 import { approveTrade, approveProbe, DEFAULT_POLICY } from '../src/close1/risk-gate.mjs';
 import { Executor } from '../src/close1/executor.mjs';
-import { buildSnapshot, alertsBetween, deliverAlerts, withEvidenceReport } from '../src/close1/runtime.mjs';
+import { buildSnapshot, alertsBetween, deliverAlerts, withEvidenceReport, baselineStatus, gateEvidenceAlerts } from '../src/close1/runtime.mjs';
+import { readOperatorLock, makeWriteGuard, lockAlerts, recordWrite, readWrites, foreignWrites, setWatchSince, WritesBlocked } from '../src/close1/operator-lock.mjs';
+import { hostHealth, loadTelegramEnv, telegramOnlineTest, telegramConfigured } from '../src/close1/host.mjs';
 import { forensicRows, decide as recommend, run as runForensics } from './close1-forensics.mjs';
 import { watchUpstream } from '../src/close1/upstream.mjs';
 import { corroboratedAccount, compareAccounts } from '../src/close1/corroborated.mjs';
@@ -131,6 +133,11 @@ export async function run(argv = process.argv.slice(2)) {
   const take = argv.includes('--take');
   const policy = { ...DEFAULT_POLICY, mode: take ? 'take' : 'make', allowOpenTake: process.env.CLOSE1_ALLOW_OPEN_TAKE === '1' };
   const nowMs = Date.now();
+  // The updater is swapping the code under us: skip this run rather than run a half-updated tree.
+  try {
+    const u = JSON.parse(fs.readFileSync(path.join(DIR, 'update.lock'), 'utf8'));
+    if (Date.now() - Date.parse(u.at) < 10 * 60_000) { console.log('no run: an update is in progress'); return null; }
+  } catch { /* no lock: the normal case */ }
   const client = new TechnocoreClient({ evidenceDir: path.resolve('data/local/evidence') });
   const evidence = new EvidenceStore({ dir: path.join(DIR, 'evidence') });
   const registration = readJson(REGISTRATION, null);
@@ -241,8 +248,18 @@ export async function run(argv = process.argv.slice(2)) {
       decision = recommend({ rows, ledger, comparison, archive: archiveHealth, attempts: state.trades.length });
     } catch (err) { console.log(`recommendation failed: ${err.message}`); }
   }
-  // The operator's mode (data/local/close1/operator-mode.json): anything but ACTIVE means no writes at all.
-  const operatorMode = readJson(path.join(DIR, 'operator-mode.json'), null)?.mode ?? null;
+  // The operator's lock is read again before every write; this read is for the snapshot and the report.
+  const lock = readOperatorLock(DIR);
+  const baseline = baselineStatus(archiveHealth);
+  const tgEnv = loadTelegramEnv();
+  const telegram = checkOnly ? { status: telegramConfigured(tgEnv) ? 'CONFIGURED' : 'NOT_CONFIGURED' } : await telegramOnlineTest({ env: tgEnv, dir: DIR });
+  // Posts under OUR key in the close-1 room that this host did not make: another machine is signing with it.
+  let writerAlerts = [];
+  if (ourDid) {
+    const fw = foreignWrites({ records: evidence.read(ROOM), ourDid, writes: readWrites(DIR) });
+    if (fw.initialised) { if (!checkOnly) setWatchSince(DIR, fw.since); }
+    else if (fw.foreign.length) writerAlerts = [{ kind: 'foreign_writer_detected', text: `CRITICAL close-1: post(s) at seq ${fw.foreign.slice(0, 5).join(', ')} were signed with our key in the close-1 room but not by this host (${lock.host ?? 'unknown host'}). A second machine may be writing.` }];
+  }
 
   // 4. What the strategy would do, and whether the gate would allow it — computed
   //    on every run, so the snapshot always says whether writes are open.
@@ -267,10 +284,22 @@ export async function run(argv = process.argv.slice(2)) {
   gate.kind = gate.ok ? 'open' : gate.reasons.some((r) => HALT.test(r)) ? 'halt' : 'hold';
 
   // 5. Snapshot and alerts.
-  const snapshot = buildSnapshot({ contest, contestError, streams: stream.stats(), price, ledger, pnl, ourDid, trades: state.trades, gate, nowMs, writeErrors5m: writeErrors, upstream, upstreamError, integrity, archive: archiveHealth, corroborated, comparison, decision, operatorMode });
-  const alerts = withEvidenceReport(prev, snapshot, [...alertsBetween(prev, snapshot), ...upstreamNotes]);
+  const snapshot = buildSnapshot({ contest, contestError, streams: stream.stats(), price, ledger, pnl, ourDid, trades: state.trades, gate, nowMs, writeErrors5m: writeErrors, upstream, upstreamError, integrity, archive: archiveHealth, corroborated, comparison, decision,
+    host: hostHealth({ dir: DIR, prev, nowMs, cycleOk: Boolean(contest) && !contestError, telegram, baseline, archive: archiveHealth }) });
+  const alerts = withEvidenceReport(prev, snapshot, gateEvidenceAlerts(prev, snapshot, [...alertsBetween(prev, snapshot), ...lockAlerts(prev, snapshot), ...writerAlerts, ...upstreamNotes]));
   await deliverAlerts(alerts, { logFile: path.join(DIR, 'alerts.jsonl') });
   writeJson(path.join(DIR, 'runtime.json'), snapshot);
+  // The first complete snapshot is the BASELINE: recorded once, and its appearance is not an event.
+  const baselineFile = path.join(DIR, 'evidence-baseline.json');
+  if (snapshot.evidence_baseline_ready && !fs.existsSync(baselineFile) && !checkOnly) {
+    writeJson(baselineFile, {
+      established_at: snapshot.generated_at, runtime_commit: snapshot.runtime_commit, host: snapshot.active_runtime_host,
+      evidence_summary: snapshot.evidence_summary, exposure: [snapshot.exposure_low, snapshot.exposure_high, snapshot.proven_position],
+      archive: { latest: snapshot.archive?.archive_latest_sweep, status: snapshot.archive?.archive_status, by_class: snapshot.archive?.records_by_class },
+      trades: snapshot.trades.map((t) => ({ id: t.id, outcome: t.corroborated_outcome, settlement: t.corroborated_settlement, status: t.status }))
+    });
+    console.log('evidence baseline recorded (not an event)');
+  }
   // A meaningful change: keep the previous forensics and write a fresh one to compare with.
   if (alerts.some((a) => a.kind === 'evidence_report')) {
     try {
@@ -280,16 +309,23 @@ export async function run(argv = process.argv.slice(2)) {
     } catch (err) { console.log(`forensics refresh failed: ${err.message}`); }
   }
   printReport(snapshot, state, ledger, contestError);
-  for (const a of alerts) console.log(`ALERT ${a.kind}: ${a.text}`);
+  for (const a of alerts) console.log(`${a.logOnly ? `LOGGED ONLY${a.suppressed ? ` (${a.suppressed})` : ''}` : 'ALERT'} ${a.kind}: ${a.text}`);
   if (checkOnly || !go) {
     if (!checkOnly && gate.ok) console.log(`would: ${proposal.rationale}\ndry run; nothing signed or posted`);
     return snapshot;
   }
 
   // 6. Writes: probes first (they settle what we already did), then at most one new trade.
-  if (operatorMode && operatorMode !== 'ACTIVE') { console.log(`no writes: operator mode ${operatorMode}`); return snapshot; }
+  if (!lock.writes_allowed) { console.log(`no writes: ${lock.reasons.join('; ')}`); return snapshot; }
   if (!contest || !ledger) { console.log('no writes: contest or ledger unavailable'); return snapshot; }
-  const executor = new Executor({ identityPath: IDENTITY, client, room: ROOM });
+  const writesBefore = readWrites(DIR).actual;
+  // The snapshot above was taken before any write; this stamps what this cycle actually wrote.
+  const stampWrites = () => {
+    const w = readWrites(DIR);
+    Object.assign(snapshot, { last_write_attempt: w.last_attempt_at, last_actual_write: w.last_actual_write_at, writes_attempted_total: w.attempts, writes_actual_total: w.actual, writes_this_cycle: w.actual - writesBefore });
+    writeJson(path.join(DIR, 'runtime.json'), snapshot);
+  };
+  const executor = new Executor({ identityPath: IDENTITY, client, room: ROOM, guard: makeWriteGuard(DIR), onWrite: (w) => recordWrite(DIR, w) });
   if (executor.did !== ourDid) throw new Error('the signing key is not the registered owner; refusing to write');
   let probes = 0;
   // Fewest probes first, newest first: an older offer that keeps losing its void must not starve a fresh one.
@@ -309,19 +345,22 @@ export async function run(argv = process.argv.slice(2)) {
       (t.probes ||= []).push({ sweep: price.n, postedAt: new Date().toISOString(), mode: record.terms ? 'self' : 'rebuilt', seq: posted.seq, signed: [makerPayload(p.terms), takerPayload(p.terms, p.taker)] });
       probes += 1;
       console.log(`${t.id}: re-posted after its window to learn its fate`);
-    } catch (err) { writeErrors += 1; console.log(`${t.id}: probe failed (${err.message})`); }
+    } catch (err) { if (err instanceof WritesBlocked) { console.log(`${t.id}: ${err.message}`); break; } writeErrors += 1; console.log(`${t.id}: probe failed (${err.message})`); }
     writeJson(STATE, state);
   }
   if (writeErrors) await deliverAlerts([{ kind: 'write_failure', text: `close-1: ${writeErrors} probe write(s) failed` }], { logFile: path.join(DIR, 'alerts.jsonl') });
-  if (!gate.ok) { console.log(`no trade: ${gate.reasons.join(', ')}`); return snapshot; }
+  if (!gate.ok) { console.log(`no trade: ${gate.reasons.join(', ')}`); stampWrites(); return snapshot; }
   console.log(`proposal: ${proposal.rationale}`);
   try {
     if (proposal.action === ACTION.MAKE_OFFER) await makeOffer({ executor, stream, state, proposal });
     else if (proposal.action === ACTION.TAKE_OFFER) await takeOffer({ executor, state, proposal, ourDid });
   } catch (err) {
+    stampWrites();
+    if (err instanceof WritesBlocked) { console.log(err.message); return snapshot; }
     await deliverAlerts([{ kind: 'write_failure', text: `close-1 write failed: ${err.message}` }], { logFile: path.join(DIR, 'alerts.jsonl') });
     throw err;
   }
+  stampWrites();
   return snapshot;
 }
 
@@ -449,7 +488,7 @@ function printReport(s, state, ledger, contestError) {
   }
   const es = s.evidence_summary;
   if (es) console.log(`evidence: settled proven ${es.tally.proven_settled_ours}, corroborated ${es.tally.at_least_officially_corroborated}/${es.tally.attempts}, unknown ${es.tally.unknown} · RECOMMENDED_NEXT_MODE = ${es.recommended_next_mode} (for a person; not read by the agent)`);
-  console.log(`gate: ${s.gate?.kind ?? '?'}${s.gate?.ok ? '' : ` — ${(s.gate?.reasons || []).join(', ')}`}${s.operator_mode ? ` · operator mode ${s.operator_mode}` : ''}`);
+  console.log(`gate: ${s.gate?.kind ?? '?'}${s.gate?.ok ? '' : ` — ${(s.gate?.reasons || []).join(', ')}`} · host ${s.active_runtime_host} · operator ${s.operator_mode ?? s.operator_mode_status} · writes allowed ${s.writes_allowed} (actual total ${s.writes_actual_total}, this cycle ${s.writes_this_cycle}) · evidence ${s.evidence_status} · telegram ${s.telegram_status} · updater ${s.updater_status} · commit ${String(s.runtime_commit).slice(0, 7)}`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

@@ -17,7 +17,14 @@ import {
 } from './protocol.mjs';
 
 export class Executor {
-  constructor({ identityPath, client, room = 'close1', loadIdentity = null }) {
+  /**
+   * `guard(what)` throws when writes are not allowed; it is called before every
+   * signature and every post, so a lock that changes mid-run still stops us.
+   * `onWrite({ phase, seq })` records attempts and actual posts.
+   */
+  constructor({ identityPath, client, room = 'close1', loadIdentity = null, guard = null, onWrite = null }) {
+    this.guard = guard;
+    this.onWrite = onWrite;
     this.identityPath = identityPath;
     this.client = client;
     this.room = room;
@@ -36,6 +43,7 @@ export class Executor {
 
   /** Sign our own offer's terms. The terms must already be canonical and name us as maker. */
   signOffer(terms) {
+    this.guard?.('sign offer');
     const t = checkedTerms(terms);
     if (!t || JSON.stringify(t) !== JSON.stringify(terms) || t.maker !== this.did) throw new Error('refusing to sign: terms not canonical or not ours');
     const payload = makerPayload(t);
@@ -46,6 +54,7 @@ export class Executor {
 
   /** Countersign a stranger's offer whose maker signature verifies over the rebuilt terms. */
   signAccept(terms, makerSig) {
+    this.guard?.('sign accept');
     const t = checkedTerms(terms);
     if (!t || !safeVerify(makerPayload(t), makerSig, t.maker)) throw new Error('refusing to countersign: maker signature does not verify over the rebuilt terms');
     const payload = takerPayload(t, this.did);
@@ -60,6 +69,7 @@ export class Executor {
    * changes no position" even if it could not.
    */
   probeText(record) {
+    this.guard?.('sign probe');
     if (record.tradeObj) {
       const c = checkedTrade(record.tradeObj);
       if (!c.ok) throw new Error(`refusing to re-post: ${c.why}`);
@@ -75,8 +85,13 @@ export class Executor {
   /** Post a text the gate approved. `approval.text` must be byte-identical. */
   async post(text, approval) {
     if (!approval?.ok || approval.text !== text) throw new Error('refusing to post: no matching risk-gate approval');
-    const res = await this.client.postSignedMessage(this.room, text, this.#key());
+    this.guard?.('post');
+    this.onWrite?.({ phase: 'attempt' });
+    let res;
+    try { res = await this.client.postSignedMessage(this.room, text, this.#key()); } catch (err) { this.onWrite?.({ phase: 'error' }); throw err; }
     const line = String(res.raw ?? '').split('\n').find((l) => l.includes(JSON.parse(text).terms?.id ?? '\u0000'));
-    return { seq: Number(line?.match(/^\[(\d+)\]/)?.[1]) || null, raw: res.raw };
+    const seq = Number(line?.match(/^\[(\d+)\]/)?.[1]) || null;
+    this.onWrite?.({ phase: 'done', seq });
+    return { seq, raw: res.raw };
   }
 }

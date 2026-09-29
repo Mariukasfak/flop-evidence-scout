@@ -508,3 +508,83 @@ test('R10. a truncated tie never becomes a rank; not listed is said plainly', ()
   assert.ok(!/rank >|>25|#2[5-9]/.test(JSON.stringify(snap)), 'no pseudo-rank anywhere in the snapshot');
   assert.equal(snap.official_score_note, 'not visible in truncated top list');
 });
+
+// ---------------------------------------------------------------- 2026-09-29: a fresh host, a partial cache, no fake alerts
+
+import { baselineStatus, gateEvidenceAlerts, withEvidenceReport } from '../src/close1/runtime.mjs';
+
+/** Ten maker offers, each settled ours in a redacted record: the corroborated view should end at 10/10. */
+function freshHostFixture() {
+  const trades = Array.from({ length: 10 }, (_, i) => offer(`m${i}`, 10 + i * 3));
+  const records = {};
+  trades.forEach((t, i) => { records[11 + i * 3] = { redacted: true, bytes: sweepRecord(11 + i * 3, { trades: [{ id: t.id, maker: OUR, countersigner: stranger.did, outcome: 'settled' }] }) }; });
+  return { trades, arch: fakeArchive(records, { upTo: 60 }) };
+}
+
+function snapshotOf(trades, a) {
+  const verdicts = new Map(trades.map((t) => [t.id, archiveVerdict(t, { records: a.records, ourDid: OUR })]));
+  const ledger = buildLedger({ trades, registration, flows: flowsTo(60), prices: prices(60), ourDid: OUR, archive: verdicts, archiveMint: archiveMint({ records: a.records, regSweep: 2 }) });
+  const corroborated = corroboratedAccount({ trades, resolutions: ledger.resolutions, prices: prices(60), marks: { reference: 224, pnl_mark: 224 } });
+  const b = baselineStatus(a.health);
+  return buildSnapshot({ contest: null, streams: {}, price: null, ledger, pnl: null, ourDid: OUR, trades, gate: null, nowMs: NOW, archive: a.health, corroborated,
+    host: { evidence_baseline_ready: b.ready, evidence_status: b.status } });
+}
+
+test('H1. fresh host: partial cache → more cache → complete: NO fake "resolved" alerts, and the baseline is not an event', async () => {
+  const { trades, arch } = freshHostFixture();
+  const cacheDir = tmp();
+  const snaps = []; const sent = []; const raw = [];
+  let prev = null;
+  for (let run = 0; run < 12; run++) {
+    const a = await reconcileArchive({ trades, registration, ourDid: OUR, signedFiles: arch.signedFiles, liveLatest: 60, cacheDir, nowMs: NOW, fetchFn: arch.fetchFn, maxFetch: 5 });
+    const snap = snapshotOf(trades, a);
+    const alerts = withEvidenceReport(prev, snap, gateEvidenceAlerts(prev, snap, alertsBetween(prev, snap)));
+    sent.push(...alerts.filter((x) => !x.logOnly));
+    raw.push(...alertsBetween(prev, snap));
+    snaps.push(snap);
+    prev = snap;
+    if (a.health.pending_sweeps === 0 && snaps.length > 2 && snaps.at(-2).evidence_baseline_ready) break;
+  }
+  const corr = (s) => s.trades.filter((t) => t.corroborated_outcome === 'SETTLED').length;
+  assert.equal(snaps[0].evidence_baseline_ready, false, 'the first partial run is BACKFILLING');
+  assert.ok(corr(snaps[0]) < 10, 'the partial cache shows fewer corroborated outcomes than the archive holds');
+  assert.equal(corr(snaps.at(-1)), 10, 'the complete cache shows all of them');
+  assert.equal(snaps.at(-1).evidence_baseline_ready, true);
+  assert.deepEqual(sent.filter((x) => /unknown_resolved|corroboration_changed|trade_resolved|evidence_report|settled_proven|mint_confirmed|owner_stronger/.test(x.kind)), [], 'no fake evidence transitions were sent');
+  assert.ok(raw.some((x) => /unknown_resolved|corroboration_changed/.test(x.kind)), 'without the baseline gate the filling cache WOULD have produced fake resolved alerts (the test is not vacuous)');
+  // Only a change AFTER the baseline may alert.
+  const last = snaps.at(-1);
+  const later = { ...last, trades: last.trades.map((t, i) => (i === 0 ? { ...t, corroborated_outcome: 'UNKNOWN', corroboration: null } : t)) };
+  const real = withEvidenceReport(last, later, gateEvidenceAlerts(last, later, alertsBetween(last, later)));
+  assert.ok(real.some((x) => x.kind === 'evidence_report' && !x.logOnly), 'a genuine change after the baseline is reported');
+});
+
+test('H2. a copied cache is derived data: --revalidate fetches and hashes everything again and reports what differs', async () => {
+  const { trades, arch } = freshHostFixture();
+  const cacheDir = tmp();
+  const first = await reconcileArchive({ trades, registration, ourDid: OUR, signedFiles: arch.signedFiles, liveLatest: 60, cacheDir, nowMs: NOW, fetchFn: arch.fetchFn, maxFetch: 99 });
+  assert.equal(first.health.archive_cache_valid, true);
+  // Someone hands us a cache in which one record has been altered to say something else.
+  const f = path.join(cacheDir, 'records', '14.json');
+  const rec = JSON.parse(fs.readFileSync(f, 'utf8'));
+  rec.extract = null; rec.cls = 'REFEREE_HASH_VERIFIED_FULL';
+  fs.writeFileSync(f, JSON.stringify(rec));
+  const plain = await reconcileArchive({ trades, registration, ourDid: OUR, signedFiles: arch.signedFiles, liveLatest: 60, cacheDir, nowMs: NOW, fetchFn: arch.fetchFn, maxFetch: 0 });
+  assert.equal(plain.records.get(14).cls, 'REFEREE_HASH_VERIFIED_FULL', 'without revalidation the cache is believed, which is why a copied cache must be revalidated once');
+  const calls0 = arch.calls.length;
+  const v = await reconcileArchive({ trades, registration, ourDid: OUR, signedFiles: arch.signedFiles, liveLatest: 60, cacheDir, nowMs: NOW, fetchFn: arch.fetchFn, maxFetch: 0, revalidate: true });
+  assert.deepEqual(v.health.revalidated.differs_from_cache, [14]);
+  assert.equal(v.health.revalidated.fetched, v.health.archive_cache_required);
+  assert.ok(arch.calls.length > calls0 + 10, 'every needed record was fetched again');
+  assert.equal(v.records.get(14).cls, RECORD.REDACTED, 'the fresh hash check, not the copy, decides');
+  assert.equal(v.health.archive_cache_valid, true);
+  assert.deepEqual(baselineStatus(v.health), { ready: true, status: 'BASELINE_READY', why: null });
+});
+
+test('H3. no baseline while anything is unfetched, unread or mismatched', () => {
+  assert.equal(baselineStatus(null).ready, false);
+  assert.equal(baselineStatus({ archive_latest_sweep: null, pending_sweeps: 0 }).ready, false, 'index never read');
+  assert.equal(baselineStatus({ archive_latest_sweep: 766, pending_sweeps: 78 }).ready, false);
+  assert.equal(baselineStatus({ archive_latest_sweep: 766, pending_sweeps: 0, mismatch_sweeps: [300] }).ready, false);
+  assert.equal(baselineStatus({ archive_latest_sweep: 766, pending_sweeps: 0, mismatch_sweeps: [] }).ready, true);
+});
