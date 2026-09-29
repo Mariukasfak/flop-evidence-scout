@@ -25,7 +25,7 @@ function world({ unknownIds = ['mfk-aaaa', 'mfk-bbbb'] } = {}) {
     const id = i < unknownIds.length ? unknownIds[i] : `mfk-t${i}`;
     const unknown = i < unknownIds.length;
     return { id, status: 'SETTLED_UNPROVEN', evidence: unknown ? 'UNKNOWN' : 'OFFICIAL_REDACTED_CORROBORATION', sweep: 100 + i,
-      corroborated_outcome: unknown ? 'UNKNOWN' : (i % 2 ? 'SETTLED_OURS' : 'NOT_SETTLED'), corroborated_settlement: unknown ? 'UNKNOWN' : 'OFFICIALLY_CORROBORATED' };
+      corroborated_outcome: unknown ? 'UNKNOWN' : (i % 2 ? 'SETTLED' : 'NOT_SETTLED'), corroborated_settlement: unknown ? 'UNKNOWN' : 'OFFICIALLY_CORROBORATED' };
   });
   const snap = {
     generated_at: '2026-09-29T08:00:00.000Z', active_runtime_host: 'MINI_PC', runtime_commit: '58a7297aaaaaaaaaa', operator_mode: 'EVIDENCE_ONLY',
@@ -271,4 +271,14 @@ test('T20. no configured chat id means nobody is authorized', async () => {
   const { dir } = world();
   const r = await handleUpdate(msg('/status'), { ...ctxFor(dir), env: { TELEGRAM_BOT_TOKEN: TOKEN } });
   assert.deepEqual(r.replies, [UNAUTHORIZED]);
+});
+
+test('T21. /close1 labels PROVEN, CORROBORATED and UNKNOWN separately, with the real outcome names', async () => {
+  const { dir } = world();
+  const r = (await handleUpdate(msg('/close1'), ctxFor(dir))).replies.join('\n');
+  assert.match(r, /PROVEN: SETTLED_PROVEN 0; expozicija -4.5 … 8.42/);
+  assert.match(r, /CORROBORATED: settled 9 · not-settled 9/);
+  assert.match(r, /UNKNOWN: 2/);
+  assert.match(r, /Attempts|cap: 20\/20/);
+  assert.match((await handleUpdate(msg('/archive'), ctxFor(dir))).replies.join(''), /Cache: 102\/102 · valid: TAIP/);
 });

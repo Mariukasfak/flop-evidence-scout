@@ -119,12 +119,12 @@ export function tally(snap) {
   const t = snap?.trades || [];
   const unknown = t.filter((x) => !x.corroborated_outcome || x.corroborated_outcome === 'UNKNOWN');
   const decided = t.length - unknown.length;
-  const has = (x) => (o) => x.corroborated_outcome === o;
+  const has = (o) => (x) => x.corroborated_outcome === o;
   return {
     total: t.length, corroborated: decided, unknown: unknown.length,
     proven: snap?.settled_proven_count ?? 0,
-    settled_ours: t.filter(has('SETTLED_OURS')).length,
-    not_settled: t.filter((x) => /NOT_SETTLED|NONE|VOID/.test(String(x.corroborated_outcome || ''))).length
+    settled_ours: t.filter(has('SETTLED')).length,
+    not_settled: t.filter((x) => x.corroborated_outcome === 'NOT_SETTLED').length
   };
 }
 
@@ -198,7 +198,7 @@ export function tradeLines(snap, forensics) {
   return (snap?.trades || []).map((t) => {
     const r = rows.get(t.id) || {};
     const out = t.corroborated_outcome;
-    const settledOurs = out === 'SETTLED_OURS';
+    const settledOurs = out === 'SETTLED';
     const proven = t.evidence === 'CRYPTOGRAPHICALLY_PROVEN' || t.evidence === 'PROVEN' || String(t.corroborated_settlement || '').includes('PROVEN');
     const unk = !out || out === 'UNKNOWN';
     const icon = unk ? '❓' : proven ? '✅' : '🟡';
@@ -246,7 +246,7 @@ export function fmtArchive(snap, nowMs) {
   return [
     `${a.archive_status === 'CURRENT' ? '🟢' : '🟡'} ARCHYVAS: ${a.archive_status}`,
     `Latest: ${a.archive_latest_sweep ?? '?'} · live: ${a.live_latest_sweep ?? '?'} · lag: ${a.archive_lag_sweeps ?? '?'} sweep (~${a.archive_lag_minutes ?? '?'} min)`,
-    `Last-Modified: ${a.archive_last_modified ?? a.last_modified ?? '?'}`,
+    `Last-Modified: ${a.archive_index_last_modified ?? '?'}`,
     `Cache: ${a.archive_cache_present ?? '?'}/${a.archive_cache_required ?? '?'} · valid: ${yn(a.archive_cache_valid)}`,
     `Hash mismatches: ${(a.mismatch_sweeps || []).length}`,
     `Mūsų trūkstami sweep'ai: ${(a.our_missing_sweeps || []).length}`,
