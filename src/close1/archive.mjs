@@ -2,39 +2,65 @@
  * The official per-sweep archive, reconciled against what the referee signed.
  *
  * FLOP Labs published the records behind each post's `file` hash on 2026-09-28
- * (flop-labs/technocore-close-call-challenge#12, comment 5863800939):
- * https://challenges.technocore.chat/close-1/, with `index.json` mapping each
- * sweep to its record. Two limits decide how far any record may be trusted:
+ * (flop-labs/technocore-close-call-challenge#12, comment 5863800939, sv):
+ * https://challenges.technocore.chat/close-1/, "index.json maps each sweep to
+ * its hash. Trades posted in private rooms are redacted."
  *
- *   Redaction. "Trades posted in private rooms are redacted." A redacted
- *   record no longer hashes to the `file` the referee signed, so nothing ties
- *   its bytes to the referee. It is a hint, never an authoritative record: it
- *   cannot prove a trade settled, that one did not, or whose copy it was. On
- *   2026-09-28 every sweep holding one of our trades (249-409) was redacted.
+ * index.json, as measured 2026-09-28/29 (not a published schema — our reading):
  *
- *   Freshness. The archive is not kept current (issue #15): at 19:25Z on
- *   2026-09-28 `index.json` ended at sweep 766 (Last-Modified 04:15Z) while
- *   the referee posted sweep 952. A sweep missing from the archive is
- *   unpublished, not empty; lag never turns UNKNOWN into NOT_SETTLED.
+ *   { "contest": "close-1", "sweeps": [ { n, file, path, status, bytes,
+ *                                         redacted?, sha256? }, … ] }
  *
- * Only ARCHIVE_VERIFIED_FULL — sha256(bytes) equals the `file` hash inside a
- * signed referee post for that sweep — may change a trade's status. The pure
- * functions below decide that; `reconcileArchive` fetches only the sweeps our
- * trades and our mint need, and caches each checked record as a small extract.
+ *   file      the referee's hash for sweep n — equal to the `file` in the signed
+ *             price/flow/pnl posts of that sweep (checked for every sweep we use)
+ *   status    "full" | "redacted"
+ *   path      sweeps/<file>.json (full) or redacted/<file>.json (redacted)
+ *   sha256    redacted only: the hash of the redacted bytes actually served
+ *   redacted  redacted only: how many trades were replaced by {"redacted":"private room"}
+ *             — the input AND the output entry, so outcome and id are hidden too
+ *   bytes     size of the served file
+ *
+ * The index carries no signature. What binds a redacted record to the referee
+ * is only that the same unsigned index names the referee-signed `file` next to
+ * the redacted `sha256`, served over HTTPS from FLOP's domain. That is official
+ * publication, not cryptography: nothing lets us recompute `file` from the
+ * redacted bytes. (The `sha256` field was pointed out by a participant,
+ * shadow4810, in #12 comment 5864047963 — not by FLOP Labs.)
+ *
+ * Four trust classes, never converted into one another:
+ *
+ *   REFEREE_HASH_VERIFIED_FULL        sha256(bytes) == the `file` in a signed referee post.
+ *                                     The only class that may change a ledger status.
+ *   OFFICIAL_INDEX_VERIFIED_REDACTED  sha256(bytes) == the index's redacted `sha256`, and the
+ *                                     index's `file` == the signed `file`. Officially published
+ *                                     and intact, but not bound to the referee's hash; it
+ *                                     yields CORROBORATION, which the risk path never reads.
+ *   ARCHIVE_UNVERIFIED                a hash that cannot be checked or does not match.
+ *   ARCHIVE_MISSING                   not published yet (the index ends before it) or 404.
+ *
+ * Freshness (#15): the index stopped at sweep 766 (Last-Modified 2026-09-28
+ * 04:15Z) while the referee kept posting. Missing is unpublished, not empty.
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { sweepFor } from './protocol.mjs';
+import { sweepFor, SWEEP_MS } from './protocol.mjs';
 
 export const ARCHIVE_BASE = 'https://challenges.technocore.chat/close-1/';
 export const ARCHIVE_STATUS = Object.freeze({ CURRENT: 'CURRENT', LAGGING: 'LAGGING', UNAVAILABLE: 'UNAVAILABLE' });
 export const RECORD = Object.freeze({
-  VERIFIED_FULL: 'ARCHIVE_VERIFIED_FULL',   // bytes hash to the referee-signed `file`: authoritative
-  REDACTED: 'ARCHIVE_REDACTED',             // bytes match the index's redacted hash; not referee-bound
-  UNANCHORED: 'ARCHIVE_UNANCHORED',         // we hold no signed post for this sweep to compare against
-  MISMATCH: 'ARCHIVE_HASH_MISMATCH'         // bytes or index disagree with the referee's signed hash
+  FULL: 'REFEREE_HASH_VERIFIED_FULL',
+  REDACTED: 'OFFICIAL_INDEX_VERIFIED_REDACTED',
+  UNVERIFIED: 'ARCHIVE_UNVERIFIED',
+  MISSING: 'ARCHIVE_MISSING'
 });
+/** Cache files written before 2026-09-29 used these names. */
+const LEGACY_CLASS = {
+  ARCHIVE_VERIFIED_FULL: RECORD.FULL, ARCHIVE_REDACTED: RECORD.REDACTED,
+  ARCHIVE_UNANCHORED: RECORD.UNVERIFIED, ARCHIVE_HASH_MISMATCH: RECORD.UNVERIFIED
+};
+/** Evidence a corroboration carries: officially published, hash-checked against the index, not referee-bound. */
+export const CORROBORATION = 'OFFICIAL_REDACTED_CORROBORATION';
 /** An hour of sweeps: the archive publishes in batches, so a small lag is not news. */
 export const LAG_TOLERANCE_SWEEPS = 12;
 export const MAX_FETCH_PER_RUN = 24;
@@ -56,18 +82,22 @@ export function parseIndex(json) {
   return out;
 }
 
-/** CURRENT / LAGGING / UNAVAILABLE, and how far behind the referee the archive is. */
-export function archiveHealth({ index, error = null, liveLatest, prev = null, nowMs }) {
+/** CURRENT / LAGGING / UNAVAILABLE, how far behind the referee, and since when nothing moved. */
+export function archiveHealth({ index, error = null, liveLatest, prev = null, nowMs, lastModified = null }) {
   const latest = index && index.size ? Math.max(...index.keys()) : null;
   const lag = latest != null && liveLatest != null ? Math.max(0, liveLatest - latest) : null;
   let status = ARCHIVE_STATUS.UNAVAILABLE;
   if (!error && latest != null) status = lag != null && lag <= LAG_TOLERANCE_SWEEPS ? ARCHIVE_STATUS.CURRENT : ARCHIVE_STATUS.LAGGING;
   const entries = index ? [...index.values()] : [];
+  const moved = latest != null && latest !== prev?.archive_latest_sweep;
   return {
     archive_status: status,
     archive_latest_sweep: latest,
     live_latest_sweep: liveLatest ?? null,
     archive_lag_sweeps: lag,
+    archive_lag_minutes: lag == null ? null : Math.round((lag * SWEEP_MS) / 60_000),
+    archive_index_last_modified: lastModified ?? prev?.archive_index_last_modified ?? null,
+    archive_latest_changed_at: moved || !prev?.archive_latest_changed_at ? new Date(nowMs).toISOString() : prev.archive_latest_changed_at,
     archive_last_success: error ? (prev?.archive_last_success ?? null) : new Date(nowMs).toISOString(),
     archive_error: error ? String(error).slice(0, 200) : null,
     archive_full_count: entries.filter((e) => e.status === 'full').length,
@@ -77,22 +107,23 @@ export function archiveHealth({ index, error = null, liveLatest, prev = null, no
 
 /**
  * How far one record may be trusted. `signedFile` is the `file` hash from a
- * verified referee post for sweep n (null if we hold none).
+ * verified referee post for sweep n (null if we hold none). `integrity` marks a
+ * disagreement worth an alert, as opposed to a record we simply cannot check.
  */
 export function classifyRecord({ entry, bytes, signedFile }) {
   const got = sha256(bytes);
-  if (!signedFile) return { cls: RECORD.UNANCHORED, sha256: got };
-  if (entry.file !== signedFile) return { cls: RECORD.MISMATCH, sha256: got, why: 'index maps the sweep to a hash the referee did not sign' };
-  if (got === signedFile) return { cls: RECORD.VERIFIED_FULL, sha256: got };
+  if (!signedFile) return { cls: RECORD.UNVERIFIED, sha256: got, why: 'no signed referee post for this sweep to compare against' };
+  if (entry.file !== signedFile) return { cls: RECORD.UNVERIFIED, integrity: true, sha256: got, why: 'the index names a hash the referee did not sign' };
+  if (got === signedFile) return { cls: RECORD.FULL, sha256: got };
   if (entry.status === 'redacted' && entry.sha256 && got === entry.sha256) return { cls: RECORD.REDACTED, sha256: got };
-  return { cls: RECORD.MISMATCH, sha256: got, why: 'bytes hash to neither the signed file nor the index' };
+  return { cls: RECORD.UNVERIFIED, integrity: true, sha256: got, why: 'bytes hash to neither the signed file nor the index sha256' };
 }
 
 /**
  * The parts of one record that concern us: whether our key was minted, and
  * every trade that carries one of our ids or names our key, paired with its
  * outcome. Throws if the record is not the sweep it claims or its input and
- * output lists do not line up — such a record is treated as a mismatch.
+ * output lists do not line up — such a record is ARCHIVE_UNVERIFIED.
  */
 export function extractRecord(record, n, { ids, ourDid }) {
   const j = typeof record === 'string' || Buffer.isBuffer(record) ? JSON.parse(String(record)) : record;
@@ -121,73 +152,89 @@ export function windowOf(t, cfg = null) {
   return { from, last };
 }
 
-const sameTerms = (e, t) => Number(e.px) === Number(t.px) && Number(e.qty) === Number(t.qty);
-const isOurCopy = (e, t, ourDid) => (t.role === 'maker'
+/** The maker's side, which is what the record's `side` names. */
+const makerSide = (t) => (t.role === 'maker' ? t.ourSide : (t.ourSide === 'buy' ? 'sell' : 'buy'));
+const sameTerms = (e, t) => Number(e.px) === Number(t.px) && Number(e.qty) === Number(t.qty) && (!e.side || !t.ourSide || e.side === makerSide(t));
+/** Our exact copy: our id, our terms, our key in our role (and, for a take, the maker we took). */
+export const isOurCopy = (e, t, ourDid) => e.id === t.id && (t.role === 'maker'
   ? e.maker === ourDid && sameTerms(e, t)
   : e.countersigner === ourDid && e.maker === t.maker && sameTerms(e, t));
 
 /**
  * What the archive says about one of our trades.
  *
- *   { verdict: 'SETTLED_OURS' | 'SETTLED_NOT_OURS' | 'NOT_SETTLED' | null, … }
+ *   verdict        from REFEREE_HASH_VERIFIED_FULL records only — the ledger acts on it:
+ *                  'SETTLED_OURS' | 'SETTLED_NOT_OURS' | 'NOT_SETTLED' | null
+ *   corroboration  from OFFICIAL_INDEX_VERIFIED_REDACTED records — the ledger shows it
+ *                  and never acts on it: { kind: 'SETTLED_OURS' | 'SETTLED_NOT_OURS' |
+ *                  'NOT_SETTLED', exact, sweep, maker, countersigner, outcome, reason, fee }
  *
- * A verdict needs VERIFIED_FULL records: a settled copy in one of them, our
- * own copy voided in one of them (a take is applied once), or every sweep of
- * the window verified and none settling the id. Anything short of that
- * returns verdict null with the gaps named; redacted records contribute only
- * `observations`, which the ledger shows and never acts on.
+ * A redacted sweep hides the id AND the outcome of every private-room trade, and
+ * anyone may post a countersigned copy of our open offer in a private room. So
+ * a redacted record can corroborate that a copy settled, or that our own public
+ * take copy was voided, but it can corroborate that our OFFER never settled only
+ * when no trade at all was redacted in any sweep of the window.
  */
 export function archiveVerdict(t, { records, ourDid, cfg = null }) {
   const { from, last } = windowOf(t, cfg);
+  const gaps = { window: [from, last], missing: [], redacted: [], unverified: [], hidden_trades: 0 };
   const observations = [];
-  const missing = []; const redacted = []; const unanchored = []; const mismatched = [];
-  let allVerified = true;
-  let ourVoid = null;
+  let allFull = true; let allReadable = true;
+  let fullVoid = null; let redVoid = null; let corroboration = null;
+  let verdict = null;
   for (let n = from; n <= last; n++) {
     const rec = records.get(n);
-    if (!rec) { missing.push(n); allVerified = false; continue; }
-    if (rec.cls !== RECORD.VERIFIED_FULL) {
-      allVerified = false;
-      ({ [RECORD.REDACTED]: redacted, [RECORD.UNANCHORED]: unanchored, [RECORD.MISMATCH]: mismatched }[rec.cls] || missing).push(n);
-      for (const e of rec.extract?.trades || []) {
-        if (e.id === t.id) observations.push({ sweep: n, record: rec.cls, outcome: e.outcome, reason: e.reason, maker: e.maker, countersigner: e.countersigner, ours: isOurCopy(e, t, ourDid) });
-      }
-      continue;
-    }
+    const cls = rec ? (LEGACY_CLASS[rec.cls] ?? rec.cls) : RECORD.MISSING;
+    if (cls === RECORD.MISSING) { gaps.missing.push(n); allFull = false; allReadable = false; continue; }
+    if (cls === RECORD.UNVERIFIED) { gaps.unverified.push(n); allFull = false; allReadable = false; continue; }
+    if (cls === RECORD.REDACTED) { gaps.redacted.push(n); allFull = false; gaps.hidden_trades += rec.extract?.redacted_trades ?? 0; }
     for (const e of rec.extract?.trades || []) {
       if (e.id !== t.id) continue;
-      if (e.outcome === 'settled') {
-        const ours = isOurCopy(e, t, ourDid);
-        return {
-          verdict: ours ? 'SETTLED_OURS' : 'SETTLED_NOT_OURS', sweep: n, maker: e.maker, countersigner: e.countersigner,
-          fee: t.role === 'maker' ? e.maker_fee : e.taker_fee, observations
-        };
-      }
-      if (isOurCopy(e, t, ourDid) && !ourVoid) ourVoid = { sweep: n, reason: e.reason };
+      const ours = isOurCopy(e, t, ourDid);
+      const fee = t.role === 'maker' ? e.maker_fee : e.taker_fee;
+      const seen = { sweep: n, record: cls, outcome: e.outcome, reason: e.reason, maker: e.maker, countersigner: e.countersigner, side: e.side, px: e.px, qty: e.qty, ours, fee: ours ? fee : null };
+      observations.push(seen);
+      if (cls === RECORD.FULL) {
+        if (e.outcome === 'settled' && !verdict) verdict = { verdict: ours ? 'SETTLED_OURS' : 'SETTLED_NOT_OURS', sweep: n, maker: e.maker, countersigner: e.countersigner, fee: ours ? fee : null };
+        else if (ours && !fullVoid && e.outcome !== 'settled') fullVoid = { sweep: n, reason: e.reason };
+      } else if (e.outcome === 'settled' && !corroboration) {
+        corroboration = { kind: ours ? 'SETTLED_OURS' : 'SETTLED_NOT_OURS', exact: ours, ...seen };
+      } else if (ours && !redVoid && e.outcome !== 'settled') redVoid = seen;
     }
   }
-  if (ourVoid && t.role !== 'maker') {
-    return { verdict: ourVoid.reason === 'settled' ? 'SETTLED_NOT_OURS' : 'NOT_SETTLED', sweep: ourVoid.sweep, voidReason: ourVoid.reason, observations };
+  if (!verdict && fullVoid && t.role !== 'maker') {
+    verdict = { verdict: fullVoid.reason === 'settled' ? 'SETTLED_NOT_OURS' : 'NOT_SETTLED', sweep: fullVoid.sweep, voidReason: fullVoid.reason };
   }
-  if (allVerified) return { verdict: 'NOT_SETTLED', sweep: last, voidReason: ourVoid?.reason ?? null, observations };
-  return { verdict: null, window: [from, last], missing, redacted, unanchored, mismatched, observations };
+  if (!verdict && allFull) verdict = { verdict: 'NOT_SETTLED', sweep: last, voidReason: fullVoid?.reason ?? null };
+  if (!corroboration && redVoid && t.role !== 'maker') {
+    corroboration = { kind: redVoid.reason === 'settled' ? 'SETTLED_NOT_OURS' : 'NOT_SETTLED', exact: true, ...redVoid };
+  }
+  if (!corroboration && !verdict && allReadable && gaps.redacted.length && gaps.hidden_trades === 0) {
+    corroboration = { kind: 'NOT_SETTLED', exact: false, sweep: last, record: RECORD.REDACTED, outcome: null, reason: 'no copy in any sweep of the window, and none redacted' };
+  }
+  return { verdict: verdict?.verdict ?? null, ...(verdict || {}), corroboration, observations, gaps: verdict ? null : gaps };
 }
 
-/** Our mint in the archive: verified only from a VERIFIED_FULL record listing our key. */
+/**
+ * Our mint in the archive. Kept apart by source: `verified` only from a
+ * REFEREE_HASH_VERIFIED_FULL record, `corroborated` from an index-verified
+ * redacted one (the `minted` list is not redacted).
+ */
 export function archiveMint({ records, regSweep }) {
-  const out = { verified: null, observed: null };
+  const out = { verified: null, corroborated: null };
   if (!regSweep) return out;
   for (const n of [regSweep, regSweep + 1]) {
     const rec = records.get(n);
     if (!rec?.extract?.minted_us) continue;
-    if (rec.cls === RECORD.VERIFIED_FULL) { out.verified = { sweep: n }; break; }
-    out.observed = { sweep: n, record: rec.cls };
+    const cls = LEGACY_CLASS[rec.cls] ?? rec.cls;
+    if (cls === RECORD.FULL) { out.verified = { sweep: n }; break; }
+    if (cls === RECORD.REDACTED && !out.corroborated) out.corroborated = { sweep: n, record: cls };
   }
   return out;
 }
 
-/** The sweeps worth fetching: every trade's window, and the two sweeps that could mint us. */
-export function neededSweeps({ trades, registration, cfg = null, archiveLatest }) {
+/** Every sweep our trades and mint could touch, published or not. */
+export function wantedSweeps({ trades, registration, cfg = null }) {
   const need = new Set();
   for (const t of trades) {
     const { from, last } = windowOf(t, cfg);
@@ -197,7 +244,12 @@ export function neededSweeps({ trades, registration, cfg = null, archiveLatest }
     const r = sweepFor(Date.parse(registration.postedAt), cfg);
     need.add(r); need.add(r + 1);
   }
-  return [...need].filter((n) => archiveLatest != null && n <= archiveLatest).sort((a, b) => a - b);
+  return [...need].sort((a, b) => a - b);
+}
+
+/** The wanted sweeps the archive has published so far. */
+export function neededSweeps({ trades, registration, cfg = null, archiveLatest }) {
+  return wantedSweeps({ trades, registration, cfg }).filter((n) => archiveLatest != null && n <= archiveLatest);
 }
 
 const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
@@ -215,7 +267,7 @@ export async function reconcileArchive({
   prevHealth = null, nowMs = Date.now(), fetchFn = fetch, maxFetch = MAX_FETCH_PER_RUN, base = ARCHIVE_BASE
 }) {
   const meta = readJson(path.join(cacheDir, 'index-meta.json'), null);
-  let index = null; let error = null;
+  let index = null; let error = null; let lastModified = meta?.lastModified ?? null;
   try {
     const r = await fetchFn(`${base}index.json`, { headers: meta?.etag ? { 'if-none-match': meta.etag } : {} });
     if (r.status === 304 && meta?.body) index = parseIndex(meta.body);
@@ -223,20 +275,23 @@ export async function reconcileArchive({
     else {
       const body = await r.text();
       index = parseIndex(body);
-      writeJson(path.join(cacheDir, 'index-meta.json'), { etag: r.headers?.get?.('etag') ?? null, lastModified: r.headers?.get?.('last-modified') ?? null, at: new Date(nowMs).toISOString(), body });
+      lastModified = r.headers?.get?.('last-modified') ?? null;
+      writeJson(path.join(cacheDir, 'index-meta.json'), { etag: r.headers?.get?.('etag') ?? null, lastModified, at: new Date(nowMs).toISOString(), body });
     }
   } catch (err) {
     error = err.message;
     try { if (meta?.body) index = parseIndex(meta.body); } catch { index = null; }
   }
-  const health = archiveHealth({ index: error ? null : index, error, liveLatest, prev: prevHealth, nowMs });
+  const health = archiveHealth({ index: error ? null : index, error, liveLatest, prev: prevHealth, nowMs, lastModified });
   if (error && index) { health.archive_latest_sweep = Math.max(...index.keys()); health.archive_cached_index = true; }
 
   const ids = new Set(trades.map((t) => t.id));
   const records = new Map();
   const mismatches = [];
   let fetched = 0; let pending = 0;
-  const need = index ? neededSweeps({ trades, registration, cfg, archiveLatest: Math.max(...index.keys()) }) : [];
+  const archiveLatest = index ? Math.max(...index.keys()) : null;
+  const wanted = wantedSweeps({ trades, registration, cfg });
+  const need = wanted.filter((n) => archiveLatest != null && n <= archiveLatest);
   for (const n of need) {
     const entry = index.get(n);
     if (!entry) continue;
@@ -253,22 +308,29 @@ export async function reconcileArchive({
         const bytes = Buffer.from(await r.arrayBuffer());
         fetched += 1;
         const c = classifyRecord({ entry, bytes, signedFile });
-        let extract = null; let why = c.why ?? null; let cls = c.cls;
-        if (cls !== RECORD.MISMATCH) {
-          try { extract = extractRecord(bytes, n, { ids, ourDid }); } catch (err) { cls = RECORD.MISMATCH; why = err.message; }
+        let extract = null; let why = c.why ?? null; let cls = c.cls; let integrity = Boolean(c.integrity);
+        if (cls !== RECORD.UNVERIFIED) {
+          try { extract = extractRecord(bytes, n, { ids, ourDid }); } catch (err) { cls = RECORD.UNVERIFIED; integrity = true; why = err.message; }
         }
-        rec = { n, key, cls, sha256: c.sha256, why, extract, checkedAt: new Date(nowMs).toISOString() };
+        rec = { n, key, cls, integrity, sha256: c.sha256, why, extract, checkedAt: new Date(nowMs).toISOString() };
         writeJson(f, rec);
       } catch (err) { pending += 1; health.archive_fetch_error = `sweep ${n}: ${err.message}`.slice(0, 200); continue; }
     }
     if (!rec) { pending += 1; continue; }
-    records.set(n, rec);
-    if (rec.cls === RECORD.MISMATCH) mismatches.push({ n, why: rec.why });
+    const cls = LEGACY_CLASS[rec.cls] ?? rec.cls;
+    const integrity = rec.integrity ?? rec.cls === 'ARCHIVE_HASH_MISMATCH';
+    records.set(n, { ...rec, cls, integrity });
+    if (integrity) mismatches.push({ n, why: rec.why });
   }
   const byCls = {};
   for (const r of records.values()) byCls[r.cls] = (byCls[r.cls] || 0) + 1;
+  const ourMissing = wanted.filter((n) => !records.has(n));
+  if (ourMissing.length) byCls[RECORD.MISSING] = ourMissing.length;
   return {
-    health: { ...health, needed_sweeps: need.length, checked_sweeps: records.size, pending_sweeps: pending, fetched_this_run: fetched, records_by_class: byCls, mismatch_sweeps: mismatches.map((m) => m.n) },
+    health: {
+      ...health, needed_sweeps: wanted.length, checked_sweeps: records.size, pending_sweeps: pending, fetched_this_run: fetched,
+      records_by_class: byCls, mismatch_sweeps: mismatches.map((m) => m.n), our_missing_sweeps: ourMissing
+    },
     records,
     mismatches
   };

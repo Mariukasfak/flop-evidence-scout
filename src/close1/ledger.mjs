@@ -148,10 +148,9 @@ export function resolveTrade(t, { flows, latest, ourDid, cfg = null, provenance 
   const res = resolveFromReferee(t, { flows, latest, ourDid, cfg, provenance });
   const a = archive.get(t.id);
   if (!a) return res;
-  const withObs = {
-    ...res, archiveObservations: a.observations || [],
-    archiveGaps: a.verdict ? null : { window: a.window, missing: a.missing, redacted: a.redacted, unanchored: a.unanchored, mismatched: a.mismatched }
-  };
+  // Corroboration (an index-verified REDACTED record) is carried for people to read. It never sets
+  // status, evidence or ownership, so nothing that reads those — exposure, the gate — can see it.
+  const withObs = { ...res, archiveObservations: a.observations || [], archiveGaps: a.gaps ?? null, corroboration: a.corroboration ?? null };
   if (!a.verdict) return withObs;
   const proven = { ...withObs, evidence: EVIDENCE.OFFICIAL_ARCHIVE, sweep: a.sweep, archiveVerdict: a.verdict, superseded: { status: res.status, evidence: res.evidence, basis: res.basis } };
   // A verified record that contradicts an earlier inference is flagged; the record bound to the signed hash wins.
@@ -306,36 +305,40 @@ export function ourFee({ side, qty, px, close, feeRate = FEE_RATE }) {
  * assumption that nobody else posts a copy with our id.
  */
 export function ownerState({ registration, resolutions, trades, flows, ourDid, latest, cfg = null, archiveMint = null, roomPosts = [] }) {
-  if (!registration) return { state: OWNER.UNREGISTERED, evidence: EVIDENCE.UNKNOWN };
+  if (!registration) return { state: OWNER.UNREGISTERED, evidence: EVIDENCE.UNKNOWN, confidence: 'UNKNOWN', sources: [] };
   const regSweep = sweepFor(Date.parse(registration.postedAt), cfg);
-  if (latest < regSweep) return { state: OWNER.REGISTRATION_POSTED, evidence: EVIDENCE.UNKNOWN, regSweep };
-  let proof = null;
-  for (const [n, f] of flows) if ((f.mints || []).includes(ourDid)) { proof = { evidence: EVIDENCE.OFFICIAL, basis: 'FLOW_MINTS', sweep: n }; break; }
-  if (!proof && archiveMint?.verified) proof = { evidence: EVIDENCE.OFFICIAL_ARCHIVE, basis: 'ARCHIVE_MINTED', sweep: archiveMint.verified.sweep };
+  if (latest < regSweep) return { state: OWNER.REGISTRATION_POSTED, evidence: EVIDENCE.UNKNOWN, confidence: 'UNKNOWN', sources: [], regSweep };
+  // Every kind of evidence is collected and kept apart; the strongest decides `evidence`.
+  const sources = [];
+  for (const [n, f] of flows) if ((f.mints || []).includes(ourDid)) { sources.push({ evidence: EVIDENCE.OFFICIAL, basis: 'FLOW_MINTS', sweep: n }); break; }
+  if (archiveMint?.verified) sources.push({ evidence: EVIDENCE.OFFICIAL_ARCHIVE, basis: 'ARCHIVE_MINTED', sweep: archiveMint.verified.sweep });
   // docs/close-1-referee.md: a room message lists a room only when it comes from an owner. Not a mints[] proof,
   // and it rests on nobody else registering the same room name, so it is its own evidence class.
-  for (const p of proof ? [] : roomPosts) {
+  roomLoop: for (const p of roomPosts) {
     const from = sweepFor(Date.parse(p.postedAt), cfg);
     for (const [n, f] of flows) {
       if (n >= from && (f.rooms || []).includes(p.room)) {
-        proof = { evidence: EVIDENCE.INFERRED_OWNER_FROM_ROOM_LISTING, basis: 'FLOW_ROOMS', sweep: n, room: p.room, assumption: 'ROOM_NAME_UNIQUE_TO_US' };
-        break;
+        sources.push({ evidence: EVIDENCE.INFERRED_OWNER_FROM_ROOM_LISTING, basis: 'FLOW_ROOMS', sweep: n, room: p.room, assumption: 'ROOM_NAME_UNIQUE_TO_US' });
+        break roomLoop;
       }
     }
-    if (proof) break;
   }
-  if (!proof) {
-    for (const t of trades) {
-      if (t.role !== 'maker') continue;
-      const res = resolutions.get(t.id);
-      const reasons = [...(res?.listedVoids || []).map((v) => v.reason), res?.voidReason].filter(Boolean);
-      const passed = ['PROBE_EXPIRED', 'PROBE_SETTLED', 'FLOW_VOID_EXPIRED', 'FLOW_VOID_SETTLED'].includes(res?.basis) || reasons.some((r) => PAST_NOT_OWNER.has(r));
-      if (passed) { proof = { evidence: EVIDENCE.INFERRED_FOLD_ORDER, basis: res.basis, tradeId: t.id, assumption: 'ID_UNIQUE_TO_US' }; break; }
-    }
+  for (const t of trades) {
+    if (t.role !== 'maker') continue;
+    const res = resolutions.get(t.id);
+    const reasons = [...(res?.listedVoids || []).map((v) => v.reason), res?.voidReason].filter(Boolean);
+    const passed = ['PROBE_EXPIRED', 'PROBE_SETTLED', 'FLOW_VOID_EXPIRED', 'FLOW_VOID_SETTLED'].includes(res?.basis) || reasons.some((r) => PAST_NOT_OWNER.has(r));
+    if (passed) { sources.push({ evidence: EVIDENCE.INFERRED_FOLD_ORDER, basis: res.basis, tradeId: t.id, assumption: 'ID_UNIQUE_TO_US' }); break; }
   }
-  if (!proof) return { state: OWNER.MINT_UNKNOWN, evidence: EVIDENCE.UNKNOWN, regSweep };
+  // An index-verified redacted record listing our key in `minted`: shown, never used to open the gate.
+  const corroborated = archiveMint?.corroborated ? { evidence: 'OFFICIAL_REDACTED_CORROBORATION', basis: 'REDACTED_ARCHIVE_MINTED', sweep: archiveMint.corroborated.sweep } : null;
+  const all = corroborated ? [...sources, corroborated] : sources;
+  const proven = sources.some((x) => x.evidence === EVIDENCE.OFFICIAL || x.evidence === EVIDENCE.OFFICIAL_ARCHIVE);
+  const confidence = proven ? 'PROVEN' : corroborated ? 'OFFICIALLY_CORROBORATED' : sources.length ? 'INFERRED' : 'UNKNOWN';
+  const proof = sources[0];
+  if (!proof) return { state: OWNER.MINT_UNKNOWN, evidence: EVIDENCE.UNKNOWN, confidence, sources: all, regSweep };
   const active = [...resolutions.values()].some((r) => effectOf(r) === 'SETTLED');
-  return { state: active ? OWNER.ACTIVE : OWNER.MINT_CONFIRMED, ...proof, regSweep };
+  return { state: active ? OWNER.ACTIVE : OWNER.MINT_CONFIRMED, ...proof, confidence, sources: all, regSweep };
 }
 
 /**

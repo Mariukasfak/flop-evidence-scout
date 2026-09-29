@@ -37,7 +37,9 @@ import { decide, ACTION } from '../src/close1/strategy.mjs';
 import { approveTrade, approveProbe, DEFAULT_POLICY } from '../src/close1/risk-gate.mjs';
 import { Executor } from '../src/close1/executor.mjs';
 import { buildSnapshot, alertsBetween, deliverAlerts } from '../src/close1/runtime.mjs';
-import { observeUpstream, upstreamAlerts } from '../src/close1/upstream.mjs';
+import { watchUpstream } from '../src/close1/upstream.mjs';
+import { corroboratedAccount, compareAccounts } from '../src/close1/corroborated.mjs';
+import { standingOf } from '../src/close1/runtime.mjs';
 import { reconcileArchive, archiveVerdict, archiveMint } from '../src/close1/archive.mjs';
 
 export { checkedTerms, makerPayload, takerPayload, tradeText, SEASON };
@@ -111,7 +113,7 @@ async function backfill(stream, evidence, room, verify) {
 }
 
 /** Verified referee bodies from the evidence store, by sweep. */
-function refereeBodies(evidence, room) {
+export function refereeBodies(evidence, room) {
   const out = new Map();
   let latest = null;
   for (const r of evidence.read(room)) {
@@ -189,7 +191,7 @@ export async function run(argv = process.argv.slice(2)) {
       archiveHealth = a.health;
       for (const t of state.trades) verdicts.set(t.id, archiveVerdict(t, { records: a.records, ourDid, cfg: contest }));
       mintEvidence = archiveMint({ records: a.records, regSweep: sweepFor(Date.parse(registration.postedAt), contest) });
-      archiveHealth.mint = { verified: mintEvidence.verified, observed: mintEvidence.observed };
+      archiveHealth.mint = { verified: mintEvidence.verified, corroborated: mintEvidence.corroborated };
     } catch (err) {
       archiveHealth = { archive_status: 'UNAVAILABLE', archive_error: String(err.message).slice(0, 200), archive_last_success: prev?.archive?.archive_last_success ?? null };
     }
@@ -215,12 +217,21 @@ export async function run(argv = process.argv.slice(2)) {
   // The official repo, for rule changes, a launch record, draft status, and watched issues.
   const upstreamFile = path.join(DIR, 'upstream.json');
   const upstreamPrev = readJson(upstreamFile, null);
-  let upstream = upstreamPrev; let upstreamError = null; let upstreamNotes = [];
-  try {
-    upstream = await observeUpstream({ prev: upstreamPrev });
-    upstreamNotes = upstreamAlerts(upstreamPrev, upstream, PINNED);
-    writeJson(upstreamFile, upstream);
-  } catch (err) { upstreamError = String(err.message).slice(0, 200); }
+  // At most every 30 min, never while rate limited, never fatal: a blind watcher is not a trading failure.
+  const watch = await watchUpstream({ prev: upstreamPrev, nowMs, pinned: PINNED });
+  const upstream = watch.obs; const upstreamError = watch.error ?? null; const upstreamNotes = watch.notes;
+  if (watch.ran || watch.obs !== upstreamPrev) writeJson(upstreamFile, upstream);
+
+  // The corroborated account: a separate model from officially published redacted records.
+  // NOT USED FOR SIGNING OR RISK APPROVAL — it goes to the snapshot only, never into snapIn below.
+  let corroborated = null; let comparison = null;
+  if (ledger) {
+    corroborated = corroboratedAccount({
+      trades: state.trades, resolutions: ledger.resolutions, prices: prices.byN,
+      marks: { reference: price?.ref?.px != null ? Number(price.ref.px) : null, pnl_mark: pnl?.mark != null ? Number(pnl.mark) : null }
+    });
+    comparison = compareAccounts({ ledger, corroborated, standing: standingOf(pnl?.top, ourDid), pnl });
+  }
 
   // 4. What the strategy would do, and whether the gate would allow it — computed
   //    on every run, so the snapshot always says whether writes are open.
@@ -245,7 +256,7 @@ export async function run(argv = process.argv.slice(2)) {
   gate.kind = gate.ok ? 'open' : gate.reasons.some((r) => HALT.test(r)) ? 'halt' : 'hold';
 
   // 5. Snapshot and alerts.
-  const snapshot = buildSnapshot({ contest, contestError, streams: stream.stats(), price, ledger, pnl, ourDid, trades: state.trades, gate, nowMs, writeErrors5m: writeErrors, upstream, upstreamError, integrity, archive: archiveHealth });
+  const snapshot = buildSnapshot({ contest, contestError, streams: stream.stats(), price, ledger, pnl, ourDid, trades: state.trades, gate, nowMs, writeErrors5m: writeErrors, upstream, upstreamError, integrity, archive: archiveHealth, corroborated, comparison });
   const alerts = [...alertsBetween(prev, snapshot), ...upstreamNotes];
   await deliverAlerts(alerts, { logFile: path.join(DIR, 'alerts.jsonl') });
   writeJson(path.join(DIR, 'runtime.json'), snapshot);
@@ -409,6 +420,13 @@ function printReport(s, state, ledger, contestError) {
   if (s.reference_warning) console.log(`reference: ${s.reference_warning} (trade ${s.reference_age_at_post_seconds} s old at the post; the published reference still stands, rule 11)`);
   if (s.upstream) console.log(`upstream: manifest ${String(s.upstream.manifest_sha256).slice(0, 8)}… (${s.upstream.manifest_status}), rules ${s.upstream.rules_version}, watched issues ${Object.keys(s.upstream.watched || {}).length}`);
   if (s.upstream_error) console.log(`upstream check failed: ${s.upstream_error}`);
+  console.log(`github watcher: ${s.github_watch_status ?? '?'} (remaining ${s.github_remaining ?? '?'}, reset ${s.github_reset_at ?? '?'}, last success ${s.github_last_success ?? 'never'}${s.github_authenticated ? ', token' : ', no token'})`);
+  console.log(`owner confidence: ${s.owner_confidence} [${(s.owner_evidence_sources || []).map((x) => `${x.evidence}${x.sweep ? `@${x.sweep}` : ''}`).join(', ')}]`);
+  const acct = s.corroborated_account;
+  if (acct) {
+    console.log(`corroborated account (${acct.label}): position ${acct.net_position} (unknown range ${acct.unknown_range.low} … ${acct.unknown_range.high}), cash ${acct.cash}, fees ${acct.fees}, avg entry ${acct.average_entry}, score ${JSON.stringify(acct.score_at)}`);
+    for (const x of s.account_comparison?.conflicts || []) console.log(`ACCOUNT CONFLICT ${x.kind}: ${x.detail}`);
+  }
   console.log(`gate: ${s.gate?.kind ?? '?'}${s.gate?.ok ? '' : ` — ${(s.gate?.reasons || []).join(', ')}`}`);
 }
 

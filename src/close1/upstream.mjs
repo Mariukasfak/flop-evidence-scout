@@ -52,38 +52,141 @@ const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 export const watchKey = (repo, n) => `${repo}#${n}`;
 export const isMaintainer = (c) => MAINTAINERS.has(c?.author) || MAINTAINER_ASSOC.has(c?.association);
 
-function headers(env, json = true) {
-  const h = { 'user-agent': 'FLOP-Evidence-Scout/1.0' };
-  if (json) h.accept = 'application/vnd.github+json';
-  if (env.GITHUB_TOKEN) h.authorization = `Bearer ${env.GITHUB_TOKEN}`;
-  return h;
+/**
+ * GitHub, spent carefully. The VPS has no token (2026-09-29): 60 requests an
+ * hour, shared with everything else on that address, and one afternoon of
+ * dry runs used all of it. So every read goes through one client that
+ *   - sends If-None-Match with the ETag of the last answer; a 304 costs no quota,
+ *   - remembers X-RateLimit-Remaining / -Reset and makes NO request while the
+ *     remaining budget is at the reserve or after a 403/429, until the reset,
+ *   - uses GITHUB_TOKEN when one is set, and works without it.
+ * Being rate-limited makes the watcher DEGRADED (BLIND after hours without a
+ * success); it is never a close-1 trading failure.
+ */
+export const RESERVE_REQUESTS = 5;
+export const WATCH_EVERY_MS = 30 * 60_000;
+export const BLIND_AFTER_MS = 3 * 3600_000;
+
+export class RateLimited extends Error {
+  constructor(until) { super(`GitHub rate limit: no requests until ${until}`); this.until = until; }
 }
-async function getJson(fetchFn, url, env, { allow404 = false } = {}) {
-  const r = await fetchFn(url, { headers: headers(env) });
-  if (allow404 && (r.status === 404 || r.status === 403)) return null;
-  if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
-  return r.json();
+
+/** Keep only what the watcher reads, so the ETag cache stays small. */
+function slim(v, depth = 0) {
+  if (Array.isArray(v)) return v.map((x) => slim(x, depth + 1));
+  if (!v || typeof v !== 'object') return typeof v === 'string' && v.length > 600 ? v.slice(0, 600) : v;
+  const out = {};
+  for (const [k, x] of Object.entries(v)) {
+    if (['reactions', 'labels', 'assignees', 'assignee', 'milestone', 'performed_via_github_app', 'timeline_url', 'events_url', 'repository_url', 'labels_url', 'comments_url', 'html_url', 'node_id', 'closed_by', 'sub_issues_summary', 'issue_dependencies_summary'].includes(k)) continue;
+    if (k === 'user') { out.user = { login: x?.login ?? null }; continue; }
+    out[k] = depth > 3 ? x : slim(x, depth + 1);
+  }
+  return out;
 }
-async function getText(fetchFn, url, env) {
-  const r = await fetchFn(url, { headers: headers(env, false) });
-  if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
-  return r.text();
+
+export function makeGitHub({ fetchFn = fetch, env = process.env, nowMs = Date.now(), state = null, cache = {} }) {
+  const s = { limit: state?.limit ?? null, remaining: state?.remaining ?? null, reset_at: state?.reset_at ?? null, blocked_until: state?.blocked_until ?? null, requests: 0, not_modified: 0 };
+  const etags = { ...cache };
+  const until = () => {
+    if (s.blocked_until && Date.parse(s.blocked_until) > nowMs) return s.blocked_until;
+    if (s.remaining != null && s.remaining <= RESERVE_REQUESTS && s.reset_at && Date.parse(s.reset_at) > nowMs) return s.reset_at;
+    return null;
+  };
+  const note = (r) => {
+    const h = (k) => r.headers?.get?.(k) ?? null;
+    if (h('x-ratelimit-remaining') != null) s.remaining = Number(h('x-ratelimit-remaining'));
+    if (h('x-ratelimit-limit') != null) s.limit = Number(h('x-ratelimit-limit'));
+    if (h('x-ratelimit-reset') != null) s.reset_at = new Date(Number(h('x-ratelimit-reset')) * 1000).toISOString();
+    if (r.status === 429 || (r.status === 403 && (s.remaining === 0 || h('retry-after')))) {
+      const retry = h('retry-after') ? new Date(nowMs + Number(h('retry-after')) * 1000).toISOString() : null;
+      s.blocked_until = retry ?? s.reset_at ?? new Date(nowMs + 3600_000).toISOString();
+      throw new RateLimited(s.blocked_until);
+    }
+  };
+  async function get(url, { json = true, allow404 = false } = {}) {
+    const wait = until();
+    if (wait) throw new RateLimited(wait);
+    const headers = { 'user-agent': 'FLOP-Evidence-Scout/1.0' };
+    if (json) headers.accept = 'application/vnd.github+json';
+    if (env.GITHUB_TOKEN) headers.authorization = `Bearer ${env.GITHUB_TOKEN}`;
+    const cached = etags[url];
+    if (cached?.etag) headers['if-none-match'] = cached.etag;
+    s.requests += 1;
+    const r = await fetchFn(url, { headers });
+    note(r);
+    if (r.status === 304 && cached) { s.not_modified += 1; return cached.data; }
+    if (allow404 && (r.status === 404 || r.status === 403)) return null;
+    if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
+    const data = json ? slim(await r.json()) : await r.text();
+    const etag = r.headers?.get?.('etag') ?? null;
+    if (etag) etags[url] = { etag, data };
+    return data;
+  }
+  return {
+    json: (url, opts) => get(url, { ...opts, json: true }),
+    text: (url) => get(url, { json: false }),
+    blockedUntil: until,
+    /** The watcher's state after this run, for the snapshot and the next run. */
+    finish(ok, err = null, prevState = null) {
+      const lastSuccess = ok ? new Date(nowMs).toISOString() : (prevState?.last_success ?? null);
+      const status = ok ? 'OK' : (!lastSuccess || nowMs - Date.parse(lastSuccess) > BLIND_AFTER_MS ? 'BLIND' : 'DEGRADED');
+      return {
+        status, authenticated: Boolean(env.GITHUB_TOKEN), limit: s.limit, remaining: s.remaining, reset_at: s.reset_at,
+        blocked_until: until(), last_success: lastSuccess, last_attempt: new Date(nowMs).toISOString(),
+        last_error: ok ? null : String(err?.message ?? err).slice(0, 200), requests_last_run: s.requests, not_modified_last_run: s.not_modified
+      };
+    },
+    etags
+  };
 }
+
+/** Degraded state without a request: what the snapshot shows while we wait out a reset. */
+export function githubStateWhileWaiting(prevState, nowMs) {
+  const lastSuccess = prevState?.last_success ?? null;
+  const blind = !lastSuccess || nowMs - Date.parse(lastSuccess) > BLIND_AFTER_MS;
+  return { ...(prevState || {}), status: prevState?.status === 'OK' ? 'OK' : blind ? 'BLIND' : 'DEGRADED', requests_last_run: 0, not_modified_last_run: 0 };
+}
+
+/**
+ * One watcher turn: at most every WATCH_EVERY_MS, never while blocked, never
+ * throwing. Returns the observation to keep and the alerts it justifies.
+ */
+export async function watchUpstream({ prev = null, fetchFn = fetch, nowMs = Date.now(), env = process.env, pinned, everyMs = WATCH_EVERY_MS }) {
+  // An observation written before this watcher kept its own state was a success at prev.at.
+  const g0 = prev?.github ?? (prev?.at ? { status: 'OK', last_success: prev.at, last_attempt: prev.at } : null);
+  const lastAttempt = g0?.last_attempt ?? prev?.at ?? null;
+  const blocked = [g0?.blocked_until, g0?.remaining != null && g0.remaining <= RESERVE_REQUESTS ? g0.reset_at : null]
+    .filter((t) => t && Date.parse(t) > nowMs)[0];
+  if (blocked) return { obs: { ...prev, github: githubStateWhileWaiting(g0, nowMs) }, notes: [], ran: false, why: `rate limited until ${blocked}` };
+  if (prev && lastAttempt && nowMs - Date.parse(lastAttempt) < everyMs) return { obs: prev.github ? prev : { ...prev, github: g0 }, notes: [], ran: false, why: 'not due' };
+  const gh = makeGitHub({ fetchFn, env, nowMs, state: g0, cache: prev?.httpCache ?? {} });
+  try {
+    const obs = await observeUpstream({ prev, gh, nowMs });
+    obs.httpCache = gh.etags;
+    obs.github = gh.finish(true, null, g0);
+    return { obs, notes: upstreamAlerts(prev, obs, pinned), ran: true };
+  } catch (err) {
+    // Keep the last good observation; only the watcher's own state moves.
+    return { obs: { ...(prev || {}), httpCache: gh.etags, github: gh.finish(false, err, g0) }, notes: [], ran: true, error: String(err.message).slice(0, 200) };
+  }
+}
+
 const slimIssue = (i) => ({ title: String(i.title).slice(0, 120), state: i.state, comments: i.comments, updated: i.updated_at, author: i.user?.login ?? null, association: i.author_association ?? null });
 
 /** One observation of the repo and the watched issues, reusing `prev` for anything unchanged. */
-export async function observeUpstream({ prev = null, fetchFn = fetch, nowMs = Date.now(), env = process.env }) {
+export async function observeUpstream({ prev = null, gh = null, fetchFn = fetch, nowMs = Date.now(), env = process.env }) {
+  gh ||= makeGitHub({ fetchFn, env, nowMs, state: prev?.github, cache: prev?.httpCache ?? {} });
   const api = 'https://api.github.com/repos';
-  const tree = await getJson(fetchFn, `${api}/${REPO}/git/trees/main?recursive=1`, env);
+  const tree = await gh.json(`${api}/${REPO}/git/trees/main?recursive=1`);
   const files = Object.fromEntries((tree.tree || []).filter((e) => e.type === 'blob').map((e) => [e.path, e.sha]));
   const obs = { at: new Date(nowMs).toISOString(), treeSha: tree.sha, files };
   if (prev && prev.treeSha === tree.sha) {
     Object.assign(obs, { manifestSha256: prev.manifestSha256, manifestStatus: prev.manifestStatus, rulesVersion: prev.rulesVersion, headCommit: prev.headCommit });
   } else {
     const raw = `https://raw.githubusercontent.com/${REPO}/main`;
-    const manifest = await getText(fetchFn, `${raw}/manifest.json`, env);
-    const contest = JSON.parse(await getText(fetchFn, `${raw}/contest.json`, env));
-    const commits = await getJson(fetchFn, `${api}/${REPO}/commits?per_page=1`, env);
+    const manifest = await gh.text(`${raw}/manifest.json`);
+    const contest = JSON.parse(await gh.text(`${raw}/contest.json`));
+    const commits = await gh.json(`${api}/${REPO}/commits?per_page=1`);
     Object.assign(obs, {
       manifestSha256: sha256(manifest),
       manifestStatus: JSON.parse(manifest).status ?? null,
@@ -91,11 +194,11 @@ export async function observeUpstream({ prev = null, fetchFn = fetch, nowMs = Da
       headCommit: commits[0] ? { sha: commits[0].sha.slice(0, 10), title: commits[0].commit.message.split('\n')[0].slice(0, 100) } : null
     });
   }
-  const issues = await getJson(fetchFn, `${api}/${REPO}/issues?state=all&per_page=50&sort=updated`, env);
+  const issues = await gh.json(`${api}/${REPO}/issues?state=all&per_page=50&sort=updated`);
   obs.issues = Object.fromEntries(issues.map((i) => [i.number, slimIssue(i)]));
   const known = new Map(issues.map((i) => [watchKey(REPO, i.number), i]));
   let ypIssues = [];
-  try { ypIssues = await getJson(fetchFn, `${api}/${YP}/issues?state=all&per_page=50&sort=updated`, env) || []; } catch { ypIssues = []; }
+  try { ypIssues = await gh.json(`${api}/${YP}/issues?state=all&per_page=50&sort=updated`) || []; } catch (err) { if (err instanceof RateLimited) throw err; ypIssues = []; }
   for (const i of ypIssues) known.set(watchKey(YP, i.number), i);
 
   const list = [...WATCHED];
@@ -114,7 +217,7 @@ export async function observeUpstream({ prev = null, fetchFn = fetch, nowMs = Da
     if (!now && before?.checkedAt && nowMs - Date.parse(before.checkedAt) < SINGLE_FETCH_EVERY_MS) { obs.watched[key] = before; continue; }
     const single = !now;
     if (!now) {
-      try { now = await getJson(fetchFn, `${api}/${w.repo}/issues/${w.n}`, env, { allow404: true }); } catch { now = undefined; }
+      try { now = await gh.json(`${api}/${w.repo}/issues/${w.n}`, { allow404: true }); } catch (err) { if (err instanceof RateLimited) throw err; now = undefined; }
       if (now === null) { obs.watched[key] = { ...w, unavailable: true, checkedAt: obs.at }; continue; }   // private or gone: not an error
       if (!now) { if (before) obs.watched[key] = before; continue; }
     }
@@ -124,7 +227,7 @@ export async function observeUpstream({ prev = null, fetchFn = fetch, nowMs = Da
       continue;
     }
     const page = Math.max(1, Math.ceil((now.comments || 0) / 100));
-    const comments = now.comments ? (await getJson(fetchFn, `${api}/${w.repo}/issues/${w.n}/comments?per_page=100&page=${page}`, env)) || [] : [];
+    const comments = now.comments ? (await gh.json(`${api}/${w.repo}/issues/${w.n}/comments?per_page=100&page=${page}`)) || [] : [];
     const slim = comments.map((c) => ({ id: c.id, author: c.user?.login ?? null, association: c.author_association ?? null, at: c.created_at, text: String(c.body ?? '').slice(0, 600) }));
     obs.watched[key] = {
       ...entry,

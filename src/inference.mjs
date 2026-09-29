@@ -267,7 +267,8 @@ export function workSettledReadiness(receipt) {
     timestamps: typeof receipt?.at === 'string' && Number.isFinite(receipt?.result?.latencyMs)
   };
   const missing = Object.entries(has).filter(([, v]) => !v).map(([k]) => k);
-  return { ready: missing.length === 0, missing, has };
+  const fields = Object.fromEntries(Object.entries(has).map(([k, v]) => [k, v ? 'PRESENT' : 'MISSING']));
+  return { ready: missing.length === 0, missing, has, fields };
 }
 
 /** Running totals across a set of receipts — the number the airdrop is scored on. */

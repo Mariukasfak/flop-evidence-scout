@@ -14,17 +14,26 @@ const ARCHIVE_COLOR = { CURRENT: '#34d399', LAGGING: '#fbbf24', UNAVAILABLE: '#f
 
 /** The board row is display order; a place is shown only when the whole tie is visible. */
 function standingLine(s) {
-  if (!s.leaderboard_display_row) return `not in the ${esc(s.leaderboard_rows_visible ?? 0)} rows the referee shows · place unknown`;
+  if (!s.leaderboard_display_row) return `not visible in truncated top list (${esc(s.leaderboard_rows_visible ?? 0)} rows shown) · place unknown`;
   const tie = `score ${esc(s.official_score)} · display row ${esc(s.leaderboard_display_row)} (DID order, not a rank) · tie of ${esc(s.tie_visible_count)} visible`;
-  if (!s.tie_complete) return `${tie}, <strong>may continue past the list</strong> · prize place UNKNOWN`;
+  if (!s.tie_complete) return `${tie}, <strong>tie may extend beyond visible list</strong> · prize place UNKNOWN`;
   const places = (s.prize_places || []).length ? `places ${esc(s.prize_places.join(', '))} shared by ${esc(s.prize_sharing)}` : 'no prize place';
   return `${tie}, complete · ${places} (${esc(s.prize_confidence)}: live mark, not final)`;
 }
 
+/** The corroborated account, fenced off: it is never what the gate reads. */
+function corroboratedBlock(s) {
+  const c = s.corroborated_account;
+  if (!c) return '';
+  const cmp = s.account_comparison || {};
+  const conflicts = (cmp.conflicts || []).map((x) => `<span style="color:#f87171">${esc(x.detail)}</span>`).join('; ');
+  return `<div>🧮 <strong>Corroborated account</strong> <em>(${esc(c.label)})</em>: position ${esc(c.net_position)} (still unknown: ${esc(c.unknown_range.low)} … ${esc(c.unknown_range.high)}), cash ${esc(c.cash)}, fees ${esc(c.fees)}, avg entry ${esc(c.average_entry ?? '—')}, score at reference ${esc(c.score_at?.reference?.score ?? '?')}${conflicts ? ` · CONFLICT: ${conflicts}` : ''}</div>`;
+}
+
 function archiveLine(a) {
   if (!a) return 'not checked yet';
-  const lag = a.archive_lag_sweeps != null ? ` · ${esc(a.archive_lag_sweeps)} sweeps behind the referee (${esc(a.live_latest_sweep)})` : '';
-  const cls = Object.entries(a.records_by_class || {}).map(([k, v]) => `${esc(k.replace('ARCHIVE_', '').toLowerCase())} ${esc(v)}`).join(', ') || 'none';
+  const lag = a.archive_lag_sweeps != null ? ` · ${esc(a.archive_lag_sweeps)} sweeps (~${esc(a.archive_lag_minutes)} min) behind the referee (${esc(a.live_latest_sweep)})${a.archive_index_last_modified ? ` · index last modified ${esc(a.archive_index_last_modified)}` : ''}` : '';
+  const cls = Object.entries(a.records_by_class || {}).map(([k, v]) => `${esc(k)} ${esc(v)}`).join(', ') || 'none';
   return `<span style="color:${ARCHIVE_COLOR[a.archive_status] || '#94a3b8'}">${esc(a.archive_status)}</span> · ends at sweep ${esc(a.archive_latest_sweep ?? '?')}${lag}`
     + ` · our sweeps checked ${esc(a.checked_sweeps ?? 0)}/${esc(a.needed_sweeps ?? 0)} (${cls})${a.mismatch_sweeps?.length ? ` · <span style="color:#f87171">hash mismatch at ${esc(a.mismatch_sweeps.join(', '))}</span>` : ''}`;
 }
@@ -66,11 +75,13 @@ export function renderClose1Section(s) {
       </div>
     </div>
     <div class="card" style="margin-bottom:24px;font-size:0.85rem;line-height:1.6">
-      <div>🔏 <strong>Contest:</strong> ${verified} · owner <strong>${esc(s.owner_state)}</strong> (${esc(s.owner_evidence)}${conf.owner_assumption ? `, assumes ${esc(conf.owner_assumption)}` : ''})</div>
+      <div>🔏 <strong>Contest:</strong> ${verified} · owner <strong>${esc(s.owner_state)}</strong> (${esc(s.owner_evidence)}${conf.owner_assumption ? `, assumes ${esc(conf.owner_assumption)}` : ''}) · confidence <strong>${esc(s.owner_confidence ?? '?')}</strong>${(s.owner_evidence_sources || []).length ? ` [${(s.owner_evidence_sources || []).map((x) => esc(x.evidence)).join(', ')}]` : ''}</div>
       <div>📊 <strong>Flow ${esc(c?.n ?? '?')}:</strong> listed settled ${esc(c?.listed.settled)} / void ${esc(c?.listed.void)} / mints ${esc(c?.listed.mints)} · <strong>omitted</strong> settled ${esc(c?.omitted.settled)} / void ${esc(c?.omitted.void)} / mints ${esc(c?.omitted.mints)}${c?.missed ? ` · missed ranges ${esc(c.missed)}` : ''} — an empty list is not an empty sweep</div>
       <div>🧾 <strong>Evidence confidence:</strong> ${esc(conf.overall)} · position ${esc(conf.position)} · settlements proven ours ${esc(s.settled_proven_count)}, id-only ${esc(s.id_settled_count)}</div>
       <div>🏁 <strong>Board:</strong> ${standingLine(s)}</div>
-      <div>🗄️ <strong>Official archive:</strong> ${archiveLine(s.archive)} — a redacted record never proves a trade or its absence</div>
+      <div>🗄️ <strong>Official archive:</strong> ${archiveLine(s.archive)} — only REFEREE_HASH_VERIFIED_FULL may change a status; OFFICIAL_INDEX_VERIFIED_REDACTED corroborates, never proves</div>
+      <div>🐙 <strong>GitHub watcher:</strong> ${esc(s.github_watch_status ?? '?')} · remaining ${esc(s.github_remaining ?? '?')} · resets ${esc(s.github_reset_at ?? '?')} · last success ${esc(s.github_last_success ?? 'never')}${s.github_authenticated ? '' : ' · no token'}</div>
+      ${corroboratedBlock(s)}
       <div>🟢 <strong>Open offers:</strong> ${offers}</div>
       <div>🕒 <strong>Latest trade:</strong> ${last ? `<code>${esc(last.id)}</code> ${esc(last.status)} · ${esc(last.evidence)} · ownership ${esc(last.ownership)}` : 'none'}</div>
       ${rows ? `<table style="width:100%;margin-top:10px;font-size:0.8rem"><thead><tr><th align="left">trade</th><th align="left">status</th><th align="left">evidence</th><th align="left">ours?</th><th align="left">archive (unverified)</th></tr></thead><tbody>${rows}</tbody></table>` : ''}

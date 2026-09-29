@@ -37,7 +37,8 @@ export function standingOf(top, ourDid, { places = PRIZE_PLACES, final = false }
   const base = {
     leaderboard_display_row: idx >= 0 ? idx + 1 : null, leaderboard_rows_visible: rows.length,
     official_score: idx >= 0 ? rows[idx][1] : null, tie_score: null, tie_visible_count: null, tie_complete: null,
-    rows_strictly_above: null, prize_place_status: PRIZE_STATUS.NOT_LISTED, prize_places: null, prize_sharing: null, prize_confidence: 'NONE'
+    rows_strictly_above: null, prize_place_status: PRIZE_STATUS.NOT_LISTED, prize_places: null, prize_sharing: null, prize_confidence: 'NONE',
+    leaderboard_note: idx >= 0 ? null : 'not visible in truncated top list'
   };
   if (idx < 0) return base;
   const score = (r) => Number(r[1]);
@@ -48,7 +49,7 @@ export function standingOf(top, ourDid, { places = PRIZE_PLACES, final = false }
   const complete = score(rows.at(-1)) !== ours;
   const out = { ...base, tie_score: rows[idx][1], tie_visible_count: tied, tie_complete: ordered && complete, rows_strictly_above: ordered ? above : null };
   if (!ordered) return { ...out, prize_place_status: PRIZE_STATUS.UNORDERED };
-  if (!complete) return { ...out, prize_place_status: PRIZE_STATUS.TIE_TRUNCATED };
+  if (!complete) return { ...out, prize_place_status: PRIZE_STATUS.TIE_TRUNCATED, leaderboard_note: 'tie may extend beyond visible list' };
   const spanned = [];
   for (let p = above + 1; p <= Math.min(above + tied, places); p++) spanned.push(p);
   return {
@@ -70,7 +71,8 @@ function confidence(ledger) {
 
 export function buildSnapshot({
   contest, contestError = null, streams, price, ledger, pnl, ourDid, trades, gate, nowMs,
-  writeErrors5m = 0, upstream = null, upstreamError = null, integrity = {}, archive = null
+  writeErrors5m = 0, upstream = null, upstreamError = null, integrity = {}, archive = null,
+  corroborated = null, comparison = null
 }) {
   const res = ledger ? [...ledger.resolutions.values()] : [];
   const top = Array.isArray(pnl?.top) ? pnl.top : [];
@@ -97,6 +99,8 @@ export function buildSnapshot({
     stream_gap_by_room: Object.fromEntries(Object.entries(streamStats).map(([r, s]) => [r, s.lastGap])),
     owner_state: ledger?.owner?.state ?? null,
     owner_evidence: ledger?.owner?.evidence ?? null,
+    owner_confidence: ledger?.owner?.confidence ?? null,
+    owner_evidence_sources: (ledger?.owner?.sources || []).map((x) => ({ evidence: x.evidence, basis: x.basis, sweep: x.sweep ?? null, assumption: x.assumption ?? null })),
     balance_provable: ledger?.balance.provable ?? false,
     polf_balance: ledger?.balance.polf ?? null,
     free_polf_worst_case: ledger?.balance.worstFreePolf ?? null,
@@ -112,7 +116,7 @@ export function buildSnapshot({
     ...standing,
     pnl_sweep: pnl?.n ?? null,
     local_replay_score: ledger?.replay.score ?? null,
-    official_score_note: standing.leaderboard_display_row ? null : `not among the ${top.length} the referee lists`,
+    official_score_note: standing.leaderboard_note,
     open_offers: ledger?.openOffers ?? [],
     pending_trades: ledger?.pending ?? [],
     settled_count: ledger?.settledCount ?? 0,
@@ -136,7 +140,15 @@ export function buildSnapshot({
       rules_version: upstream.rulesVersion, head: upstream.headCommit, watched: upstream.watched
     } : null,
     upstream_error: upstreamError,
+    github_watch_status: upstream?.github?.status ?? null,
+    github_remaining: upstream?.github?.remaining ?? null,
+    github_reset_at: upstream?.github?.reset_at ?? null,
+    github_last_success: upstream?.github?.last_success ?? null,
+    github_blocked_until: upstream?.github?.blocked_until ?? null,
+    github_authenticated: upstream?.github?.authenticated ?? null,
     archive: archive ?? null,
+    corroborated_account: corroborated ? { ...corroborated, rows: undefined } : null,
+    account_comparison: comparison ?? null,
     archive_conflicts: ledger?.archiveConflicts ?? [],
     gate: gate ?? null,
     trades: res.map((r) => ({
@@ -146,7 +158,8 @@ export function buildSnapshot({
         sweep: o.sweep, record: o.record, outcome: o.outcome, reason: o.reason, our_copy: o.ours,
         maker: o.maker === ourDid ? 'US' : o.maker, countersigner: o.countersigner === ourDid ? 'US' : o.countersigner
       })),
-      archive_gaps: r.archiveGaps ? { redacted: r.archiveGaps.redacted?.length ?? 0, missing: r.archiveGaps.missing?.length ?? 0, unanchored: r.archiveGaps.unanchored?.length ?? 0, mismatched: r.archiveGaps.mismatched?.length ?? 0 } : null
+      archive_gaps: r.archiveGaps ? { redacted: r.archiveGaps.redacted?.length ?? 0, missing: r.archiveGaps.missing?.length ?? 0, unverified: r.archiveGaps.unverified?.length ?? 0, hidden_trades: r.archiveGaps.hidden_trades ?? 0 } : null,
+      corroboration: r.corroboration ? { kind: r.corroboration.kind, exact: r.corroboration.exact, sweep: r.corroboration.sweep, record: r.corroboration.record, evidence: 'OFFICIAL_REDACTED_CORROBORATION' } : null
     }))
   };
 }
@@ -185,6 +198,9 @@ export function alertsBetween(prev, next) {
   const placed = (s) => s?.prize_confidence === 'PROVEN' && (s.prize_places || []).length > 0;
   if (placed(next) && !placed(prev)) add('prize_place_proven', `close-1: proven prize place(s) ${next.prize_places.join(', ')}, shared by ${next.prize_sharing}`);
   out.push(...archiveAlerts(prev?.archive, next.archive));
+  out.push(...githubAlerts(prev, next));
+  const sig = (s) => (s?.account_comparison?.conflicts || []).map((c) => c.kind).sort().join(',');
+  if (sig(next) && sig(next) !== sig(prev)) add('account_conflict', `close-1 accounts disagree: ${next.account_comparison.conflicts.map((c) => c.detail).join('; ')}`);
   const conflicts = (next.archive_conflicts || []).filter((id) => !(prev?.archive_conflicts || []).includes(id));
   if (conflicts.length) add('archive_integrity', `close-1: a verified archive record contradicts our earlier inference for ${conflicts.join(', ')}`);
   const halted = (s) => s?.gate && !s.gate.ok && s.gate.kind === 'halt';
@@ -198,18 +214,38 @@ export function alertsBetween(prev, next) {
  * and a record whose hash disagrees with the referee. Staying LAGGING, or
  * flapping through UNAVAILABLE, is shown on the dashboard and sent nowhere.
  */
+export const ARCHIVE_STALL_MS = 60 * 60_000;
+export const ARCHIVE_LAG_DROP_SWEEPS = 50;
+
 export function archiveAlerts(prev, next) {
   const out = [];
   if (!next || !prev) return out;
+  const add = (kind, text) => out.push({ kind, text });
   const was = prev.archive_status; const now = next.archive_status;
-  if (now === 'LAGGING' && was === 'CURRENT') out.push({ kind: 'archive_lagging', text: `close-1 archive stalled: ends at sweep ${next.archive_latest_sweep}, referee at ${next.live_latest_sweep} (${next.archive_lag_sweeps} sweeps behind)` });
-  if (now === 'CURRENT' && was && was !== 'CURRENT') out.push({ kind: 'archive_current', text: `close-1 archive caught up: sweep ${next.archive_latest_sweep} (referee ${next.live_latest_sweep})` });
-  if (now === 'LAGGING' && was === 'LAGGING' && next.archive_latest_sweep > (prev.archive_latest_sweep ?? Infinity)) {
-    out.push({ kind: 'archive_advanced', text: `close-1 archive published up to sweep ${next.archive_latest_sweep} (was ${prev.archive_latest_sweep}); still ${next.archive_lag_sweeps} behind` });
+  const moved = next.archive_latest_sweep != null && prev.archive_latest_sweep != null && next.archive_latest_sweep > prev.archive_latest_sweep;
+  if (now === 'LAGGING' && was === 'CURRENT') add('archive_lagging', `close-1 archive stalled: ends at sweep ${next.archive_latest_sweep}, referee at ${next.live_latest_sweep} (${next.archive_lag_sweeps} sweeps, ~${next.archive_lag_minutes} min behind)`);
+  if (now === 'CURRENT' && was && was !== 'CURRENT') add('archive_current', `close-1 archive caught up: sweep ${next.archive_latest_sweep} (referee ${next.live_latest_sweep})`);
+  else if (moved) {
+    const stalledFor = prev.archive_latest_changed_at ? Date.parse(next.archive_latest_changed_at) - Date.parse(prev.archive_latest_changed_at) : 0;
+    const drop = (prev.archive_lag_sweeps ?? 0) - (next.archive_lag_sweeps ?? 0);
+    if (stalledFor >= ARCHIVE_STALL_MS || drop > ARCHIVE_LAG_DROP_SWEEPS) {
+      add('archive_advanced', `close-1 archive moved: sweep ${prev.archive_latest_sweep} → ${next.archive_latest_sweep}${drop > 0 ? `, lag down ${drop} sweeps` : ''}; still ${next.archive_lag_sweeps} behind`);
+    }
   }
+  const arrived = (prev.our_missing_sweeps || []).filter((n) => !(next.our_missing_sweeps || []).includes(n));
+  if (arrived.length) add('archive_our_sweeps', `close-1 archive now has sweep(s) ${arrived.slice(0, 12).join(', ')} holding our trades, missing until now`);
   const bad = (next.mismatch_sweeps || []).filter((n) => !(prev.mismatch_sweeps || []).includes(n));
-  if (bad.length) out.push({ kind: 'archive_integrity', text: `close-1 archive record(s) for sweep ${bad.join(', ')} do not hash to what the referee signed` });
+  if (bad.length) add('archive_integrity', `close-1 archive record(s) for sweep ${bad.join(', ')} fail the hash check`);
   return out;
+}
+
+/** The GitHub watcher: news only when it goes blind for hours, and when it can see again. */
+export function githubAlerts(prev, next) {
+  const was = prev?.github_watch_status; const now = next?.github_watch_status;
+  if (!was || !now || was === now) return [];
+  if (now === 'BLIND') return [{ kind: 'github_watch_blind', text: `close-1 GitHub watcher blind since ${next.github_last_success ?? 'never'} (rate limit; resets ${next.github_reset_at ?? '?'}). Trading is not affected.` }];
+  if (now === 'OK' && was === 'BLIND') return [{ kind: 'github_watch_restored', text: 'close-1 GitHub watcher sees upstream again' }];
+  return [];
 }
 
 /**

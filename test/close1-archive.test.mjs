@@ -19,6 +19,9 @@ import {
 import { approveTrade, DEFAULT_POLICY, REASON, referenceStatus } from '../src/close1/risk-gate.mjs';
 import { decide } from '../src/close1/strategy.mjs';
 import { buildSnapshot, alertsBetween, archiveAlerts, standingOf, PRIZE_STATUS } from '../src/close1/runtime.mjs';
+import { classifyTrade, corroboratedAccount, compareAccounts, CORROBORATED_LABEL } from '../src/close1/corroborated.mjs';
+import { watchUpstream, makeGitHub, RateLimited } from '../src/close1/upstream.mjs';
+import { PINNED } from '../src/close1/contest-source.mjs';
 
 const me = generateIdentity();
 const stranger = generateIdentity();
@@ -161,7 +164,7 @@ test('5. a full record whose hash matches the signed file, naming our maker/coun
     12: { bytes: sweepRecord(12, { trades: [{ id: 'tk-full', maker: stranger.did, countersigner: other.did, qty: '1.00', outcome: 'void', reason: 'settled' }, { id: 'tk-full', maker: stranger.did, countersigner: OUR, qty: '1.00', outcome: 'settled' }] }) }
   }, { upTo: 30 });
   const a = await reconcile([mk, tk], arch);
-  assert.equal(a.records.get(10).cls, RECORD.VERIFIED_FULL);
+  assert.equal(a.records.get(10).cls, RECORD.FULL);
   const L = buildLedger({ trades: [mk, tk], registration, flows: flowsTo(40), prices: prices(40), ourDid: OUR, archive: a.verdicts });
   for (const id of ['mfk-full', 'tk-full']) {
     const r = L.resolutions.get(id);
@@ -189,7 +192,7 @@ test('6. a sweep the lagging archive has not published leaves UNKNOWN as UNKNOWN
   assert.equal(a.health.archive_lag_sweeps, 29);
   const v = a.verdicts.get(t.id);
   assert.equal(v.verdict, null);
-  assert.deepEqual(v.missing, [12], 'sweep 12 is unpublished, not empty');
+  assert.deepEqual(v.gaps.missing, [12], 'sweep 12 is unpublished, not empty');
   const r = resolveTrade(t, { flows: omittedFlows(), latest: 40, ourDid: OUR, archive: a.verdicts });
   assert.deepEqual([r.status, r.evidence, r.basis], [STATUS.UNKNOWN, EVIDENCE.UNKNOWN_OMITTED, 'PROBES_EXHAUSTED']);
   // The index itself unreachable: UNAVAILABLE, same conservative answer.
@@ -218,15 +221,15 @@ test('7. a redacted or hash-mismatched record proves neither absence nor ownersh
   // Mismatch: the served bytes are not the record the referee hashed.
   const forged = sweepRecord(10, { trades: [{ id: 'mfk-lost', maker: OUR, countersigner: stranger.did, outcome: 'settled' }] });
   const bad = await reconcile([t], fakeArchive({ 10: { bytes: sweepRecord(10), serve: forged } }, { upTo: 30 }));
-  assert.equal(bad.records.get(10).cls, RECORD.MISMATCH);
+  assert.equal(bad.records.get(10).cls, RECORD.UNVERIFIED);
   assert.deepEqual(bad.health.mismatch_sweeps, [10]);
   assert.equal(bad.verdicts.get(t.id).verdict, null);
   assert.equal(resolveTrade(t, { flows: omittedFlows(), latest: 40, ourDid: OUR, archive: bad.verdicts }).status, STATUS.UNKNOWN);
   // An index that maps the sweep to a hash the referee never signed is a mismatch too.
   const wrongIndex = fakeArchive({ 10: { bytes: sweepRecord(10), signedFile: 'f'.repeat(64) } }, { upTo: 30 });
-  assert.equal((await reconcile([t], wrongIndex)).records.get(10).cls, RECORD.MISMATCH);
+  assert.equal((await reconcile([t], wrongIndex)).records.get(10).cls, RECORD.UNVERIFIED);
   // With no signed post to compare against, nothing is trusted either.
-  assert.equal(classifyRecord({ entry: { status: 'full', file: sha(sweepRecord(10)) }, bytes: sweepRecord(10), signedFile: null }).cls, RECORD.UNANCHORED);
+  assert.equal(classifyRecord({ entry: { status: 'full', file: sha(sweepRecord(10)) }, bytes: sweepRecord(10), signedFile: null }).cls, RECORD.UNVERIFIED);
 });
 
 test('8. when the archive resumes, an earlier UNKNOWN is reconciled; checked sweeps come from the cache', async () => {
@@ -255,7 +258,11 @@ test('9. an archive stall is announced once, on the transition — not every run
   assert.deepEqual(archiveAlerts(h('LAGGING', 766), h('LAGGING', 766, 905)), [], 'still lagging: silent');
   assert.deepEqual(archiveAlerts(h('LAGGING', 766), h('UNAVAILABLE', null)), [], 'a failed read is shown, not sent');
   assert.deepEqual(archiveAlerts(h('LAGGING', 766), h('CURRENT', 899)).map((a) => a.kind), ['archive_current']);
-  assert.deepEqual(archiveAlerts(h('LAGGING', 766), h('LAGGING', 800)).map((a) => a.kind), ['archive_advanced'], 'a new batch published');
+  const at = (x, iso) => ({ ...x, archive_latest_changed_at: iso });
+  assert.deepEqual(archiveAlerts(at(h('LAGGING', 766), iso(NOW - 3 * 3600_000)), at(h('LAGGING', 800), iso(NOW))).map((a) => a.kind), ['archive_advanced'], 'moved after a long stall');
+  assert.deepEqual(archiveAlerts(at(h('LAGGING', 766), iso(NOW - 10 * 60_000)), at(h('LAGGING', 770), iso(NOW))), [], 'a small step right after another: silent');
+  assert.deepEqual(archiveAlerts(at(h('LAGGING', 766), iso(NOW - 10 * 60_000)), at(h('LAGGING', 830), iso(NOW))).map((a) => a.kind), ['archive_advanced'], 'lag down more than 50 sweeps');
+  assert.deepEqual(archiveAlerts({ ...h('LAGGING', 766), our_missing_sweeps: [900] }, { ...h('LAGGING', 766), our_missing_sweeps: [] }).map((a) => a.kind), ['archive_our_sweeps'], 'a sweep of ours appeared');
   assert.deepEqual(archiveAlerts(null, h('LAGGING', 766)), [], 'the first observation is a baseline');
   assert.deepEqual(archiveAlerts(h('LAGGING', 766), { ...h('LAGGING', 766), mismatch_sweeps: [312] }).map((a) => a.kind), ['archive_integrity']);
   assert.deepEqual(archiveAlerts({ ...h('LAGGING', 766), mismatch_sweeps: [312] }, { ...h('LAGGING', 766), mismatch_sweeps: [312] }), [], 'a known mismatch is not re-sent');
@@ -320,7 +327,7 @@ test('the mint: verified only from a full record; a room listing is its own, wea
   const red = await reconcile([], fakeArchive({ 2: { redacted: true, bytes: sweepRecord(2, { minted: [OUR], redact: 1 }) } }, { upTo: 5 }));
   const mr = archiveMint({ records: red.records, regSweep: 2 });
   assert.equal(mr.verified, null);
-  assert.equal(mr.observed.record, RECORD.REDACTED);
+  assert.equal(mr.corroborated.record, RECORD.REDACTED);
   // docs/close-1-referee.md room listing: our signed t:room listed in a signed flow post.
   const rooms = flowsTo(8, { 7: flow(7, { rooms: ['mfk-close1'] }) });
   const byRoom = buildLedger({ trades: [], registration, flows: rooms, prices: prices(8), ourDid: OUR, roomPosts: [{ room: 'mfk-close1', postedAt: at(6) }] });
@@ -328,4 +335,176 @@ test('the mint: verified only from a full record; a room listing is its own, wea
   assert.equal(byRoom.balance.provable, false, 'an inference never makes the balance provable');
   const early = buildLedger({ trades: [], registration, flows: rooms, prices: prices(8), ourDid: OUR, roomPosts: [{ room: 'mfk-close1', postedAt: at(8) }] });
   assert.notEqual(early.owner.evidence, EVIDENCE.INFERRED_OWNER_FROM_ROOM_LISTING, 'a listing before our post proves nothing about us');
+});
+
+// ---------------------------------------------------------------- 2026-09-29: trust classes, corroboration, GitHub budget
+
+test('R1. redacted bytes matching the index sha256: OFFICIAL_INDEX_VERIFIED_REDACTED, never FULL', () => {
+  const bytes = sweepRecord(9, { redact: 2 });
+  const signed = 'b'.repeat(64);
+  const c = classifyRecord({ entry: { status: 'redacted', file: signed, sha256: sha(bytes) }, bytes, signedFile: signed });
+  assert.equal(c.cls, RECORD.REDACTED);
+  assert.equal(RECORD.REDACTED, 'OFFICIAL_INDEX_VERIFIED_REDACTED');
+  assert.notEqual(c.cls, RECORD.FULL);
+});
+
+test('R2. redacted bytes that do not match the index sha256: ARCHIVE_UNVERIFIED, flagged for integrity', () => {
+  const bytes = sweepRecord(9, { redact: 2 });
+  const signed = 'b'.repeat(64);
+  const c = classifyRecord({ entry: { status: 'redacted', file: signed, sha256: 'c'.repeat(64) }, bytes, signedFile: signed });
+  assert.deepEqual([c.cls, c.integrity], [RECORD.UNVERIFIED, true]);
+});
+
+test('R3. full bytes matching the signed referee file: REFEREE_HASH_VERIFIED_FULL', () => {
+  const bytes = sweepRecord(9);
+  const c = classifyRecord({ entry: { status: 'full', file: sha(bytes) }, bytes, signedFile: sha(bytes) });
+  assert.equal(c.cls, 'REFEREE_HASH_VERIFIED_FULL');
+});
+
+test('R4. a redacted record with our EXACT trade is OFFICIAL_REDACTED_CORROBORATION, never SETTLED_PROVEN', async () => {
+  const t = lostOffer();
+  const a = await reconcile([t], fakeArchive({
+    10: { redacted: true, bytes: sweepRecord(10, { trades: [{ id: 'mfk-lost', maker: OUR, countersigner: stranger.did, outcome: 'settled' }], redact: 1 }) },
+    11: { redacted: true, bytes: sweepRecord(11, { redact: 1 }) }, 12: { redacted: true, bytes: sweepRecord(12, { redact: 1 }) }
+  }, { upTo: 30 }));
+  const r = resolveTrade(t, { flows: omittedFlows(), latest: 40, ourDid: OUR, archive: a.verdicts });
+  assert.deepEqual([r.status, r.evidence, r.ownership], [STATUS.UNKNOWN, EVIDENCE.UNKNOWN_OMITTED, OWNERSHIP.UNPROVEN]);
+  assert.deepEqual([r.corroboration.kind, r.corroboration.exact, r.corroboration.record], ['SETTLED_OURS', true, RECORD.REDACTED]);
+  const k = classifyTrade(t, r);
+  assert.deepEqual([k.settlement_confidence, k.ownership_confidence, k.effect], ['OFFICIALLY_CORROBORATED', 'OFFICIALLY_CORROBORATED', 'SETTLED']);
+  // Other terms (another price) are not our exact copy.
+  const other = await reconcile([t], fakeArchive({ 10: { redacted: true, bytes: sweepRecord(10, { trades: [{ id: 'mfk-lost', maker: OUR, countersigner: stranger.did, px: '230.00', outcome: 'settled' }] }) } }, { upTo: 30 }));
+  assert.equal(other.verdicts.get(t.id).corroboration.exact, false);
+  // Our offer with no visible copy, in sweeps where private trades were redacted: stays unknown.
+  const hidden = await reconcile([t], fakeArchive({ 10: { redacted: true, bytes: sweepRecord(10, { redact: 3 }) }, 11: { redacted: true, bytes: sweepRecord(11) }, 12: { redacted: true, bytes: sweepRecord(12) } }, { upTo: 30 }));
+  assert.equal(hidden.verdicts.get(t.id).corroboration, null, 'a private-room copy of our offer could be among the redacted');
+  // A take whose own public copy was voided: corroborated not settled for us.
+  const tk = take('tk-v', 12);
+  const voided = await reconcile([tk], fakeArchive({ 12: { redacted: true, bytes: sweepRecord(12, { trades: [{ id: 'tk-v', maker: stranger.did, countersigner: OUR, side: 'buy', qty: '1.00', outcome: 'void', reason: 'funds' }], redact: 4 }) } }, { upTo: 30 }));
+  assert.deepEqual([voided.verdicts.get('tk-v').corroboration.kind, voided.verdicts.get('tk-v').corroboration.reason], ['NOT_SETTLED', 'funds']);
+});
+
+test('R5. the corroborated account never reaches the risk gate', async () => {
+  const t = lostOffer();
+  const records = { 10: { redacted: true, bytes: sweepRecord(10, { trades: [{ id: 'mfk-lost', maker: OUR, countersigner: stranger.did, outcome: 'settled' }] }) } };
+  const withC = await reconcile([t], fakeArchive(records, { upTo: 30 }));
+  const base = { trades: [t], registration, flows: omittedFlows(), prices: prices(40), ourDid: OUR };
+  const L0 = buildLedger(base);
+  const L1 = buildLedger({ ...base, archive: withC.verdicts });
+  for (const k of ['exposure', 'balance', 'pending', 'settledCount', 'settledProvenCount']) assert.deepEqual(L1[k], L0[k], k);
+  assert.equal(L1.owner.state, L0.owner.state);
+  const price = { n: 40, for: 41, ref: { px: '224.00', time: iso(NOW - 60_000) }, postedAt: iso(NOW - 60_000) };
+  const gate = (L) => approveTrade({ ...healthy(price), ledger: L, attempts: 20 }, proposal(), DEFAULT_POLICY, NOW);
+  assert.deepEqual(gate(L1), gate(L0));
+  const acct = corroboratedAccount({ trades: [t], resolutions: L1.resolutions, prices: prices(40), marks: { reference: 224 } });
+  assert.equal(acct.label, CORROBORATED_LABEL);
+  assert.equal(acct.net_position, 0.5, 'the corroborated view does count it');
+  assert.equal(L1.exposure.definite, 0, 'the proven view does not');
+  // A corroborated mint shows in the sources but does not confirm the mint for the gate.
+  const redMint = await reconcile([], fakeArchive({ 2: { redacted: true, bytes: sweepRecord(2, { minted: [OUR], redact: 1 }) } }, { upTo: 5 }));
+  const Lm = buildLedger({ trades: [], registration, flows: flowsTo(5), prices: prices(5), ourDid: OUR, archiveMint: archiveMint({ records: redMint.records, regSweep: 2 }) });
+  assert.deepEqual([Lm.owner.state, Lm.owner.confidence], [OWNER.MINT_UNKNOWN, 'OFFICIALLY_CORROBORATED']);
+});
+
+test('R5b. accounts are compared, and a disagreement is raised once', () => {
+  const ledger = { exposure: { definite: 0, low: -1, high: 1, worstFreePolf: 9000 } };
+  const inside = compareAccounts({ ledger, corroborated: { net_position: 0.5, cash: 9800, score_at: { pnl_mark: { score: -2 } }, unknown_range: { unknown_trades: 0 } }, standing: { leaderboard_display_row: null }, pnl: { top: [['x', '100']] } });
+  assert.deepEqual(inside.conflicts, []);
+  assert.equal(inside.C.note, 'not visible in truncated top list');
+  const outside = compareAccounts({ ledger, corroborated: { net_position: -2.1, cash: 9800, score_at: { pnl_mark: { score: 150 } }, unknown_range: { unknown_trades: 0 } }, standing: { leaderboard_display_row: null }, pnl: { top: [['x', '100']] } });
+  assert.deepEqual(outside.conflicts.map((c) => c.kind).sort(), ['CORROBORATED_OUTSIDE_PROVEN_RANGE', 'CORROBORATED_SCORE_ABOVE_BOARD']);
+  const snap = (c) => ({ contest_verified: true, account_comparison: { conflicts: c } });
+  assert.deepEqual(alertsBetween(snap([]), snap(outside.conflicts)).map((a) => a.kind), ['account_conflict']);
+  assert.deepEqual(alertsBetween(snap(outside.conflicts), snap(outside.conflicts)), [], 'the same conflict is not re-sent');
+});
+
+test('R6/R7. a long stall is silent run after run; the resume is one alert', () => {
+  const h = (latest, live, changedAt) => ({ archive_status: live - latest > 12 ? 'LAGGING' : 'CURRENT', archive_latest_sweep: latest, live_latest_sweep: live, archive_lag_sweeps: live - latest, archive_latest_changed_at: changedAt, mismatch_sweeps: [], our_missing_sweeps: [] });
+  const stalled = iso(NOW - 26 * 3600_000);
+  let prev = h(766, 1000, stalled); const sent = [];
+  for (let i = 1; i <= 72; i++) { const next = h(766, 1000 + i, stalled); sent.push(...archiveAlerts(prev, next)); prev = next; }
+  assert.deepEqual(sent, [], 'six hours of 5-minute runs, nothing');
+  const resumed = h(1070, 1073, iso(NOW));
+  assert.deepEqual(archiveAlerts(prev, resumed).map((a) => a.kind), ['archive_current']);
+  assert.deepEqual(archiveAlerts(resumed, h(1071, 1074, iso(NOW))), [], 'and then quiet again');
+});
+
+/** A fake GitHub: counts requests, answers with rate headers, can refuse. */
+function fakeGitHub({ remaining = 50, reset = NOW / 1000 + 1800, refuse = false } = {}) {
+  const calls = [];
+  const state = { remaining };
+  const fetchFn = async (url, opts = {}) => {
+    calls.push({ url, etag: opts.headers?.['if-none-match'] ?? null });
+    const hdr = () => ({ get: (k) => ({ 'x-ratelimit-remaining': String(state.remaining), 'x-ratelimit-limit': '60', 'x-ratelimit-reset': String(Math.floor(reset)), etag: '"e1"' })[k] ?? null });
+    if (refuse) { state.remaining = 0; return { ok: false, status: 403, headers: hdr(), json: async () => ({}), text: async () => '' }; }
+    if (opts.headers?.['if-none-match'] === '"e1"') return { ok: false, status: 304, headers: hdr(), json: async () => null, text: async () => '' };
+    state.remaining = Math.max(0, state.remaining - 1);
+    let body = null; let status = 200;
+    if (url.includes('/git/trees/')) body = { sha: 't1', tree: [] };
+    else if (url.includes('/issues?')) body = [];
+    else if (url.includes('raw.githubusercontent')) body = url.endsWith('manifest.json') ? JSON.stringify({ status: 'draft' }) : JSON.stringify({ rules_version: '0.1-draft' });
+    else if (url.includes('/commits')) body = [{ sha: 'abcdef1234', commit: { message: 'x' } }];
+    else status = 404;
+    return { ok: status === 200, status, headers: hdr(), json: async () => body, text: async () => (typeof body === 'string' ? body : JSON.stringify(body)) };
+  };
+  return { fetchFn, calls, state };
+}
+
+test('R8. a GitHub 403 rate limit backs off: no further calls until the reset, and it is not a trading failure', async () => {
+  const gh = fakeGitHub({ refuse: true });
+  const first = await watchUpstream({ prev: null, fetchFn: gh.fetchFn, nowMs: NOW, env: {}, pinned: PINNED });
+  assert.equal(gh.calls.length, 1, 'stopped at the first refusal');
+  assert.match(first.error, /rate limit/);
+  assert.equal(first.obs.github.status, 'BLIND', 'never succeeded');
+  assert.ok(first.obs.github.blocked_until);
+  gh.calls.length = 0;
+  for (const min of [10, 20, 29]) {
+    const again = await watchUpstream({ prev: first.obs, fetchFn: gh.fetchFn, nowMs: NOW + min * 60_000, env: {}, pinned: PINNED });
+    assert.equal(again.ran, false);
+  }
+  assert.equal(gh.calls.length, 0, 'no request while blocked');
+  // A low remaining budget also stops us before the reset.
+  const low = makeGitHub({ fetchFn: gh.fetchFn, env: {}, nowMs: NOW, state: { remaining: 3, reset_at: iso(NOW + 600_000) } });
+  await assert.rejects(low.json('https://api.github.com/x'), RateLimited);
+  assert.equal(gh.calls.length, 0);
+});
+
+test('R9. after the reset the watcher resumes; unchanged answers come back as free 304s', async () => {
+  const refused = fakeGitHub({ refuse: true });
+  const blocked = (await watchUpstream({ prev: null, fetchFn: refused.fetchFn, nowMs: NOW, env: {}, pinned: PINNED })).obs;
+  const gh = fakeGitHub({ reset: NOW / 1000 + 7200 });
+  const later = NOW + 31 * 60_000;
+  const resumed = await watchUpstream({ prev: blocked, fetchFn: gh.fetchFn, nowMs: later, env: {}, pinned: PINNED });
+  assert.equal(resumed.ran, true);
+  assert.equal(resumed.obs.github.status, 'OK');
+  assert.equal(resumed.obs.github.last_success, iso(later));
+  assert.deepEqual(alertsBetween({ contest_verified: true, github_watch_status: 'BLIND' }, { contest_verified: true, github_watch_status: 'OK' }).map((a) => a.kind), ['github_watch_restored']);
+  assert.deepEqual(alertsBetween({ contest_verified: true, github_watch_status: 'OK' }, { contest_verified: true, github_watch_status: 'DEGRADED' }), [], 'a short degradation is not news');
+  assert.deepEqual(alertsBetween({ contest_verified: true, github_watch_status: 'DEGRADED' }, { contest_verified: true, github_watch_status: 'BLIND' }).map((a) => a.kind), ['github_watch_blind']);
+  // Not due yet: no requests at all.
+  gh.calls.length = 0;
+  const soon = await watchUpstream({ prev: resumed.obs, fetchFn: gh.fetchFn, nowMs: later + 5 * 60_000, env: {}, pinned: PINNED });
+  assert.deepEqual([soon.ran, gh.calls.length], [false, 0]);
+  // Due again: every read carries its ETag and comes back 304.
+  const next = await watchUpstream({ prev: resumed.obs, fetchFn: gh.fetchFn, nowMs: later + 31 * 60_000, env: {}, pinned: PINNED });
+  assert.equal(next.obs.github.status, 'OK');
+  assert.ok(gh.calls.length > 0 && gh.calls.every((c) => c.etag === '"e1"'), 'conditional requests only');
+  assert.equal(next.obs.github.not_modified_last_run, gh.calls.length);
+  // A token, if present, is used; its absence is fine.
+  let auth = null;
+  await makeGitHub({ fetchFn: async (u, o) => { auth = o.headers.authorization; return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({}) }; }, env: { GITHUB_TOKEN: 't0k' }, nowMs: NOW }).json('https://api.github.com/y');
+  assert.equal(auth, 'Bearer t0k');
+});
+
+test('R10. a truncated tie never becomes a rank; not listed is said plainly', () => {
+  const top = Array.from({ length: 25 }, (_, i) => [i === 24 ? OUR : `did:key:z6Mk${String(i).padStart(2, '0')}`, '743.97']);
+  const s = standingOf(top, OUR);
+  assert.equal(s.leaderboard_note, 'tie may extend beyond visible list');
+  assert.equal(s.prize_places, null);
+  const gone = standingOf(top.slice(0, 24), OUR);
+  assert.equal(gone.leaderboard_note, 'not visible in truncated top list');
+  assert.equal(gone.leaderboard_display_row, null);
+  const snap = buildSnapshot({ contest: null, streams: {}, price: null, ledger: null, pnl: { n: 1, top: top.slice(0, 24) }, ourDid: OUR, trades: [], gate: null, nowMs: NOW });
+  assert.ok(!/rank >|>25|#2[5-9]/.test(JSON.stringify(snap)), 'no pseudo-rank anywhere in the snapshot');
+  assert.equal(snap.official_score_note, 'not visible in truncated top list');
 });
