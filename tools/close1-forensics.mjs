@@ -6,6 +6,7 @@
  *
  *   node tools/close1-forensics.mjs          table + accounts + recommendation (markdown)
  *   node tools/close1-forensics.mjs --json   the same as JSON
+ *   node tools/close1-forensics.mjs --quiet  write the files only (the agent calls this on an evidence change)
  *
  * Reads the evidence store, our trade records and the archive cache (the only
  * network read is the archive's index.json, to know what is published). It
@@ -90,7 +91,7 @@ export function forensicRows({ trades, ledger, verdicts, corroborated, ourDid, c
 }
 
 /** Counts by confidence, and a recommendation derived only from stated facts. */
-export function decide({ rows, ledger, comparison, archive, attempts, policy = DEFAULT_POLICY }) {
+export function decide({ rows, ledger, comparison, archive, attempts, policy = DEFAULT_POLICY, officialLookup = false }) {
   const count = (f) => rows.filter(f).length;
   const tally = {
     attempts,
@@ -101,13 +102,22 @@ export function decide({ rows, ledger, comparison, archive, attempts, policy = D
     unknown: count((r) => r.outcome === 'UNKNOWN'),
     at_least_officially_corroborated: count((r) => r.outcome !== 'UNKNOWN')
   };
+  // Funds and exposure limits permitting a trade is never a reason to resume (operator, 2026-09-29):
+  // only better evidence is. Each improvement is listed; only the ones that also make a NEW trade
+  // checkable — an archive covering current sweeps, or an official signed lookup — can lift the mode.
+  const covering = archive?.archive_status === 'CURRENT' && !(archive.our_missing_sweeps || []).length;
+  const improvements = [];
+  if (covering) improvements.push('the archive covers current sweeps');
+  if (officialLookup) improvements.push('FLOP Labs publishes a signed per-owner/per-trade lookup');
+  if (tally.proven_settled_ours > 0) improvements.push(`${tally.proven_settled_ours} trade(s) have copy-level settlement provenance`);
+  if (tally.unknown === 0) improvements.push('no trade remains unknown');
   const reasons = [];
-  let mode = MODE.SAFE_RESUME_CANDIDATE;
+  let mode = covering || officialLookup ? MODE.SAFE_RESUME_CANDIDATE : MODE.EVIDENCE_ONLY;
   if (comparison.conflicts.length) { mode = MODE.HOLD; reasons.push('the proven, corroborated and board views disagree'); }
-  if (archive?.archive_status !== 'CURRENT') {
-    if (mode !== MODE.HOLD) mode = MODE.EVIDENCE_ONLY;
+  if (!covering) {
     reasons.push(`the archive is ${archive?.archive_status ?? 'unknown'} (${archive?.archive_lag_sweeps ?? '?'} sweeps behind): a new trade now would land in a sweep with no record, and the flow post omits most outcomes, so it would most likely end UNKNOWN like the last ones`);
   }
+  if (!covering && !officialLookup && improvements.length) reasons.push(`improved (${improvements.join('; ')}), but a new trade still could not be checked`);
   if (tally.proven_settled_ours === 0) reasons.push('no trade is proven ours yet, so the ledger still carries every unknown at worst case');
   if (tally.unknown > 0) reasons.push(`${tally.unknown} trades remain unknown`);
   const E = ledger.exposure;
@@ -115,6 +125,7 @@ export function decide({ rows, ledger, comparison, archive, attempts, policy = D
     tally,
     exposure: { proven_definite: E.definite, proven_range: [E.low, E.high], worst_free_polf: E.worstFreePolf, policy_max_abs: policy.maxAbsPosition },
     recommended_next_mode: mode,
+    evidence_improvements: improvements,
     reasons,
     note: 'Recommendation for a person only. The 20-attempt cap is unchanged and nothing here is read by the agent.'
   };
@@ -164,6 +175,7 @@ export async function run(argv = process.argv.slice(2)) {
   fs.mkdirSync(DIR, { recursive: true });
   fs.writeFileSync(path.join(DIR, 'forensics.json'), JSON.stringify(report, null, 2));
   fs.writeFileSync(path.join(DIR, 'forensics.md'), markdown(report) + '\n');
+  if (argv.includes('--quiet')) return report;
   if (argv.includes('--json')) console.log(JSON.stringify(report, null, 2));
   else {
     console.log(markdown(report));

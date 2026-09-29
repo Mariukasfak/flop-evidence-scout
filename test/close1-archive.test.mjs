@@ -248,7 +248,7 @@ test('8. when the archive resumes, an earlier UNKNOWN is reconciled; checked swe
   const snapOf = (res) => ({ contest_verified: true, trades: [{ id: t.id, status: res.status, evidence: res.evidence, ownership: res.ownership, terminal: true }] });
   const was = resolveTrade(t, { flows: omittedFlows(), latest: 40, ourDid: OUR });
   const alerts = alertsBetween(snapOf(was), snapOf(r));
-  assert.deepEqual(alerts.map((x) => x.kind), ['trade_resolved']);
+  assert.deepEqual(alerts.map((x) => x.kind), ['settled_proven']);
   assert.match(alerts[0].text, /SETTLED_PROVEN.*verified archive record \(was UNKNOWN\)/);
 });
 

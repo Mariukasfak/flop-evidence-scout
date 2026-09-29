@@ -72,9 +72,10 @@ function confidence(ledger) {
 export function buildSnapshot({
   contest, contestError = null, streams, price, ledger, pnl, ourDid, trades, gate, nowMs,
   writeErrors5m = 0, upstream = null, upstreamError = null, integrity = {}, archive = null,
-  corroborated = null, comparison = null
+  corroborated = null, comparison = null, decision = null, operatorMode = null
 }) {
   const res = ledger ? [...ledger.resolutions.values()] : [];
+  const cRows = new Map((corroborated?.rows || []).map((x) => [x.id, x]));
   const top = Array.isArray(pnl?.top) ? pnl.top : [];
   const standing = standingOf(top, ourDid);
   const refStatus = referenceStatus(price, undefined, nowMs);
@@ -149,6 +150,12 @@ export function buildSnapshot({
     archive: archive ?? null,
     corroborated_account: corroborated ? { ...corroborated, rows: undefined } : null,
     account_comparison: comparison ?? null,
+    // The forensics recommendation, for a person. Nothing in the agent reads it.
+    evidence_summary: decision ? {
+      recommended_next_mode: decision.recommended_next_mode, tally: decision.tally, exposure: decision.exposure,
+      evidence_improvements: decision.evidence_improvements ?? [], reasons: decision.reasons
+    } : null,
+    operator_mode: operatorMode,
     archive_conflicts: ledger?.archiveConflicts ?? [],
     gate: gate ?? null,
     trades: res.map((r) => ({
@@ -159,7 +166,10 @@ export function buildSnapshot({
         maker: o.maker === ourDid ? 'US' : o.maker, countersigner: o.countersigner === ourDid ? 'US' : o.countersigner
       })),
       archive_gaps: r.archiveGaps ? { redacted: r.archiveGaps.redacted?.length ?? 0, missing: r.archiveGaps.missing?.length ?? 0, unverified: r.archiveGaps.unverified?.length ?? 0, hidden_trades: r.archiveGaps.hidden_trades ?? 0 } : null,
-      corroboration: r.corroboration ? { kind: r.corroboration.kind, exact: r.corroboration.exact, sweep: r.corroboration.sweep, record: r.corroboration.record, evidence: 'OFFICIAL_REDACTED_CORROBORATION' } : null
+      corroboration: r.corroboration ? { kind: r.corroboration.kind, exact: r.corroboration.exact, sweep: r.corroboration.sweep, record: r.corroboration.record, evidence: 'OFFICIAL_REDACTED_CORROBORATION' } : null,
+      corroborated_outcome: cRows.get(r.id)?.outcome ?? null,
+      corroborated_settlement: cRows.get(r.id)?.settlement_confidence ?? null,
+      corroborated_ownership: cRows.get(r.id)?.ownership_confidence ?? null
     }))
   };
 }
@@ -190,7 +200,7 @@ export function alertsBetween(prev, next) {
       if (t.terminal && (was?.status !== t.status || was?.evidence !== t.evidence)) {
         const own = t.status === STATUS.ID_SETTLED ? ' — the id settled; that it was OUR copy is not proven' : '';
         const arch = t.evidence === EVIDENCE.OFFICIAL_ARCHIVE && was && was.evidence !== EVIDENCE.OFFICIAL_ARCHIVE ? ` — decided by a verified archive record (was ${was.status})` : '';
-        add('trade_resolved', `close-1 ${t.id}: ${t.status}${t.void_reason ? ` (${t.void_reason})` : ''}, evidence ${t.evidence}, ownership ${t.ownership}${own}${arch}`);
+        add(t.status === STATUS.SETTLED_PROVEN ? 'settled_proven' : 'trade_resolved', `close-1 ${t.id}: ${t.status}${t.void_reason ? ` (${t.void_reason})` : ''}, evidence ${t.evidence}, ownership ${t.ownership}${own}${arch}`);
       }
     }
   }
@@ -198,6 +208,7 @@ export function alertsBetween(prev, next) {
   const placed = (s) => s?.prize_confidence === 'PROVEN' && (s.prize_places || []).length > 0;
   if (placed(next) && !placed(prev)) add('prize_place_proven', `close-1: proven prize place(s) ${next.prize_places.join(', ')}, shared by ${next.prize_sharing}`);
   out.push(...archiveAlerts(prev?.archive, next.archive));
+  out.push(...evidenceAlerts(prev, next));
   out.push(...githubAlerts(prev, next));
   const sig = (s) => (s?.account_comparison?.conflicts || []).map((c) => c.kind).sort().join(',');
   if (sig(next) && sig(next) !== sig(prev)) add('account_conflict', `close-1 accounts disagree: ${next.account_comparison.conflicts.map((c) => c.detail).join('; ')}`);
@@ -239,6 +250,78 @@ export function archiveAlerts(prev, next) {
   return out;
 }
 
+/**
+ * Evidence moving under our 20 trades (operator, 2026-09-29): an UNKNOWN that
+ * resolves, a corroborated result that changes, owner evidence that gets
+ * stronger, a proven exposure range that moves, and the recommendation
+ * changing. A snapshot written before these fields existed is a baseline.
+ */
+const OWNER_RANK = { UNKNOWN: 0, INFERRED: 1, OFFICIALLY_CORROBORATED: 2, PROVEN: 3 };
+
+export function evidenceAlerts(prev, next) {
+  const out = [];
+  if (!prev || !next) return out;
+  const add = (kind, text) => out.push({ kind, text });
+  const before = new Map((prev.trades || []).map((t) => [t.id, t]));
+  const how = (t) => `${t.corroborated_outcome}${t.corroboration ? ` (${t.corroboration.kind}, ${t.corroboration.record ?? 'record'} sweep ${t.corroboration.sweep ?? '?'})` : ''}`;
+  for (const t of next.trades || []) {
+    const was = before.get(t.id);
+    if (!was || was.corroborated_outcome === undefined || t.corroborated_outcome == null) continue;
+    if (was.corroborated_outcome === t.corroborated_outcome && (was.corroboration?.kind ?? null) === (t.corroboration?.kind ?? null)) continue;
+    if (was.corroborated_outcome === 'UNKNOWN') add('unknown_resolved', `close-1 ${t.id}: UNKNOWN → ${how(t)}, settlement ${t.corroborated_settlement}`);
+    else add('corroboration_changed', `close-1 ${t.id}: corroborated ${how(was)} → ${how(t)}`);
+  }
+  const rank = (s) => OWNER_RANK[s] ?? -1;
+  if (prev.owner_confidence && rank(next.owner_confidence) > rank(prev.owner_confidence)) {
+    add('owner_stronger', `close-1 owner evidence stronger: ${prev.owner_confidence} → ${next.owner_confidence} (${next.owner_state}, ${next.owner_evidence})`);
+  }
+  const range = (s) => `${s.exposure_low} … ${s.exposure_high} (definite ${s.proven_position})`;
+  if (prev.exposure_low != null && next.exposure_low != null && range(prev) !== range(next)) {
+    add('proven_exposure_changed', `close-1 proven exposure ${range(prev)} → ${range(next)}`);
+  }
+  const mode = (s) => s?.evidence_summary?.recommended_next_mode;
+  if (mode(prev) && mode(next) && mode(prev) !== mode(next)) add('mode_changed', `close-1 RECOMMENDED_NEXT_MODE ${mode(prev)} → ${mode(next)}: ${(next.evidence_summary.reasons || []).join('; ')}`);
+  return out;
+}
+
+/** Kinds that are folded into one evidence report instead of being sent one by one. */
+export const REPORT_KINDS = Object.freeze(new Set([
+  'archive_advanced', 'archive_current', 'archive_our_sweeps', 'archive_integrity', 'maintainer_reply',
+  'unknown_resolved', 'corroboration_changed', 'settled_proven', 'trade_resolved', 'mint_confirmed', 'owner_stronger',
+  'proven_exposure_changed', 'mode_changed'
+]));
+const OFFICIAL_KINDS = new Set(['archive_advanced', 'archive_current', 'archive_our_sweeps', 'archive_integrity', 'maintainer_reply']);
+
+/**
+ * On a meaningful change, one message in the operator's seven points; the
+ * alerts it folds stay in the log. Nothing meaningful: the alerts unchanged.
+ */
+export function withEvidenceReport(prev, next, alerts) {
+  const folded = alerts.filter((a) => REPORT_KINDS.has(a.kind) && !a.logOnly);
+  if (!folded.length) return alerts;
+  const texts = (f) => folded.filter(f).map((a) => `  - ${a.text}`);
+  const official = texts((a) => OFFICIAL_KINDS.has(a.kind));
+  const ours = texts((a) => !OFFICIAL_KINDS.has(a.kind) && !['proven_exposure_changed', 'mode_changed'].includes(a.kind));
+  const range = (s) => (s?.exposure_low != null ? `${s.exposure_low} … ${s.exposure_high} (definite ${s.proven_position}), worst-case free POLF ${Math.round(s.free_polf_worst_case * 100) / 100}` : '?');
+  const corr = (s) => (s?.corroborated_account ? `${s.corroborated_account.net_position} (still unknown ${s.corroborated_account.unknown_range?.low} … ${s.corroborated_account.unknown_range?.high})` : '?');
+  const a = next.archive || {};
+  const es = next.evidence_summary || {}; const pm = prev?.evidence_summary?.recommended_next_mode; const nm = es.recommended_next_mode;
+  const act = [];
+  if (nm && pm && nm !== pm) act.push(`review the new recommendation ${nm}; nothing changes until a person decides`);
+  if (folded.some((x) => x.kind === 'archive_integrity')) act.push('an archive record fails its hash check: look before trusting any archive result');
+  const text = [
+    `close-1 evidence change at sweep ${next.current_sweep ?? '?'}`,
+    '1. Official:', ...(official.length ? official : ['  - no new official publication']),
+    '2. Our trades:', ...(ours.length ? ours : ['  - none of our trades changed state']),
+    `3. Proven exposure: ${range(prev)} → ${range(next)}`,
+    `4. Corroborated position (NOT USED FOR SIGNING OR RISK APPROVAL): ${corr(prev)} → ${corr(next)}`,
+    `5. Archive: ${a.archive_status ?? '?'}, latest ${a.archive_latest_sweep ?? '?'}, referee ${a.live_latest_sweep ?? '?'}, lag ${a.archive_lag_sweeps ?? '?'} sweeps (~${a.archive_lag_minutes ?? '?'} min)`,
+    `6. RECOMMENDED_NEXT_MODE: ${pm && nm && pm !== nm ? `${pm} → ${nm} (CHANGED)` : `${nm ?? '?'} (unchanged)`}`,
+    `7. Operator action: ${act.length ? act.join('; ') : 'none required'}`
+  ].join('\n');
+  return [...alerts.map((x) => (folded.includes(x) ? { ...x, logOnly: true } : x)), { kind: 'evidence_report', text }];
+}
+
 /** The GitHub watcher: news only when it goes blind for hours, and when it can see again. */
 export function githubAlerts(prev, next) {
   const was = prev?.github_watch_status; const now = next?.github_watch_status;
@@ -258,7 +341,8 @@ export async function deliverAlerts(alerts, { logFile, env = process.env, fetchF
   fs.appendFileSync(logFile, alerts.map((a) => JSON.stringify({ at: new Date().toISOString(), ...a })).join('\n') + '\n');
   if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return { sent: 0, logged: alerts.length };
   let sent = 0;
-  for (const a of alerts) {
+  // logOnly: recorded, not sent (community comments; alerts folded into an evidence report).
+  for (const a of alerts.filter((x) => !x.logOnly)) {
     try {
       const r = await fetchFn(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
         method: 'POST', headers: { 'content-type': 'application/json' },

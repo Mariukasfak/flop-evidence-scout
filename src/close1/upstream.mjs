@@ -43,6 +43,24 @@ export const TITLE_WATCH = Object.freeze({ repo: YP, pattern: /\bE\.(38|40|44)\b
 export const MAINTAINERS = new Set(['sv']);
 const MAINTAINER_ASSOC = new Set(['OWNER', 'MEMBER']);
 const SUBSTANTIVE_CHARS = 40;
+/**
+ * close-call #15 is where we asked about the stopped archive (2026-09-28). A
+ * maintainer answer there is tagged with what it seems to settle, so the
+ * operator sees at once whether it names a backfill, a cadence, a lookup,
+ * copy provenance, a signed binding or a date before the lock.
+ */
+export const ARCHIVE_ISSUE = `${REPO}#15`;
+export const ARCHIVE_ANSWER_TOPICS = Object.freeze([
+  ['backfill', /backfill|resum|catch(?:es|ing)? up|republish|after 766|missing sweeps/i],
+  ['cadence', /cadence|hourly|daily|schedule|interval|every \d+/i],
+  ['per-owner/per-trade lookup', /lookup|per[- ]owner|per[- ]trade|endpoint|query/i],
+  ['copy provenance', /provenance|which copy|countersign/i],
+  ['signed binding', /signed|signature|bind|attest/i],
+  ['before the lock', /\block\b|10-04|oct(?:ober)? 4/i]
+]);
+/** Our own comments are not news, and a community comment is logged unless it claims an integrity problem. */
+const OUR_LOGINS = new Set(['mariukasfak']);
+const INTEGRITY_CLAIM = /mismatch|does(?:n't| not) match|tamper|altered|inconsisten/i;
 /** Issues outside the two listed repos cost a request each; without a token the budget is 60 an hour. */
 const SINGLE_FETCH_EVERY_MS = 3600_000;
 /** A file whose name suggests a launch record or a detached signature. */
@@ -164,7 +182,7 @@ export async function watchUpstream({ prev = null, fetchFn = fetch, nowMs = Date
     const obs = await observeUpstream({ prev, gh, nowMs });
     obs.httpCache = gh.etags;
     obs.github = gh.finish(true, null, g0);
-    return { obs, notes: upstreamAlerts(prev, obs, pinned), ran: true };
+    return { obs, notes: [...upstreamAlerts(prev, obs, pinned), ...communityNotes(prev, obs)], ran: true };
   } catch (err) {
     // Keep the last good observation; only the watcher's own state moves.
     return { obs: { ...(prev || {}), httpCache: gh.etags, github: gh.finish(false, err, g0) }, notes: [], ran: true, error: String(err.message).slice(0, 200) };
@@ -275,12 +293,32 @@ export function upstreamAlerts(prev, next, pinned) {
     if (w.unavailable || before.unavailable) continue;
     for (const c of w.newSince || []) {
       if (!isMaintainer(c) || c.text.replace(/\s+/g, ' ').trim().length < SUBSTANTIVE_CHARS) continue;
-      add('maintainer_reply', `${w.priority} ${key} (${w.topic}): ${c.author} wrote: ${c.text.replace(/\s+/g, ' ').slice(0, 280)}`);
+      const tags = key === ARCHIVE_ISSUE ? ARCHIVE_ANSWER_TOPICS.filter(([, re]) => re.test(c.text)).map(([t]) => t) : [];
+      add('maintainer_reply', `${w.priority} ${key} (${w.topic}): ${c.author} wrote${tags.length ? ` [mentions: ${tags.join(', ')}]` : ''}: ${c.text.replace(/\s+/g, ' ').slice(0, 280)}`);
     }
     if (w.state !== before.state) add('watched_issue_state', `${w.priority} ${key} (${w.topic}) is now ${w.state}`);
   }
   for (const [n, i] of Object.entries(next.issues || {})) {
     if (!prev.issues?.[n] && isMaintainer(i)) add('new_issue', `close-1 repo: new issue #${n} by ${i.author} "${i.title}"`);
+  }
+  return out;
+}
+
+/**
+ * Community comments on the close-call issues: written to the alert log, not
+ * sent (logOnly), unless one claims a concrete integrity problem.
+ */
+export function communityNotes(prev, next) {
+  const out = [];
+  if (!prev) return out;
+  for (const [key, w] of Object.entries(next.watched || {})) {
+    if (w.repo !== REPO || !prev.watched?.[key] || w.unavailable || prev.watched[key].unavailable) continue;
+    for (const c of w.newSince || []) {
+      const text = c.text.replace(/\s+/g, ' ').trim();
+      if (isMaintainer(c) || OUR_LOGINS.has(String(c.author).toLowerCase()) || text.length < SUBSTANTIVE_CHARS) continue;
+      const claim = INTEGRITY_CLAIM.test(text);
+      out.push({ kind: claim ? 'community_integrity_claim' : 'community_comment', logOnly: !claim, text: `${key}: ${c.author} wrote: ${text.slice(0, 280)}` });
+    }
   }
   return out;
 }

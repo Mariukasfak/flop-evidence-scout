@@ -36,7 +36,8 @@ import { buildLedger, termsOf, STATUS } from '../src/close1/ledger.mjs';
 import { decide, ACTION } from '../src/close1/strategy.mjs';
 import { approveTrade, approveProbe, DEFAULT_POLICY } from '../src/close1/risk-gate.mjs';
 import { Executor } from '../src/close1/executor.mjs';
-import { buildSnapshot, alertsBetween, deliverAlerts } from '../src/close1/runtime.mjs';
+import { buildSnapshot, alertsBetween, deliverAlerts, withEvidenceReport } from '../src/close1/runtime.mjs';
+import { forensicRows, decide as recommend, run as runForensics } from './close1-forensics.mjs';
 import { watchUpstream } from '../src/close1/upstream.mjs';
 import { corroboratedAccount, compareAccounts } from '../src/close1/corroborated.mjs';
 import { standingOf } from '../src/close1/runtime.mjs';
@@ -232,6 +233,16 @@ export async function run(argv = process.argv.slice(2)) {
     });
     comparison = compareAccounts({ ledger, corroborated, standing: standingOf(pnl?.top, ourDid), pnl });
   }
+  // The forensics recommendation, every run, for the snapshot and the evidence report only.
+  let decision = null;
+  if (ledger && corroborated) {
+    try {
+      const rows = forensicRows({ trades: state.trades, ledger, verdicts, corroborated, ourDid, cfg: contest });
+      decision = recommend({ rows, ledger, comparison, archive: archiveHealth, attempts: state.trades.length });
+    } catch (err) { console.log(`recommendation failed: ${err.message}`); }
+  }
+  // The operator's mode (data/local/close1/operator-mode.json): anything but ACTIVE means no writes at all.
+  const operatorMode = readJson(path.join(DIR, 'operator-mode.json'), null)?.mode ?? null;
 
   // 4. What the strategy would do, and whether the gate would allow it — computed
   //    on every run, so the snapshot always says whether writes are open.
@@ -256,10 +267,18 @@ export async function run(argv = process.argv.slice(2)) {
   gate.kind = gate.ok ? 'open' : gate.reasons.some((r) => HALT.test(r)) ? 'halt' : 'hold';
 
   // 5. Snapshot and alerts.
-  const snapshot = buildSnapshot({ contest, contestError, streams: stream.stats(), price, ledger, pnl, ourDid, trades: state.trades, gate, nowMs, writeErrors5m: writeErrors, upstream, upstreamError, integrity, archive: archiveHealth, corroborated, comparison });
-  const alerts = [...alertsBetween(prev, snapshot), ...upstreamNotes];
+  const snapshot = buildSnapshot({ contest, contestError, streams: stream.stats(), price, ledger, pnl, ourDid, trades: state.trades, gate, nowMs, writeErrors5m: writeErrors, upstream, upstreamError, integrity, archive: archiveHealth, corroborated, comparison, decision, operatorMode });
+  const alerts = withEvidenceReport(prev, snapshot, [...alertsBetween(prev, snapshot), ...upstreamNotes]);
   await deliverAlerts(alerts, { logFile: path.join(DIR, 'alerts.jsonl') });
   writeJson(path.join(DIR, 'runtime.json'), snapshot);
+  // A meaningful change: keep the previous forensics and write a fresh one to compare with.
+  if (alerts.some((a) => a.kind === 'evidence_report')) {
+    try {
+      const cur = path.join(DIR, 'forensics.json');
+      if (fs.existsSync(cur)) fs.copyFileSync(cur, path.join(DIR, 'forensics.prev.json'));
+      await runForensics(['--quiet']);
+    } catch (err) { console.log(`forensics refresh failed: ${err.message}`); }
+  }
   printReport(snapshot, state, ledger, contestError);
   for (const a of alerts) console.log(`ALERT ${a.kind}: ${a.text}`);
   if (checkOnly || !go) {
@@ -268,6 +287,7 @@ export async function run(argv = process.argv.slice(2)) {
   }
 
   // 6. Writes: probes first (they settle what we already did), then at most one new trade.
+  if (operatorMode && operatorMode !== 'ACTIVE') { console.log(`no writes: operator mode ${operatorMode}`); return snapshot; }
   if (!contest || !ledger) { console.log('no writes: contest or ledger unavailable'); return snapshot; }
   const executor = new Executor({ identityPath: IDENTITY, client, room: ROOM });
   if (executor.did !== ourDid) throw new Error('the signing key is not the registered owner; refusing to write');
@@ -427,7 +447,9 @@ function printReport(s, state, ledger, contestError) {
     console.log(`corroborated account (${acct.label}): position ${acct.net_position} (unknown range ${acct.unknown_range.low} … ${acct.unknown_range.high}), cash ${acct.cash}, fees ${acct.fees}, avg entry ${acct.average_entry}, score ${JSON.stringify(acct.score_at)}`);
     for (const x of s.account_comparison?.conflicts || []) console.log(`ACCOUNT CONFLICT ${x.kind}: ${x.detail}`);
   }
-  console.log(`gate: ${s.gate?.kind ?? '?'}${s.gate?.ok ? '' : ` — ${(s.gate?.reasons || []).join(', ')}`}`);
+  const es = s.evidence_summary;
+  if (es) console.log(`evidence: settled proven ${es.tally.proven_settled_ours}, corroborated ${es.tally.at_least_officially_corroborated}/${es.tally.attempts}, unknown ${es.tally.unknown} · RECOMMENDED_NEXT_MODE = ${es.recommended_next_mode} (for a person; not read by the agent)`);
+  console.log(`gate: ${s.gate?.kind ?? '?'}${s.gate?.ok ? '' : ` — ${(s.gate?.reasons || []).join(', ')}`}${s.operator_mode ? ` · operator mode ${s.operator_mode}` : ''}`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
