@@ -136,8 +136,8 @@ test('T1. Telegram: nothing is created or guessed; one test message once, and on
   assert.equal(loadTelegramEnv({ env: {}, file: path.join(tmp(), 'nope') }).TELEGRAM_BOT_TOKEN, undefined);
   // log-only alerts never reach Telegram
   const log = path.join(tmp(), 'a.jsonl'); const texts = [];
-  await deliverAlerts([{ kind: 'x', text: 'held', logOnly: true }, { kind: 'y', text: 'sent' }], { logFile: log, env, fetchFn: async (u, o) => { texts.push(JSON.parse(o.body).text); return { ok: true }; } });
-  assert.deepEqual(texts, ['sent']);
+  await deliverAlerts([{ kind: 'x', text: 'held', logOnly: true }, { kind: 'write_failure', text: 'sent' }], { logFile: log, env, fetchFn: async (u, o) => { texts.push(JSON.parse(o.body).text); return { ok: true }; } });
+  assert.deepEqual(texts, ['🟡 SVARBU\nsent']);
 });
 
 test('T2. the host block says which machine, which lock, and whether anything was ever written', () => {

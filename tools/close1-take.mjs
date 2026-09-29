@@ -41,6 +41,7 @@ import { readOperatorLock, makeWriteGuard, lockAlerts, recordWrite, readWrites, 
 import { hostHealth, loadTelegramEnv, telegramOnlineTest, telegramConfigured } from '../src/close1/host.mjs';
 import { forensicRows, decide as recommend, run as runForensics } from './close1-forensics.mjs';
 import { watchUpstream } from '../src/close1/upstream.mjs';
+import { loadSettings } from '../src/close1/telegram-bot.mjs';
 import { corroboratedAccount, compareAccounts } from '../src/close1/corroborated.mjs';
 import { standingOf } from '../src/close1/runtime.mjs';
 import { reconcileArchive, archiveVerdict, archiveMint } from '../src/close1/archive.mjs';
@@ -226,7 +227,8 @@ export async function run(argv = process.argv.slice(2)) {
   const upstreamFile = path.join(DIR, 'upstream.json');
   const upstreamPrev = readJson(upstreamFile, null);
   // At most every 30 min, never while rate limited, never fatal: a blind watcher is not a trading failure.
-  const watch = await watchUpstream({ prev: upstreamPrev, nowMs, pinned: PINNED });
+  const tgSettings = loadSettings(DIR); // operator's monitoring settings from the Telegram console (read only here)
+  const watch = await watchUpstream({ prev: upstreamPrev, nowMs, pinned: PINNED, everyMs: tgSettings.github_interval_minutes * 60_000 });
   const upstream = watch.obs; const upstreamError = watch.error ?? null; const upstreamNotes = watch.notes;
   if (watch.ran || watch.obs !== upstreamPrev) writeJson(upstreamFile, upstream);
 
@@ -286,8 +288,8 @@ export async function run(argv = process.argv.slice(2)) {
   // 5. Snapshot and alerts.
   const snapshot = buildSnapshot({ contest, contestError, streams: stream.stats(), price, ledger, pnl, ourDid, trades: state.trades, gate, nowMs, writeErrors5m: writeErrors, upstream, upstreamError, integrity, archive: archiveHealth, corroborated, comparison, decision,
     host: hostHealth({ dir: DIR, prev, nowMs, cycleOk: Boolean(contest) && !contestError, telegram, baseline, archive: archiveHealth }) });
-  const alerts = withEvidenceReport(prev, snapshot, gateEvidenceAlerts(prev, snapshot, [...alertsBetween(prev, snapshot), ...lockAlerts(prev, snapshot), ...writerAlerts, ...upstreamNotes]));
-  await deliverAlerts(alerts, { logFile: path.join(DIR, 'alerts.jsonl') });
+  const alerts = withEvidenceReport(prev, snapshot, gateEvidenceAlerts(prev, snapshot, [...alertsBetween(prev, snapshot, { archiveDropSweeps: tgSettings.archive_resume_threshold_sweeps }), ...lockAlerts(prev, snapshot), ...writerAlerts, ...upstreamNotes]));
+  await deliverAlerts(alerts, { logFile: path.join(DIR, 'alerts.jsonl'), env: tgEnv, settings: tgSettings });
   writeJson(path.join(DIR, 'runtime.json'), snapshot);
   // The first complete snapshot is the BASELINE: recorded once, and its appearance is not an event.
   const baselineFile = path.join(DIR, 'evidence-baseline.json');
@@ -348,7 +350,7 @@ export async function run(argv = process.argv.slice(2)) {
     } catch (err) { if (err instanceof WritesBlocked) { console.log(`${t.id}: ${err.message}`); break; } writeErrors += 1; console.log(`${t.id}: probe failed (${err.message})`); }
     writeJson(STATE, state);
   }
-  if (writeErrors) await deliverAlerts([{ kind: 'write_failure', text: `close-1: ${writeErrors} probe write(s) failed` }], { logFile: path.join(DIR, 'alerts.jsonl') });
+  if (writeErrors) await deliverAlerts([{ kind: 'write_failure', text: `close-1: ${writeErrors} probe write(s) failed` }], { logFile: path.join(DIR, 'alerts.jsonl'), env: loadTelegramEnv() });
   if (!gate.ok) { console.log(`no trade: ${gate.reasons.join(', ')}`); stampWrites(); return snapshot; }
   console.log(`proposal: ${proposal.rationale}`);
   try {
@@ -357,7 +359,7 @@ export async function run(argv = process.argv.slice(2)) {
   } catch (err) {
     stampWrites();
     if (err instanceof WritesBlocked) { console.log(err.message); return snapshot; }
-    await deliverAlerts([{ kind: 'write_failure', text: `close-1 write failed: ${err.message}` }], { logFile: path.join(DIR, 'alerts.jsonl') });
+    await deliverAlerts([{ kind: 'write_failure', text: `close-1 write failed: ${err.message}` }], { logFile: path.join(DIR, 'alerts.jsonl'), env: loadTelegramEnv() });
     throw err;
   }
   stampWrites();

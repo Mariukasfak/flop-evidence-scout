@@ -88,7 +88,7 @@ test('M8 log-only alerts are written, never sent', async () => {
   const fetchFn = async (_u, o) => { sent.push(JSON.parse(o.body).text); return { ok: true }; };
   const r = await deliverAlerts([{ kind: 'community_comment', logOnly: true, text: 'a' }, { kind: 'evidence_report', text: 'b' }],
     { logFile: path.join(dir, 'a.jsonl'), env: { TELEGRAM_BOT_TOKEN: 't', TELEGRAM_CHAT_ID: 'c' }, fetchFn });
-  assert.deepEqual(sent, ['b']);
+  assert.deepEqual(sent, ['🟡 SVARBU\nb']);
   assert.equal(r.logged, 2);
   assert.equal(fs.readFileSync(path.join(dir, 'a.jsonl'), 'utf8').trim().split('\n').length, 2);
 });

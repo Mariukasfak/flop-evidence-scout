@@ -6,6 +6,7 @@
  * human: nothing is sent while things stay healthy, so a Telegram channel fed
  * from `alertsBetween` stays quiet on a good day.
  */
+import { selectForTelegram, severityOf, SEVERITY_LABEL } from './telegram-bot.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { effectOf, isTerminal, STATUS, EVIDENCE } from './ledger.mjs';
@@ -176,7 +177,7 @@ export function buildSnapshot({
 }
 
 /** Alerts for what changed from `prev` to `next`. Healthy-and-unchanged yields []. */
-export function alertsBetween(prev, next) {
+export function alertsBetween(prev, next, opts = {}) {
   const out = [];
   const add = (kind, text) => out.push({ kind, text });
   if (!next.contest_verified && (prev?.contest_verified ?? true)) add('contest_verification_failed', `close-1 contest check FAILED: ${next.contest_error ?? 'unknown'} — writes halted`);
@@ -208,7 +209,7 @@ export function alertsBetween(prev, next) {
   // No top-3 alerts from display rows: a place is announced only once it is proven (final, complete tie).
   const placed = (s) => s?.prize_confidence === 'PROVEN' && (s.prize_places || []).length > 0;
   if (placed(next) && !placed(prev)) add('prize_place_proven', `close-1: proven prize place(s) ${next.prize_places.join(', ')}, shared by ${next.prize_sharing}`);
-  out.push(...archiveAlerts(prev?.archive, next.archive));
+  out.push(...archiveAlerts(prev?.archive, next.archive, opts.archiveDropSweeps ? { dropSweeps: opts.archiveDropSweeps } : undefined));
   out.push(...evidenceAlerts(prev, next));
   out.push(...githubAlerts(prev, next));
   const sig = (s) => (s?.account_comparison?.conflicts || []).map((c) => c.kind).sort().join(',');
@@ -229,7 +230,7 @@ export function alertsBetween(prev, next) {
 export const ARCHIVE_STALL_MS = 60 * 60_000;
 export const ARCHIVE_LAG_DROP_SWEEPS = 50;
 
-export function archiveAlerts(prev, next) {
+export function archiveAlerts(prev, next, { dropSweeps = ARCHIVE_LAG_DROP_SWEEPS } = {}) {
   const out = [];
   if (!next || !prev) return out;
   const add = (kind, text) => out.push({ kind, text });
@@ -240,7 +241,7 @@ export function archiveAlerts(prev, next) {
   else if (moved) {
     const stalledFor = prev.archive_latest_changed_at ? Date.parse(next.archive_latest_changed_at) - Date.parse(prev.archive_latest_changed_at) : 0;
     const drop = (prev.archive_lag_sweeps ?? 0) - (next.archive_lag_sweeps ?? 0);
-    if (stalledFor >= ARCHIVE_STALL_MS || drop > ARCHIVE_LAG_DROP_SWEEPS) {
+    if (stalledFor >= ARCHIVE_STALL_MS || drop > dropSweeps) {
       add('archive_advanced', `close-1 archive moved: sweep ${prev.archive_latest_sweep} → ${next.archive_latest_sweep}${drop > 0 ? `, lag down ${drop} sweeps` : ''}; still ${next.archive_lag_sweeps} behind`);
     }
   }
@@ -363,18 +364,21 @@ export function githubAlerts(prev, next) {
  * Deliver alerts: always appended to a local log; also sent to Telegram when
  * TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set (not set on 2026-09-26).
  */
-export async function deliverAlerts(alerts, { logFile, env = process.env, fetchFn = fetch }) {
+export async function deliverAlerts(alerts, { logFile, env = process.env, fetchFn = fetch, settings = null }) {
   if (!alerts.length) return { sent: 0 };
   fs.mkdirSync(path.dirname(logFile), { recursive: true });
-  fs.appendFileSync(logFile, alerts.map((a) => JSON.stringify({ at: new Date().toISOString(), ...a })).join('\n') + '\n');
+  // The operator's Telegram settings (alert level, quiet mode) decide what is SENT; the log keeps everything.
+  const { send, held } = selectForTelegram(alerts, settings || undefined);
+  const heldSet = new Map(held.map((h) => [h.text, h.telegram]));
+  fs.appendFileSync(logFile, alerts.map((a) => JSON.stringify({ at: new Date().toISOString(), ...a, ...(heldSet.has(a.text) ? { telegram: heldSet.get(a.text) } : {}) })).join('\n') + '\n');
   if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return { sent: 0, logged: alerts.length };
   let sent = 0;
   // logOnly: recorded, not sent (community comments; alerts folded into an evidence report).
-  for (const a of alerts.filter((x) => !x.logOnly)) {
+  for (const a of send) {
     try {
       const r = await fetchFn(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text: a.text })
+        body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text: `${SEVERITY_LABEL[severityOf(a.kind)]}\n${a.text}` })
       });
       if (r.ok) sent += 1;
     } catch { /* logged above; a failed alert must not stop the run */ }
