@@ -18,6 +18,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { tagThirdParty } from '../src/close1/flop-watch.mjs';
 
 const DATA = process.env.SCOUT_DATA_DIR || path.resolve('data/local');
 const INBOX = path.join(DATA, 'watch-inbox.md');
@@ -44,7 +45,8 @@ export function oneLine(text, { maxChars = 800 } = {}) {
 }
 
 export function formatNote(text, { now = () => new Date(), source = 'watcher' } = {}) {
-  return `- ${now().toISOString()} | ${source} | ${oneLine(text)}`;
+  // A line that leans on RootData / CoinMarketCap / another aggregator is marked [TREČIOJI ŠALIS], never official.
+  return `- ${now().toISOString()} | ${source} | ${tagThirdParty(oneLine(text))}`;
 }
 
 /** How long an identical note stays "already said". */

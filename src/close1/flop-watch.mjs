@@ -13,8 +13,58 @@
  */
 import crypto from 'node:crypto';
 
-export const OFFICIAL = '[OFICIALU]';
+/**
+ * Source-confidence labels. Three different things, never merged into one:
+ *   OFFICIAL         a fact visible directly at an official FLOP Labs / Technocore endpoint, signed feed or repo
+ *   MAINTAINER       a specific claim written by a confirmed FLOP maintainer
+ *   COMMUNITY_REPRO  a community member's reproduction or measurement
+ * An official endpoint plus a community comment is NOT "officially confirmed": each part keeps its own label.
+ * COMMUNITY is a plain community comment (no reproduction), THIRD_PARTY an aggregator or news site.
+ */
+export const OFFICIAL = '[OFICIALUS DUOMUO]';
+export const MAINTAINER = '[MAINTAINERIO PATVIRTINTA]';
+export const COMMUNITY_REPRO = '[COMMUNITY REPRODUKCIJA]';
 export const COMMUNITY = '[COMMUNITY]';
+export const THIRD_PARTY = '[TREČIOJI ŠALIS]';
+
+/** A comment that reports its own measurement or replay, as opposed to an opinion or a "me too". */
+const REPRODUCTION = /reproduc|replay|re-?hash|re-?fetch|measured|verified|\bsha-?256\b|hash(?:es)? (?:match|to)|\b\d[\d,]*\s*\/\s*\d[\d,]*\b|zero (?:unexplained )?(?:mismatch|difference)/i;
+export const isReproduction = (text) => REPRODUCTION.test(String(text ?? ''));
+/** The label for one community comment. */
+export const communityLabel = (text) => (isReproduction(text) ? COMMUNITY_REPRO : COMMUNITY);
+
+/**
+ * Who may be called official for a token launch, airdrop or mainnet fact: FLOP Labs' own repos, the
+ * Technocore/FLOP domains and signed feeds. Aggregators (RootData, CoinMarketCap, ...) only ever get
+ * THIRD_PARTY, and an unknown host is treated the same way.
+ */
+const OFFICIAL_HOSTS = /^(?:[\w-]+\.)*(?:technocore\.chat|flop\.(?:network|xyz|org)|flop-labs\.(?:com|io|xyz))$/i;
+const OFFICIAL_REPO = /^(?:https?:\/\/)?(?:www\.)?(?:github\.com|api\.github\.com\/repos|raw\.githubusercontent\.com)\/flop-labs\//i;
+export function sourceLabel(urlOrName) {
+  const s = String(urlOrName ?? '').trim();
+  if (OFFICIAL_REPO.test(s)) return OFFICIAL;
+  try { if (OFFICIAL_HOSTS.test(new URL(/^https?:/i.test(s) ? s : `https://${s}`).hostname)) return OFFICIAL; } catch { /* not a URL */ }
+  return THIRD_PARTY;
+}
+export const isOfficialSource = (urlOrName) => sourceLabel(urlOrName) === OFFICIAL;
+const AGGREGATORS = /rootdata|coinmarketcap|coingecko|cryptorank|dropstab|messari|defillama|icodrops|airdrops\.io/i;
+/** Free text that leans on an aggregator: prefix it so it can never read as an official launch fact. */
+export const tagThirdParty = (text) => (AGGREGATORS.test(String(text)) && !String(text).includes(THIRD_PARTY) ? `${THIRD_PARTY} ${text}` : String(text));
+
+/**
+ * How the archive recovery (766 → 1119) is classified, part by part.
+ * `comments` are issue comments {author, association, text}; `isMaintainer` decides who is official.
+ */
+export function classifyArchiveRecovery({ latest, lastModified = null, comments = [], isMaintainer = () => false }) {
+  const short = (c) => `${c.author}: ${String(c.text ?? '').replace(/\s+/g, ' ').slice(0, 120)}`;
+  const official = [`index.json → ${latest}${lastModified ? ` (Last-Modified ${lastModified})` : ''}`];
+  const community = comments.filter((c) => !isMaintainer(c) && isReproduction(c.text)).map(short);
+  const maintainer = comments.filter((c) => isMaintainer(c)).map(short);
+  return {
+    official_data: official, community_reproduction: community, maintainer_confirmation: maintainer,
+    text: `${OFFICIAL} ${official[0]}; ${COMMUNITY_REPRO} ${community.length ? [...new Set(community.map((x) => x.split(':')[0]))].join(', ') : 'none'}; ${MAINTAINER} ${maintainer.length ? 'yes' : 'none'}`
+  };
+}
 
 /** Watched issues that are the same story: one alert per new fact, not one per thread. */
 export const TOPIC_GROUPS = Object.freeze({
@@ -167,8 +217,8 @@ export function mentionAlerts(prev, next) {
   const out = [];
   if (!prev || !next?.events) return out;
   for (const e of next.events) {
-    if (e.type === 'OFFICIAL') out.push({ kind: 'mention_official', key: e.key, text: `${OFFICIAL} ${e.key} (${e.title}): ${e.author} wrote${e.direct ? ' to @Mariukasfak' : ''}: ${e.text.slice(0, 260)}` });
-    else if (e.type === 'COMMUNITY_MENTION') out.push({ kind: 'mention_community', key: e.key, text: `${COMMUNITY} ${e.key} (${e.title}): ${e.author} mentioned @Mariukasfak: ${e.text.slice(0, 220)}` });
+    if (e.type === 'OFFICIAL') out.push({ kind: 'mention_official', key: e.key, text: `${MAINTAINER} ${e.key} (${e.title}): ${e.author} wrote${e.direct ? ' to @Mariukasfak' : ''}: ${e.text.slice(0, 260)}` });
+    else if (e.type === 'COMMUNITY_MENTION') out.push({ kind: 'mention_community', key: e.key, text: `${communityLabel(e.text)} ${e.key} (${e.title}): ${e.author} mentioned @Mariukasfak: ${e.text.slice(0, 220)}` });
     else if (e.type === 'STATE') out.push({ kind: 'our_thread_state', key: e.key, text: `[LOCAL] ${e.key} (${e.title}) is now ${e.merged ? 'merged' : e.state}` });
   }
   return out;

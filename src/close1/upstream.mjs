@@ -14,7 +14,7 @@
  * repos are read as data — nothing in them is executed or obeyed.
  */
 import crypto from 'node:crypto';
-import { OFFICIAL, COMMUNITY, groupOf, dedupeGroupedAlerts, observeHeads, headAlerts, observeMentions, mentionAlerts } from './flop-watch.mjs';
+import { MAINTAINER, communityLabel, groupOf, dedupeGroupedAlerts, observeHeads, headAlerts, observeMentions, mentionAlerts } from './flop-watch.mjs';
 
 export const REPO = 'flop-labs/technocore-close-call-challenge';
 const YP = 'flop-labs/yellowpaper';
@@ -32,6 +32,11 @@ export const WATCHED = Object.freeze([
   { repo: REPO, n: 15, priority: 'HIGH', topic: 'archive lag; owner proof by room listing' },
   { repo: REPO, n: 17, priority: 'HIGH', topic: 'close-1' },
   { repo: REPO, n: 25, priority: 'HIGH', topic: 'archive stalled a second time at 1119 (same topic as #15)' },
+  // Community findings (lastbubble2035, pepedesigner; read 2026-09-30). Every statement below is [COMMUNITY] until a maintainer confirms it.
+  { repo: REPO, n: 21, priority: 'MEDIUM', topic: 'redacted archive authentication / unsigned index binding',
+    summary: 'COMMUNITY: the sha256 of the served redacted bytes already exists per entry in index.json (README documents it), so integrity of the 1023 redacted records is checkable today; the remaining gap is that index.json itself is unsigned, so nothing binds it to the referee. Suggested fix: a referee signature over index.json.' },
+  { repo: REPO, n: 22, priority: 'MEDIUM', topic: 'state-root construction / per-key proofs',
+    summary: 'COMMUNITY: the construction of the signed state root is not documented and not reproducible from published data (asked of @sv, unanswered). Replay findings: public-room data up to the archive watermark appears auditable without per-key proofs; private-room trades and unpublished sweeps remain the main gap.' },
   { repo: YP, n: 32, priority: 'HIGH', topic: 'E.40 agent airdrop: work-settled vs escrow-settled' },
   { repo: YP, n: 31, priority: 'HIGH', topic: 'E.38/E.40 account unit' },
   { repo: YP, n: 76, priority: 'HIGH', topic: 'E.38 conversion evidence path' },
@@ -63,6 +68,8 @@ export const ARCHIVE_ANSWER_TOPICS = Object.freeze([
 /** Our own comments are not news, and a community comment is logged unless it claims an integrity problem. */
 const OUR_LOGINS = new Set(['mariukasfak']);
 const INTEGRITY_CLAIM = /mismatch|does(?:n't| not) match|tamper|altered|inconsisten/i;
+/** "zero mismatches" reports a clean check; it is a reproduction, not an integrity contradiction. */
+const NO_PROBLEM = /\b(?:zero|no|0|without)\s+(?:unexplained\s+)?(?:mismatch(?:es)?|differences?|inconsisten\w*)/gi;
 /** Issues outside the two listed repos cost a request each; without a token the budget is 60 an hour. */
 const SINGLE_FETCH_EVERY_MS = 3600_000;
 /** A file whose name suggests a launch record or a detached signature. */
@@ -319,7 +326,7 @@ export function upstreamAlerts(prev, next, pinned) {
     for (const c of w.newSince || []) {
       if (!isMaintainer(c, next.committers) || c.text.replace(/\s+/g, ' ').trim().length < SUBSTANTIVE_CHARS) continue;
       const tags = groupOf(key) === 'CLOSE1_ARCHIVE_PUBLICATION' ? ARCHIVE_ANSWER_TOPICS.filter(([, re]) => re.test(c.text)).map(([t]) => t) : [];
-      out.push({ kind: 'maintainer_reply', key, body: c.text, text: `${OFFICIAL} ${w.priority} ${key} (${w.topic}): ${c.author} wrote${tags.length ? ` [mentions: ${tags.join(', ')}]` : ''}: ${c.text.replace(/\s+/g, ' ').slice(0, 280)}` });
+      out.push({ kind: 'maintainer_reply', key, body: c.text, text: `${MAINTAINER} ${w.priority} ${key} (${w.topic}): ${c.author} wrote${tags.length ? ` [mentions: ${tags.join(', ')}]` : ''}: ${c.text.replace(/\s+/g, ' ').slice(0, 280)}` });
     }
     if (w.state !== before.state) add('watched_issue_state', `${w.priority} ${key} (${w.topic}) is now ${w.state}`);
   }
@@ -341,8 +348,8 @@ export function communityNotes(prev, next) {
     for (const c of w.newSince || []) {
       const text = c.text.replace(/\s+/g, ' ').trim();
       if (isMaintainer(c, next.committers) || OUR_LOGINS.has(String(c.author).toLowerCase()) || text.length < SUBSTANTIVE_CHARS) continue;
-      const claim = INTEGRITY_CLAIM.test(text);
-      out.push({ kind: claim ? 'community_integrity_claim' : 'community_comment', logOnly: !claim, key, body: text, text: `${COMMUNITY} ${key}: ${c.author} wrote: ${text.slice(0, 280)}` });
+      const claim = INTEGRITY_CLAIM.test(text.replace(NO_PROBLEM, ' '));
+      out.push({ kind: claim ? 'community_integrity_claim' : 'community_comment', logOnly: !claim, key, body: text, text: `${communityLabel(text)} ${key}: ${c.author} wrote: ${text.slice(0, 280)}` });
     }
   }
   return out;

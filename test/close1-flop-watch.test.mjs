@@ -47,7 +47,7 @@ test('F2. the same maintainer statement in #15 and #25 is ONE alert, this run an
   const { notes, digests } = dedupeGroupedAlerts(raw, []);
   assert.equal(notes.length, 1);
   assert.equal(notes[0].kind, 'maintainer_reply');
-  assert.match(notes[0].text, /^\[OFICIALU\] /);
+  assert.match(notes[0].text, /^\[MAINTAINERIO PATVIRTINTA\] /);
   assert.match(notes[0].text, /mentions: backfill, cadence, before the lock/);
   // the copy shows up in #25 a cycle later: nothing new
   const later = dedupeGroupedAlerts(raw.slice(1), digests);
@@ -83,7 +83,7 @@ test('F4. an official maintainer reply is IMPORTANT and reaches Telegram at the 
   const next = obsWith({ [K25]: watched(K25, 25, [{ id: 5, author: 'someone', association: 'MEMBER', at: 'x', text: 'We see the second stall and are investigating the publisher job; details soon.' }], { comments: 1 }) });
   const a = upstreamAlerts(prev, next, PIN);
   assert.deepEqual(a.map((x) => x.kind), ['maintainer_reply']);
-  assert.match(a[0].text, /^\[OFICIALU\] HIGH /);
+  assert.match(a[0].text, /^\[MAINTAINERIO PATVIRTINTA\] HIGH /);
   assert.equal(severityOf('maintainer_reply'), 'IMPORTANT');
   assert.equal(selectForTelegram(a, DEFAULT_SETTINGS).send.length, 1);
 });
@@ -224,7 +224,7 @@ test('F15. merged changes: any yellowpaper merge, other repos only when they tou
   assert.deepEqual(headAlerts(second, broken), []);
 });
 
-test('F16. @Mariukasfak: a maintainer reply is [OFICIALU], a community mention is [COMMUNITY] and never proactive', async () => {
+test('F16. @Mariukasfak: a maintainer reply is [MAINTAINERIO PATVIRTINTA], a community mention is [COMMUNITY] and never proactive', async () => {
   let items = [{ number: 25, title: 'Sweep archive has stalled a second time', state: 'open', comments: 1, updated_at: '2026-09-30T06:00:00Z', user: { login: 'keitaj' }, url: 'https://api.github.com/repos/flop-labs/technocore-close-call-challenge/issues/25' },
     { number: 61, title: 'our issue', state: 'open', comments: 0, updated_at: '2026-09-30T06:00:00Z', user: { login: 'Mariukasfak' }, url: 'https://api.github.com/repos/flop-labs/tclk/issues/61' }];
   let comments = [{ id: 100, user: { login: 'keitaj' }, author_association: 'NONE', body: 'old' }];
@@ -244,7 +244,7 @@ test('F16. @Mariukasfak: a maintainer reply is [OFICIALU], a community mention i
   const next = await observeMentions({ prev: base, gh: gh(fetchFn, T0 + 30 * MIN), isMaintainer: isMaint, nowMs: T0 + 30 * MIN });
   const a = mentionAlerts(base, next);
   assert.deepEqual(a.map((x) => x.kind).sort(), ['mention_community', 'mention_official', 'our_thread_state']);
-  assert.match(a.find((x) => x.kind === 'mention_official').text, /^\[OFICIALU\] .*sv wrote/);
+  assert.match(a.find((x) => x.kind === 'mention_official').text, /^\[MAINTAINERIO PATVIRTINTA\] .*sv wrote/);
   assert.match(a.find((x) => x.kind === 'mention_community').text, /^\[COMMUNITY\] .*randomperson mentioned @Mariukasfak/);
   assert.match(a.find((x) => x.kind === 'our_thread_state').text, /tclk#61 .*closed/);
   assert.equal(severityOf('mention_official'), 'IMPORTANT');
