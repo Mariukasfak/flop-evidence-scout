@@ -97,7 +97,9 @@ const W = (newSince, over = {}) => ({ watched: { [ARCHIVE_ISSUE]: { repo: 'flop-
 
 test('M9 #15: a maintainer answer is sent and tagged by what it settles; community comments are logged only', () => {
   const prev = W([], { comments: 1 });
-  const sv = upstreamAlerts(prev, W([{ id: 2, author: 'sv', association: 'NONE', text: 'We will backfill sweeps after 766 before the lock and publish hourly from now on.' }]), { packageSha256: null });
+  const svText = 'We will backfill sweeps after 766 before the lock and publish hourly from now on.';
+  assert.equal(upstreamAlerts(prev, W([{ id: 2, author: 'sv', association: 'NONE', text: svText }]), { packageSha256: null }).length, 0, 'sv with NONE and no proof of publishing to the official main is a community voice');
+  const sv = upstreamAlerts(prev, { ...W([{ id: 2, author: 'sv', association: 'NONE', text: svText }]), committers: ['sv'] }, { packageSha256: null });
   assert.equal(sv.length, 1);
   assert.match(sv[0].text, /\[mentions: backfill, cadence, before the lock\]/);
   const who = (author, text) => communityNotes(prev, W([{ id: 2, author, association: 'NONE', text }]));

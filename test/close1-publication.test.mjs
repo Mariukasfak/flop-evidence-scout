@@ -54,7 +54,7 @@ test('P3. after the batch nothing moves for several cycles: back to STALLED', ()
   const runs = drive(every20(40, 220, (t) => ({ t, latest: 1119, live: live(t) })), start);
   assert.equal(runs[0].state, P.RECOVERING, 'two quiet cycles are not yet a stall');
   assert.equal(runs.at(-1).state, P.STALLED);
-  assert.match(runs.at(-1).reason, /no advance for/);
+  assert.match(runs.at(-1).reason, /no (archive )?advance for/);
   assert.match(publicationTransition(start, runs.at(-1)), /RECOVERING → STALLED/);
 });
 

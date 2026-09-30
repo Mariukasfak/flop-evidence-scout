@@ -195,7 +195,9 @@ export function alertsBetween(prev, next, opts = {}) {
     if (gap.at !== prev?.stream_gap_by_room?.[room]?.at) add('stream_gap', `gap in ${room}: ${gap.kind} ${gap.from}…${gap.to}`);
   }
   const stale = (s) => s?.gate?.reasons?.includes('price_post_stale') || s?.gate?.reasons?.includes('required_room_not_read_recently');
-  if (stale(next) && !stale(prev)) add('referee_stale', 'close-1 referee stopped posting (or we stopped reading it) — writes halted');
+  // Feed health as a pair of transitions: HEALTHY -> STALE and STALE -> HEALTHY, each once.
+  if (stale(next) && !stale(prev)) add('referee_stale', 'close-1 referee feed HEALTHY → STALE (stopped posting, or we stopped reading it)');
+  if (prev && stale(prev) && !stale(next)) add('referee_recovered', 'close-1 referee feed STALE → HEALTHY');
   if (prev) {
     const before = new Map((prev.trades || []).map((t) => [t.id, t]));
     for (const t of next.trades || []) {
@@ -218,7 +220,9 @@ export function alertsBetween(prev, next, opts = {}) {
   const conflicts = (next.archive_conflicts || []).filter((id) => !(prev?.archive_conflicts || []).includes(id));
   if (conflicts.length) add('archive_integrity', `close-1: a verified archive record contradicts our earlier inference for ${conflicts.join(', ')}`);
   const halted = (s) => s?.gate && !s.gate.ok && s.gate.kind === 'halt';
-  if (halted(next) && !halted(prev)) add('risk_gate_halt', `close-1 risk gate halted writes: ${next.gate.reasons.join(', ')}`);
+  // Trading is already blocked by the attempt cap: a second "halt" tells the operator nothing new (feed health has its own alert).
+  const capBlocks = (s) => s?.gate?.reasons?.includes('attempt_cap_reached');
+  if (halted(next) && !halted(prev) && !capBlocks(next)) add('risk_gate_halt', `close-1 risk gate halted writes: ${next.gate.reasons.join(', ')}`);
   if ((next.write_errors_5m || 0) > 0 && !(prev?.write_errors_5m > 0)) add('write_failure', 'close-1 signing/posting failed; needs a look');
   return out;
 }
@@ -266,6 +270,24 @@ export function archiveAlerts(prev, next, { dropSweeps = ARCHIVE_LAG_DROP_SWEEPS
  * stronger, a proven exposure range that moves, and the recommendation
  * changing. A snapshot written before these fields existed is a baseline.
  */
+/** The parts of a trade's evidence that could strengthen an UNKNOWN, compared field by field. */
+export const unknownEvidenceFields = (t) => ({
+  'ledger status': `${t.status}/${t.evidence}`,
+  'ownership evidence': t.ownership ?? null,
+  'settlement basis': t.basis ?? null,
+  'exact-copy observations in the archive': (t.archive_observations || []).length,
+  'redacted records in its window': t.archive_gaps?.redacted ?? null,
+  'missing records in its window': t.archive_gaps?.missing ?? null,
+  'unverified records in its window': t.archive_gaps?.unverified ?? null,
+  'hidden trades in its window': t.archive_gaps?.hidden_trades ?? null,
+  'corroboration': t.corroboration ? `${t.corroboration.kind}/${t.corroboration.exact ? 'exact' : 'inferred'}` : null,
+  'corroborated settlement': t.corroborated_settlement ?? null,
+  'corroborated ownership': t.corroborated_ownership ?? null
+});
+export function unknownEvidenceDiff(was, now) {
+  const a = unknownEvidenceFields(was); const b = unknownEvidenceFields(now);
+  return Object.keys(b).filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k])).map((k) => `${k}: ${a[k] ?? '—'} → ${b[k] ?? '—'}`);
+}
 const OWNER_RANK = { UNKNOWN: 0, INFERRED: 1, OFFICIALLY_CORROBORATED: 2, PROVEN: 3 };
 
 export function evidenceAlerts(prev, next) {
@@ -280,6 +302,13 @@ export function evidenceAlerts(prev, next) {
     if (was.corroborated_outcome === t.corroborated_outcome && (was.corroboration?.kind ?? null) === (t.corroboration?.kind ?? null)) continue;
     if (was.corroborated_outcome === 'UNKNOWN') add('unknown_resolved', `close-1 ${t.id}: UNKNOWN → ${how(t)}, settlement ${t.corroborated_settlement}`);
     else add('corroboration_changed', `close-1 ${t.id}: corroborated ${how(was)} → ${how(t)}`);
+  }
+  // An UNKNOWN that stays UNKNOWN but gains or loses evidence (more archive records, a copy seen, a different gap): say exactly what moved.
+  for (const t of next.trades || []) {
+    const was = before.get(t.id);
+    if (!was || was.corroborated_outcome !== 'UNKNOWN' || t.corroborated_outcome !== 'UNKNOWN') continue;
+    const diff = unknownEvidenceDiff(was, t);
+    if (diff.length) add('unknown_evidence_changed', `close-1 ${t.id} is still UNKNOWN, but its evidence changed: ${diff.join('; ')}`);
   }
   const rank = (s) => OWNER_RANK[s] ?? -1;
   if (prev.owner_confidence && rank(next.owner_confidence) > rank(prev.owner_confidence)) {
@@ -311,7 +340,7 @@ export function baselineStatus(archive) {
 
 /** Evidence transitions: what a cache filling up would fake. Integrity, lock, GitHub and contest alerts are not among them. */
 export const EVIDENCE_TRANSITION_KINDS = Object.freeze(new Set([
-  'trade_resolved', 'settled_proven', 'unknown_resolved', 'corroboration_changed', 'owner_stronger', 'mint_confirmed',
+  'trade_resolved', 'settled_proven', 'unknown_resolved', 'unknown_evidence_changed', 'corroboration_changed', 'owner_stronger', 'mint_confirmed',
   'proven_exposure_changed', 'mode_changed', 'archive_our_sweeps', 'account_conflict', 'prize_place_proven'
 ]));
 
@@ -325,7 +354,7 @@ export function gateEvidenceAlerts(prev, next, alerts) {
 export const REPORT_KINDS = Object.freeze(new Set([
   'archive_advanced', 'archive_current', 'archive_our_sweeps', 'archive_integrity', 'maintainer_reply',
   'unknown_resolved', 'corroboration_changed', 'settled_proven', 'trade_resolved', 'mint_confirmed', 'owner_stronger',
-  'proven_exposure_changed', 'mode_changed'
+  'proven_exposure_changed', 'mode_changed', 'unknown_evidence_changed'
 ]));
 const OFFICIAL_KINDS = new Set(['archive_advanced', 'archive_current', 'archive_our_sweeps', 'archive_integrity', 'maintainer_reply']);
 

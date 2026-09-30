@@ -464,14 +464,16 @@ test('upstream: quiet when nothing changed; alerts on rules, draft status, launc
 test('upstream: a maintainer answer or a state change alerts; community comments and issues do not', () => {
   const kinds = (next) => upstreamAlerts(obs(), next, PIN).map((a) => a.kind);
   assert.deepEqual(kinds(withComment({ author: 'ktrxktr', association: 'NONE', text: 'five 0.1 links, all expired unread; details below in full' })), [], 'community comment: recorded, not sent');
-  const a = upstreamAlerts(obs(), withComment({ author: 'sv', association: 'NONE', text: 'Confirmed. When the referee fell behind on day 1, the last reference stood, as rule 11 provides.' }), PIN);
+  const svComment = { author: 'sv', association: 'NONE', text: 'Confirmed. When the referee fell behind on day 1, the last reference stood, as rule 11 provides.' };
+  assert.deepEqual(kinds(withComment(svComment)), [], 'a name alone is not enough: association NONE and no commits on the official main is [COMMUNITY]');
+  const a = upstreamAlerts(obs(), { ...withComment(svComment), committers: ['sv'] }, PIN);
   assert.deepEqual(a.map((x) => x.kind), ['maintainer_reply']);
   assert.match(a[0].text, /HIGH .*#10 .*sv wrote: Confirmed/);
   assert.deepEqual(kinds(withComment({ author: 'someone', association: 'MEMBER', text: 'x'.repeat(60) })), ['maintainer_reply'], 'org members count as maintainers');
   assert.deepEqual(kinds(withComment({ author: 'sv', association: 'MEMBER', text: 'thanks' })), [], 'a one-word reply is not substantive');
   assert.deepEqual(kinds(obs({ watched: { [W10]: { ...obs().watched[W10], state: 'closed' } } })), ['watched_issue_state']);
   assert.deepEqual(kinds(obs({ issues: { ...obs().issues, 11: { title: 'new', state: 'open', comments: 0, author: 'stranger' } } })), [], 'a community issue is not news');
-  assert.deepEqual(kinds(obs({ issues: { ...obs().issues, 18: { title: 'lock notice', state: 'open', comments: 0, author: 'sv' } } })), ['new_issue']);
+  assert.deepEqual(kinds(obs({ committers: ['sv'], issues: { ...obs().issues, 18: { title: 'lock notice', state: 'open', comments: 0, author: 'sv' } } })), ['new_issue']);
   const yp = { repo: 'flop-labs/yellowpaper', n: 90, priority: 'HIGH', topic: 'airdrop decision E.38/E.40/E.44', title: 'E.44 credit eligibility', byTitle: true, state: 'open', comments: 0 };
   assert.deepEqual(kinds(obs({ watched: { ...obs().watched, 'flop-labs/yellowpaper#90': yp } })), ['new_watched_issue']);
   const gone = { repo: 'flop-labs/flop-core', n: 1796, priority: 'P2', unavailable: true };

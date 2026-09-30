@@ -91,6 +91,7 @@ export function archiveHealth({ index, error = null, liveLatest, prev = null, no
   if (!error && latest != null) status = lag != null && lag <= LAG_TOLERANCE_SWEEPS ? ARCHIVE_STATUS.CURRENT : ARCHIVE_STATUS.LAGGING;
   const entries = index ? [...index.values()] : [];
   const moved = latest != null && latest !== prev?.archive_latest_sweep;
+  const changedAt = moved || !prev?.archive_latest_changed_at ? new Date(nowMs).toISOString() : prev.archive_latest_changed_at;
   return {
     archive_status: status,
     archive_latest_sweep: latest,
@@ -98,13 +99,13 @@ export function archiveHealth({ index, error = null, liveLatest, prev = null, no
     archive_lag_sweeps: lag,
     archive_lag_minutes: lag == null ? null : Math.round((lag * SWEEP_MS) / 60_000),
     archive_index_last_modified: lastModified ?? prev?.archive_index_last_modified ?? null,
-    archive_latest_changed_at: moved || !prev?.archive_latest_changed_at ? new Date(nowMs).toISOString() : prev.archive_latest_changed_at,
+    archive_latest_changed_at: changedAt,
     archive_last_success: error ? (prev?.archive_last_success ?? null) : new Date(nowMs).toISOString(),
     archive_error: error ? String(error).slice(0, 200) : null,
     archive_full_count: entries.filter((e) => e.status === 'full').length,
     archive_redacted_count: entries.filter((e) => e.status === 'redacted').length,
     // Did it merely catch up once, or does it publish regularly? (see publication.mjs)
-    publication: publicationHealth(prev?.publication, { latest, live: liveLatest ?? null, lag, lastModified: lastModified ?? prev?.archive_index_last_modified ?? null, nowMs, error })
+    publication: publicationHealth(prev?.publication, { latest, live: liveLatest ?? null, lag, lastModified: lastModified ?? prev?.archive_index_last_modified ?? null, changedAt, nowMs, error })
   };
 }
 

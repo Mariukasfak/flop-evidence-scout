@@ -85,7 +85,8 @@ export const IMPORTANT_KINDS = Object.freeze(new Set([
   'evidence_report', 'archive_our_sweeps', 'archive_current', 'archive_advanced', 'unknown_resolved', 'corroboration_changed',
   'settled_proven', 'trade_resolved', 'owner_stronger', 'mint_confirmed', 'proven_exposure_changed', 'mode_changed',
   'maintainer_reply', 'new_watched_issue', 'watched_issue_state', 'github_watch_blind', 'github_watch_restored',
-  'prize_place_proven', 'publication_transition', 'updater_blocked', 'write_failure', 'archive_lagging', 'contest_verification_failed',
+  'prize_place_proven', 'publication_transition', 'referee_recovered', 'unknown_evidence_changed', 'mention_official', 'our_thread_state',
+  'protocol_change_merged', 'yellowpaper_change', 'updater_blocked', 'write_failure', 'archive_lagging', 'contest_verification_failed',
   'contest_verification_restored', 'referee_stale', 'risk_gate_halt', 'package_changed_upstream', 'package_not_draft',
   'rules_repo_changed', 'rules_version_final', 'seed_changed', 'launch_record_published'
 ]));
@@ -234,6 +235,7 @@ export function fmtUnknown(snap, forensics) {
     const r = rows.get(t.id) || {};
     out.push('', `${t.id}`,
       `${String(r.side ?? '?').toUpperCase()} ${r.qty ?? '?'} @ ${r.price ?? '?'} · sweep ${r.posted_sweep ?? t.sweep ?? '?'}`,
+      `Ledger: ${t.status ?? '?'}/${t.evidence ?? '?'} · savininkystė: ${t.ownership ?? '?'} · settlement: ${t.corroborated_settlement ?? '?'}`,
       `Signed flow: ${r.referee_flow_visible_outcome ?? t.basis ?? '?'}`,
       `Archyvas: ${r.archive_outcome && r.archive_outcome !== '—' ? r.archive_outcome : 'kopijos nėra'}${r.archive_class ? ` (${r.archive_class})` : ''}`,
       `Kodėl neaišku: ${r.notes || (t.archive_gaps?.hidden_trades ? `${t.archive_gaps.hidden_trades} paslėptų sandorių lange` : 'nei pasirašytas srautas, nei archyvas neįrodo rezultato')}`);
@@ -294,11 +296,17 @@ export function fmtHost(snap, nowMs) {
 export function operatorAlerts(dataDir, limit = 10) {
   let text = '';
   try { text = fs.readFileSync(path.join(dataDir, 'alerts.jsonl'), 'utf8'); } catch { return []; }
+  // Evidence reports written before the baseline existed came from a half-filled cache: not news.
+  const baseAt = readJson(path.join(dataDir, 'evidence-baseline.json'))?.established_at ?? null;
+  // Replaced by publication_transition: the lag-threshold alerts flipped every cycle around 12 sweeps.
+  const SUPERSEDED = new Set(['archive_lagging', 'archive_current', 'archive_advanced']);
   const rows = [];
   for (const line of text.split(/\r?\n/)) {
     if (!line.trim()) continue;
     let a; try { a = JSON.parse(line); } catch { continue; }
     if (a.logOnly) continue;
+    if (SUPERSEDED.has(a.kind)) continue;
+    if (baseAt && a.kind === 'evidence_report' && a.at < baseAt) continue;
     if (a.telegram && String(a.telegram).startsWith('HELD_') && severityOf(a.kind) === 'INFO') continue;
     rows.push(a);
   }

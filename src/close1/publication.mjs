@@ -40,7 +40,7 @@ const iso = (ms) => new Date(ms).toISOString();
  * Next publication state from the previous one and this cycle's archive reading.
  * `error` (index unreadable) keeps the previous state: an outage of our own view is not a publication event.
  */
-export function publicationHealth(prev, { latest, live = null, lag = null, lastModified = null, nowMs, error = null }) {
+export function publicationHealth(prev, { latest, live = null, lag = null, lastModified = null, changedAt = null, nowMs, error = null }) {
   if (error || latest == null) {
     return prev ? { ...prev, note: 'archive index unreadable this cycle; state carried over' } : null;
   }
@@ -84,13 +84,19 @@ export function publicationHealth(prev, { latest, live = null, lag = null, lastM
     return set(PUBLICATION.STABLE, `advancing; lag ${lag ?? '?'}`);
   }
 
-  // No advance this cycle.
+  // No advance this cycle. The state rules below are untouched; only the STALLED wording is kept current.
+  const facts = () => {
+    const since = prev.last_advance_at ?? changedAt ?? prev.since;
+    const lmAge = lastModifiedAgeMin(lastModified, nowMs);
+    return `no archive advance for ${durationText(nowMs - Date.parse(since))} (latest ${latest}, live ${live ?? '?'}, lag ${lag ?? '?'}${lmAge != null ? `, Last-Modified age ${durationText(lmAge * 60_000)}` : ''})`;
+  };
   const silent = nowMs - lastAdvMs;
   if (prev.state === PUBLICATION.RECOVERING && silent > SILENCE_MS) return set(PUBLICATION.STALLED, `no advance for ${Math.round(silent / 60000)} min after a recovery`);
   if (prev.state === PUBLICATION.STABLE) {
     if (silent > STABLE_SILENCE_MS) return set(PUBLICATION.STALLED, `no advance for ${Math.round(silent / 60000)} min`);
     if (lag != null && lag > DEMOTE_LAG) return set(PUBLICATION.STALLED, `${lag} sweeps behind (more than ${DEMOTE_LAG})`);
   }
+  if (out.state === PUBLICATION.STALLED) out.reason = facts();
   return out;
 }
 
@@ -99,6 +105,12 @@ export function publicationTransition(prev, next) {
   if (!prev?.state || !next?.state || prev.state === next.state) return null;
   return `close-1 archive publication ${prev.state} → ${next.state}: ${next.reason}`;
 }
+
+/** 21h 12m, or 35m. */
+export const durationText = (ms) => {
+  const m = Math.max(0, Math.round(ms / 60_000));
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
+};
 
 /** The Last-Modified age in minutes, or null. */
 export const lastModifiedAgeMin = (lastModified, nowMs) => {

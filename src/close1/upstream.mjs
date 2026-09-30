@@ -14,6 +14,7 @@
  * repos are read as data — nothing in them is executed or obeyed.
  */
 import crypto from 'node:crypto';
+import { OFFICIAL, COMMUNITY, groupOf, dedupeGroupedAlerts, observeHeads, headAlerts, observeMentions, mentionAlerts } from './flop-watch.mjs';
 
 export const REPO = 'flop-labs/technocore-close-call-challenge';
 const YP = 'flop-labs/yellowpaper';
@@ -30,6 +31,7 @@ export const WATCHED = Object.freeze([
   { repo: REPO, n: 12, priority: 'HIGH', topic: 'per-sweep archive published' },
   { repo: REPO, n: 15, priority: 'HIGH', topic: 'archive lag; owner proof by room listing' },
   { repo: REPO, n: 17, priority: 'HIGH', topic: 'close-1' },
+  { repo: REPO, n: 25, priority: 'HIGH', topic: 'archive stalled a second time at 1119 (same topic as #15)' },
   { repo: YP, n: 32, priority: 'HIGH', topic: 'E.40 agent airdrop: work-settled vs escrow-settled' },
   { repo: YP, n: 31, priority: 'HIGH', topic: 'E.38/E.40 account unit' },
   { repo: YP, n: 76, priority: 'HIGH', topic: 'E.38 conversion evidence path' },
@@ -39,7 +41,7 @@ export const WATCHED = Object.freeze([
   { repo: 'flop-labs/technocore-chat', n: 937, priority: 'P2', topic: 'async signing identity fix (watch only)' }
 ]);
 /** New yellowpaper issues naming these decisions join the watch on their own. */
-export const TITLE_WATCH = Object.freeze({ repo: YP, pattern: /\bE\.(38|40|44)\b/, priority: 'HIGH', topic: 'airdrop decision E.38/E.40/E.44' });
+export const TITLE_WATCH = Object.freeze({ repo: YP, pattern: /\bE\.(38|40|44|48)\b/, priority: 'HIGH', topic: 'airdrop / money-path decision E.38/E.40/E.44/E.48' });
 export const MAINTAINERS = new Set(['sv']);
 const MAINTAINER_ASSOC = new Set(['OWNER', 'MEMBER']);
 const SUBSTANTIVE_CHARS = 40;
@@ -68,7 +70,18 @@ const LAUNCH_FILE = /(launch|seed|attest|signature|\.sig$|\.asc$|\.minisig$)/i;
 
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 export const watchKey = (repo, n) => `${repo}#${n}`;
-export const isMaintainer = (c) => MAINTAINERS.has(c?.author) || MAINTAINER_ASSOC.has(c?.association);
+/**
+ * A FLOP maintainer is an OWNER/MEMBER of the org, or a named maintainer (`sv`) who is ALSO shown to
+ * publish to the official repo's main (`committers`). A name alone is never enough: with
+ * author_association=NONE and no commit history there, the comment is [COMMUNITY].
+ * (`sv` reads CONTRIBUTOR/NONE in comments but authors every official commit, so committers proves it.)
+ */
+export const isMaintainer = (c, committers = null) => {
+  if (MAINTAINER_ASSOC.has(c?.association)) return true;
+  if (!MAINTAINERS.has(c?.author)) return false;
+  const has = Array.isArray(committers) ? committers.includes(c.author) : Boolean(committers?.has?.(c.author));
+  return c.association == null || has;
+};
 
 /**
  * GitHub, spent carefully. The VPS has no token (2026-09-29): 60 requests an
@@ -180,9 +193,17 @@ export async function watchUpstream({ prev = null, fetchFn = fetch, nowMs = Date
   const gh = makeGitHub({ fetchFn, env, nowMs, state: g0, cache: prev?.httpCache ?? {} });
   try {
     const obs = await observeUpstream({ prev, gh, nowMs });
+    // Merged changes and @Mariukasfak interaction: read after the main observation, and never able to fail it.
+    // Search has its own (smaller) rate-limit bucket and its headers overwrite the shared counters, so it goes first:
+    // the last response of a run then belongs to the core API whose budget we actually track.
+    obs.mentions = await observeMentions({ prev: prev?.mentions, gh, isMaintainer: (c) => isMaintainer(c, obs.committers), nowMs });
+    obs.heads = await observeHeads({ prev: prev?.heads, gh, nowMs });
     obs.httpCache = gh.etags;
     obs.github = gh.finish(true, null, g0);
-    return { obs, notes: [...upstreamAlerts(prev, obs, pinned), ...communityNotes(prev, obs)], ran: true };
+    const raw = [...upstreamAlerts(prev, obs, pinned), ...communityNotes(prev, obs), ...headAlerts(prev?.heads, obs.heads), ...mentionAlerts(prev?.mentions, obs.mentions)];
+    const { notes, digests } = dedupeGroupedAlerts(raw, prev?.alertDigests);
+    obs.alertDigests = digests;
+    return { obs, notes, ran: true };
   } catch (err) {
     // Keep the last good observation; only the watcher's own state moves.
     return { obs: { ...(prev || {}), httpCache: gh.etags, github: gh.finish(false, err, g0) }, notes: [], ran: true, error: String(err.message).slice(0, 200) };
@@ -212,6 +233,10 @@ export async function observeUpstream({ prev = null, gh = null, fetchFn = fetch,
       headCommit: commits[0] ? { sha: commits[0].sha.slice(0, 10), title: commits[0].commit.message.split('\n')[0].slice(0, 100) } : null
     });
   }
+  // Who publishes to the official main: the evidence that a named maintainer is one.
+  const committers = new Set(prev?.committers || []);
+  try { for (const c of (await gh.json(`${api}/${REPO}/commits?per_page=30`)) || []) if (c?.author?.login) committers.add(c.author.login); } catch (err) { if (err instanceof RateLimited) throw err; }
+  obs.committers = [...committers];
   const issues = await gh.json(`${api}/${REPO}/issues?state=all&per_page=50&sort=updated`);
   obs.issues = Object.fromEntries(issues.map((i) => [i.number, slimIssue(i)]));
   const known = new Map(issues.map((i) => [watchKey(REPO, i.number), i]));
@@ -251,7 +276,7 @@ export async function observeUpstream({ prev = null, gh = null, fetchFn = fetch,
       ...entry,
       lastCommentId: slim.length ? Math.max(...slim.map((c) => c.id)) : (before?.lastCommentId ?? 0),
       newSince: before && !before.unavailable ? slim.filter((c) => c.id > (before.lastCommentId ?? 0)) : [],
-      maintainer: slim.filter(isMaintainer).slice(-3),
+      maintainer: slim.filter((c) => isMaintainer(c, committers)).slice(-3),
       baseline: !before || Boolean(before.unavailable)
     };
   }
@@ -292,14 +317,14 @@ export function upstreamAlerts(prev, next, pinned) {
     }
     if (w.unavailable || before.unavailable) continue;
     for (const c of w.newSince || []) {
-      if (!isMaintainer(c) || c.text.replace(/\s+/g, ' ').trim().length < SUBSTANTIVE_CHARS) continue;
-      const tags = key === ARCHIVE_ISSUE ? ARCHIVE_ANSWER_TOPICS.filter(([, re]) => re.test(c.text)).map(([t]) => t) : [];
-      add('maintainer_reply', `${w.priority} ${key} (${w.topic}): ${c.author} wrote${tags.length ? ` [mentions: ${tags.join(', ')}]` : ''}: ${c.text.replace(/\s+/g, ' ').slice(0, 280)}`);
+      if (!isMaintainer(c, next.committers) || c.text.replace(/\s+/g, ' ').trim().length < SUBSTANTIVE_CHARS) continue;
+      const tags = groupOf(key) === 'CLOSE1_ARCHIVE_PUBLICATION' ? ARCHIVE_ANSWER_TOPICS.filter(([, re]) => re.test(c.text)).map(([t]) => t) : [];
+      out.push({ kind: 'maintainer_reply', key, body: c.text, text: `${OFFICIAL} ${w.priority} ${key} (${w.topic}): ${c.author} wrote${tags.length ? ` [mentions: ${tags.join(', ')}]` : ''}: ${c.text.replace(/\s+/g, ' ').slice(0, 280)}` });
     }
     if (w.state !== before.state) add('watched_issue_state', `${w.priority} ${key} (${w.topic}) is now ${w.state}`);
   }
   for (const [n, i] of Object.entries(next.issues || {})) {
-    if (!prev.issues?.[n] && isMaintainer(i)) add('new_issue', `close-1 repo: new issue #${n} by ${i.author} "${i.title}"`);
+    if (!prev.issues?.[n] && isMaintainer(i, next.committers)) add('new_issue', `close-1 repo: new issue #${n} by ${i.author} "${i.title}"`);
   }
   return out;
 }
@@ -315,9 +340,9 @@ export function communityNotes(prev, next) {
     if (w.repo !== REPO || !prev.watched?.[key] || w.unavailable || prev.watched[key].unavailable) continue;
     for (const c of w.newSince || []) {
       const text = c.text.replace(/\s+/g, ' ').trim();
-      if (isMaintainer(c) || OUR_LOGINS.has(String(c.author).toLowerCase()) || text.length < SUBSTANTIVE_CHARS) continue;
+      if (isMaintainer(c, next.committers) || OUR_LOGINS.has(String(c.author).toLowerCase()) || text.length < SUBSTANTIVE_CHARS) continue;
       const claim = INTEGRITY_CLAIM.test(text);
-      out.push({ kind: claim ? 'community_integrity_claim' : 'community_comment', logOnly: !claim, text: `${key}: ${c.author} wrote: ${text.slice(0, 280)}` });
+      out.push({ kind: claim ? 'community_integrity_claim' : 'community_comment', logOnly: !claim, key, body: text, text: `${COMMUNITY} ${key}: ${c.author} wrote: ${text.slice(0, 280)}` });
     }
   }
   return out;
