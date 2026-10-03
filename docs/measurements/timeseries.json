@@ -2965,6 +2965,21 @@
         "rooms": 300000,
         "room_bytes_total": 5368709120
       }
+    },
+    {
+      "at": "2026-10-03T21:14Z",
+      "sharded_did_estimate": 2351667,
+      "legacy_did_count": 52798,
+      "notes_used": 3429240,
+      "rooms_used": 20663,
+      "lobby_msgs_per_min": 1015,
+      "note": "Appended automatically by tools/measure-network.mjs.",
+      "caps": {
+        "notes": 16777216,
+        "notes_per_namespace": 300000,
+        "rooms": 300000,
+        "room_bytes_total": 5368709120
+      }
     }
   ],
   "caps": {
