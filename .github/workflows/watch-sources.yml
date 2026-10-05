@@ -44,6 +44,15 @@ jobs:
           node tools/build-guide.mjs
           node tools/build-index.mjs
 
+      - name: Refresh the freshness record before it is committed
+        # The check below runs last so it can turn the job red, but by then the commit
+        # has landed, so docs/freshness.json was never part of it: the committed copy
+        # sat on 2026-10-03 while the agent ran fine. Write it here, with the identity
+        # so the shared note is readable, and never fail on it; the later step does.
+        env:
+          SCOUT_IDENTITY_JSON: ${{ secrets.SCOUT_IDENTITY_JSON }}
+        run: node tools/check-freshness.mjs --quiet || true
+
       - name: Commit the new baseline
         run: |
           git config --global user.name "FLOP-Scout-Bot"
