@@ -19,7 +19,7 @@ export const FAUCET_PATTERNS = [/faucet/i, /testnet/i, /\bdrip\b/i, /\btap\b/i];
  * these are the shape strangers type when the news is about someone else's
  * testnet or someone else's token unlock.
  */
-const FAUCET_NOISE_PATTERNS = [/aave/i, /v\d+/i, /goes-live/i, /spend/i, /unlock/i, /funding/i];
+const FAUCET_NOISE_PATTERNS = [/aave/i, /\bv\d+\b/i, /goes-live/i, /\bspend\b/i, /unlock/i, /funding/i];
 
 export function looksLikeFaucet(value) {
   const text = String(value || '');
@@ -74,6 +74,13 @@ export class ScribeEngine {
       const remote = await this.client.getKv('scribe', this.stateKey);
       if (remote && typeof remote === 'object') {
         this.localState = { ...this.localState, ...remote };
+        // The stored hits outlive the filter that judged them. From 2026-08-31 the
+        // noise patterns held literal backspaces instead of word boundaries, so
+        // spam rooms were saved as hits and the radar said HIT for weeks. Judge
+        // them again on every load, so a fixed filter also fixes the record.
+        const hits = (this.localState.faucetHits || []).filter((h) => looksLikeFaucet(h?.room));
+        this.localState.faucetHits = hits;
+        this.localState.faucetDiscovered = hits.length > 0;
       }
     } catch (err) {
       this.lastStateError = err.message;

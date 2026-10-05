@@ -735,6 +735,41 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
   });
 
   /**
+   * The noise filter held literal backspaces instead of word boundaries from
+   * 2026-08-31, so these exact names reached the radar and it reported HIT for
+   * weeks. Both are measured names from the live tape.
+   */
+  test('scribe faucet radar ignores spend and other-protocol rooms', async () => {
+    const { looksLikeFaucet } = await import('../src/scribe-engine.mjs');
+    assert.equal(looksLikeFaucet('flop-testnet-faucet-inference-spend-a-n5hc'), false);
+    assert.equal(looksLikeFaucet('flop-aave-v4-testnet-goes-live-flz9'), false);
+    assert.equal(looksLikeFaucet('faucet'), true);
+  });
+
+  test('scribe re-judges stored faucet hits when it loads its state', async () => {
+    const { ScribeEngine } = await import('../src/scribe-engine.mjs');
+    const stored = {
+      faucetDiscovered: true,
+      faucetHits: [
+        { room: 'flop-testnet-faucet-inference-spend-a-j90d', seq: 815409 },
+        { room: 'faucet', seq: 0, via: 'rooms' }
+      ]
+    };
+    const scribe = new ScribeEngine({
+      identity: generateIdentity(),
+      client: { getKv: async () => structuredClone(stored) }
+    });
+    await scribe.loadRemoteState();
+    assert.deepEqual(scribe.localState.faucetHits.map((h) => h.room), ['faucet']);
+    assert.equal(scribe.localState.faucetDiscovered, true);
+
+    stored.faucetHits = stored.faucetHits.slice(0, 1);
+    await scribe.loadRemoteState();
+    assert.deepEqual(scribe.localState.faucetHits, []);
+    assert.equal(scribe.localState.faucetDiscovered, false);
+  });
+
+  /**
    * The events feed is a ring, so a room whose `created` line has scrolled out
    * is invisible to a watcher that reads only events. That is not a corner
    * case: `/r/faucet` took 20,468 messages from 20,440 DIDs in half an hour on

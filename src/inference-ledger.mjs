@@ -28,31 +28,85 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 
 import { verifyReceipt, isEvidenceOfWork } from './inference.mjs';
 
 export const DEFAULT_LEDGER_PATH = path.join('data', 'inference-receipts.jsonl');
 
 /**
- * Read every receipt on disk.
+ * How much of the file is held in memory at once.
+ *
+ * The ledger used to be read as one string. Genuine receipts are never dropped,
+ * so the file only grows — 326 MB on 2026-10-05, at 15.5 MB a day — and V8
+ * refuses a string past ~512 MiB. At that size every whole-file read would throw
+ * ERR_STRING_TOO_LONG, and the first restart after it would leave appendReceipt
+ * unable to build its index: the agent would stop recording the one number this
+ * file exists to keep. Reading in bounded chunks has no such ceiling.
+ */
+const DEFAULT_CHUNK_BYTES = 16 * 1024 * 1024;
+let chunkBytes = DEFAULT_CHUNK_BYTES;
+
+/** Tests shrink the chunk so a small ledger crosses many boundaries. Nothing else needs this. */
+export function setLedgerChunkBytes(bytes = DEFAULT_CHUNK_BYTES) {
+  chunkBytes = bytes;
+}
+
+/**
+ * Call `onLine` for every line in [from, to) of the file, chunk by chunk.
+ *
+ * A line split across two chunks is carried over whole, and the decoder keeps a
+ * multi-byte character split across them intact.
+ */
+function forEachLine(file, from, to, onLine) {
+  const fd = fs.openSync(file, 'r');
+  try {
+    const decoder = new StringDecoder('utf8');
+    const buffer = Buffer.allocUnsafe(Math.min(chunkBytes, Math.max(1, to - from)));
+    let position = from;
+    let carry = '';
+    while (position < to) {
+      const read = fs.readSync(fd, buffer, 0, Math.min(buffer.length, to - position), position);
+      if (read === 0) break;
+      position += read;
+      const parts = (carry + decoder.write(buffer.subarray(0, read))).split('\n');
+      carry = parts.pop();
+      for (const line of parts) onLine(line);
+    }
+    carry += decoder.end();
+    if (carry) onLine(carry);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
+ * Every parsed receipt on disk, one at a time, with its line as written.
  *
  * A malformed line is reported, not thrown on. The common cause is a process
  * killed mid-append, which costs one receipt and must not cost the ledger.
  */
-export function readLedger(ledgerPath = DEFAULT_LEDGER_PATH) {
-  if (!fs.existsSync(ledgerPath)) return { receipts: [], malformed: 0 };
-
-  const lines = fs.readFileSync(ledgerPath, 'utf8').split('\n').filter((l) => l.trim());
-  const receipts = [];
+function forEachReceipt(ledgerPath, onReceipt) {
   let malformed = 0;
-
-  for (const line of lines) {
+  if (!fs.existsSync(ledgerPath)) return { malformed };
+  forEachLine(ledgerPath, 0, fs.statSync(ledgerPath).size, (line) => {
+    if (!line.trim()) return;
+    let receipt;
     try {
-      receipts.push(JSON.parse(line));
+      receipt = JSON.parse(line);
     } catch {
       malformed++;
+      return;
     }
-  }
+    onReceipt(receipt, line);
+  });
+  return { malformed };
+}
+
+/** Read every receipt on disk. */
+export function readLedger(ledgerPath = DEFAULT_LEDGER_PATH) {
+  const receipts = [];
+  const { malformed } = forEachReceipt(ledgerPath, (receipt) => receipts.push(receipt));
   return { receipts, malformed };
 }
 
@@ -92,18 +146,11 @@ function loadIndex(ledgerPath) {
   if (size === entry.offset) return entry;
 
   // Read only the bytes appended since we last looked. Appends are
-  // leading-newline, so this chunk begins at a record boundary.
-  const fd = fs.openSync(ledgerPath, 'r');
-  try {
-    const buffer = Buffer.allocUnsafe(size - entry.offset);
-    fs.readSync(fd, buffer, 0, buffer.length, entry.offset);
-    for (const line of buffer.toString('utf8').split('\n')) {
-      if (!line.trim()) continue;
-      try { entry.ids.add(JSON.parse(line).requestId); } catch { /* a torn line is not an id */ }
-    }
-  } finally {
-    fs.closeSync(fd);
-  }
+  // leading-newline, so this range begins at a record boundary.
+  forEachLine(ledgerPath, entry.offset, size, (line) => {
+    if (!line.trim()) return;
+    try { entry.ids.add(JSON.parse(line).requestId); } catch { /* a torn line is not an id */ }
+  });
   entry.offset = size;
   return entry;
 }
@@ -111,6 +158,7 @@ function loadIndex(ledgerPath) {
 /** Forget every cached index. Tests write ledgers behind our back; nothing else needs this. */
 export function resetLedgerIndex() {
   indexCache.clear();
+  scannedAt.clear();
 }
 
 /**
@@ -173,46 +221,77 @@ function readCompactionRecord(ledgerPath) {
 export function compactLedger(ledgerPath = DEFAULT_LEDGER_PATH, { keepSimulated = 500 } = {}) {
   if (!fs.existsSync(ledgerPath)) return { compacted: false, reason: 'no ledger' };
 
-  const { receipts, malformed } = readLedger(ledgerPath);
-  const simulated = receipts.filter((r) => r.simulated === true);
-  if (simulated.length <= keepSimulated) {
-    return { compacted: false, reason: 'nothing to drop', simulated: simulated.length };
+  // Two streaming passes rather than the whole ledger in memory: count, then copy.
+  let simulated = 0;
+  forEachReceipt(ledgerPath, (receipt) => { if (receipt.simulated === true) simulated++; });
+  if (simulated <= keepSimulated) {
+    return { compacted: false, reason: 'nothing to drop', simulated };
   }
 
-  // Order is preserved for everything kept, so the file still reads as history.
-  const drop = new Set(simulated.slice(0, simulated.length - keepSimulated));
-  const kept = receipts.filter((r) => !drop.has(r));
-
-  const record = readCompactionRecord(ledgerPath);
-  record.simulatedDropped = (record.simulatedDropped || 0) + drop.size;
-  record.compactions = [...(record.compactions || []), {
-    at: new Date().toISOString(),
-    dropped: drop.size,
-    keptSimulated: keepSimulated,
-    keptTotal: kept.length,
-    malformedDiscarded: malformed
-  }].slice(-20);
+  // The oldest rehearsals go. Order is preserved for everything kept, so the
+  // file still reads as history.
+  const toDrop = simulated - keepSimulated;
+  let dropped = 0;
+  let kept = 0;
 
   // Temp-then-rename: a crash mid-compaction must leave the old ledger intact,
   // never a half-written one. The evidence is not reconstructible.
   const temp = `${ledgerPath}.compacting`;
-  fs.writeFileSync(temp, kept.map((r) => JSON.stringify(r)).join('\n'), 'utf8');
+  const out = fs.openSync(temp, 'w');
+  let malformed;
+  try {
+    ({ malformed } = forEachReceipt(ledgerPath, (receipt, line) => {
+      if (receipt.simulated === true && dropped < toDrop) { dropped++; return; }
+      fs.writeSync(out, (kept > 0 ? '\n' : '') + line);
+      kept++;
+    }));
+  } finally {
+    fs.closeSync(out);
+  }
+
+  const record = readCompactionRecord(ledgerPath);
+  record.simulatedDropped = (record.simulatedDropped || 0) + dropped;
+  record.compactions = [...(record.compactions || []), {
+    at: new Date().toISOString(),
+    dropped,
+    keptSimulated: keepSimulated,
+    keptTotal: kept,
+    malformedDiscarded: malformed
+  }].slice(-20);
+
   fs.renameSync(temp, ledgerPath);
   fs.writeFileSync(compactionRecordPath(ledgerPath), JSON.stringify(record, null, 2), 'utf8');
   indexCache.delete(path.resolve(ledgerPath));
 
-  return { compacted: true, dropped: drop.size, kept: kept.length, simulatedDropped: record.simulatedDropped };
+  return { compacted: true, dropped, kept, simulatedDropped: record.simulatedDropped };
 }
+
+/** The ledger size at the last scan that found nothing to drop, per resolved path. */
+const scannedAt = new Map();
 
 /**
  * Compact only when the file has actually grown enough to matter.
  *
  * Called every cycle, so the common case must cost one `stat` and nothing else.
+ * Being over the threshold is not enough: genuine receipts are never dropped, so
+ * a healthy ledger stays over it for good, and this used to re-read the whole
+ * file every minute to find the same "nothing to drop" — 326 MB a cycle on the
+ * mini PC, and most of the daemon's 1.9 GB. A scan is repeated only after the
+ * file has grown by another `maxBytes`.
  */
 export function compactIfLarge(ledgerPath = DEFAULT_LEDGER_PATH, { maxBytes = 4 * 1024 * 1024, keepSimulated = 500 } = {}) {
   if (!fs.existsSync(ledgerPath)) return { compacted: false, reason: 'no ledger' };
-  if (fs.statSync(ledgerPath).size <= maxBytes) return { compacted: false, reason: 'below threshold' };
-  return compactLedger(ledgerPath, { keepSimulated });
+  const size = fs.statSync(ledgerPath).size;
+  if (size <= maxBytes) return { compacted: false, reason: 'below threshold' };
+
+  const key = path.resolve(ledgerPath);
+  const last = scannedAt.get(key);
+  if (last !== undefined && size >= last && size - last < maxBytes) {
+    return { compacted: false, reason: 'scanned recently' };
+  }
+  const result = compactLedger(ledgerPath, { keepSimulated });
+  scannedAt.set(key, fs.statSync(ledgerPath).size);
+  return result;
 }
 
 /**
@@ -224,12 +303,10 @@ export function compactIfLarge(ledgerPath = DEFAULT_LEDGER_PATH, { maxBytes = 4 
  * and "work we can prove" is always visible rather than averaged away.
  */
 export function ledgerTotals(ledgerPath = DEFAULT_LEDGER_PATH) {
-  const { receipts, malformed } = readLedger(ledgerPath);
-
   const seen = new Set();
   const totals = {
-    receiptsOnDisk: receipts.length,
-    malformedLines: malformed,
+    receiptsOnDisk: 0,
+    malformedLines: 0,
     duplicates: 0,
     simulated: 0,
     // Rehearsal receipts compaction removed. Reported so "receipts on disk" is
@@ -248,17 +325,19 @@ export function ledgerTotals(ledgerPath = DEFAULT_LEDGER_PATH) {
     byTask: {}
   };
 
-  for (const receipt of receipts) {
-    if (seen.has(receipt.requestId)) { totals.duplicates++; continue; }
+  // Streamed, so the totals cost one receipt of memory at a time, not the ledger.
+  const { malformed } = forEachReceipt(ledgerPath, (receipt) => {
+    totals.receiptsOnDisk++;
+    if (seen.has(receipt.requestId)) { totals.duplicates++; return; }
     seen.add(receipt.requestId);
 
-    if (receipt.simulated === true) { totals.simulated++; continue; }
-    if (receipt?.result?.ok === false) { totals.failed++; continue; }
+    if (receipt.simulated === true) { totals.simulated++; return; }
+    if (receipt?.result?.ok === false) { totals.failed++; return; }
 
     // A receipt that does not verify is not evidence, whoever wrote it.
     if (!verifyReceipt(receipt) || !isEvidenceOfWork(receipt)) {
       totals.signatureRejected++;
-      continue;
+      return;
     }
 
     totals.counted++;
@@ -273,7 +352,8 @@ export function ledgerTotals(ledgerPath = DEFAULT_LEDGER_PATH) {
 
     if (!totals.firstAt || receipt.at < totals.firstAt) totals.firstAt = receipt.at;
     if (!totals.lastAt || receipt.at > totals.lastAt) totals.lastAt = receipt.at;
-  }
+  });
+  totals.malformedLines = malformed;
 
   totals.meanLatencyMs = totals.counted ? totals.latencyMsTotal / totals.counted : null;
   return totals;

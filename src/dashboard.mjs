@@ -5,6 +5,13 @@ import { loadOrCreateIdentity, getDidShardedPath, getStateKey } from './identity
 import { TechnocoreClient } from './technocore-client.mjs';
 import { getLatestLearningReport } from './learning-engine.mjs';
 import { renderClose1Section } from './close1/dashboard-section.mjs';
+import { tailLines } from './tail-lines.mjs';
+
+/**
+ * How much of the audit log one page render reads. The page keeps the newest
+ * 300 entries; a cycle writes a few lines of ~1.5 KB, so 2 MB is several hours.
+ */
+const AUDIT_TAIL_BYTES = 2 * 1024 * 1024;
 
 /**
  * Everything this page renders about the network was typed by a stranger, so
@@ -922,7 +929,8 @@ export async function updateDashboardFile(outputDir = 'docs', serverUrl = 'https
   const auditPath = path.join(dataDir, 'scout-audit.jsonl');
   if (fs.existsSync(auditPath)) {
     try {
-      const lines = fs.readFileSync(auditPath, 'utf8').split('\n').filter(Boolean);
+      // Only the tail: this runs every cycle, and the whole log is 170 MB.
+      const lines = tailLines(auditPath, AUDIT_TAIL_BYTES);
       logs = lines.map((line) => {
         try { return JSON.parse(line); } catch { return null; }
       }).filter(Boolean);

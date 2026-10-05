@@ -10,7 +10,8 @@ import { simulatedBackend, flopSessionBackend } from '../src/inference-backends.
 import { buildTask } from '../src/workload.mjs';
 import {
   DEFAULT_LEDGER_PATH, readLedger, appendReceipt, ledgerTotals,
-  observedThroughput, ledgerSummary, compactLedger, compactIfLarge, compactionRecordPath
+  observedThroughput, ledgerSummary, compactLedger, compactIfLarge, compactionRecordPath,
+  setLedgerChunkBytes, resetLedgerIndex
 } from '../src/inference-ledger.mjs';
 
 const identity = generateIdentity();
@@ -279,4 +280,68 @@ test('compaction leaves a ledger alone until it is actually large', () => {
   const done = compactIfLarge(ledger, { maxBytes: 1, keepSimulated: 3 });
   assert.equal(done.compacted, true);
   assert.equal(readLedger(ledger).receipts.length, 3);
+});
+
+/**
+ * The ledger is read in chunks because a whole-file string stops working at
+ * ~512 MiB, and genuine receipts are never dropped. A record split across two
+ * chunks, or a character split inside one, must read exactly as it did whole.
+ */
+test('a ledger read in tiny chunks reads exactly as it does whole', () => {
+  const ledger = tempLedger();
+  appendReceipt({ ...genuineReceipt({ task: 'ąčęėįšųūž-classify' }), requestId: 'multibyte' }, ledger);
+  for (let i = 0; i < 20; i++) {
+    appendReceipt({ ...genuineReceipt(), requestId: `sim-${i}`, simulated: true }, ledger);
+  }
+  fs.appendFileSync(ledger, '\n{"requestId":"half-writ', 'utf8');
+
+  const whole = { read: readLedger(ledger), totals: ledgerTotals(ledger) };
+  try {
+    setLedgerChunkBytes(7);
+    resetLedgerIndex();
+    assert.deepEqual(readLedger(ledger), whole.read);
+    assert.deepEqual(ledgerTotals(ledger), whole.totals);
+    assert.equal(readLedger(ledger).receipts[0].request.task, 'ąčęėįšųūž-classify');
+
+    // The duplicate index is built the same way after a restart.
+    assert.equal(appendReceipt({ ...genuineReceipt(), requestId: 'sim-13', simulated: true }, ledger).appended, false);
+    assert.equal(appendReceipt({ ...genuineReceipt(), requestId: 'new-one' }, ledger).appended, true);
+  } finally {
+    setLedgerChunkBytes();
+    resetLedgerIndex();
+  }
+  assert.equal(readLedger(ledger).receipts.length, 22);
+});
+
+test('compaction streams in chunks and keeps the newest rehearsals', () => {
+  const ledger = tempLedger();
+  appendReceipt({ ...genuineReceipt({ feeFlop: 7 }), requestId: 'evidence-1' }, ledger);
+  for (let i = 0; i < 10; i++) {
+    appendReceipt({ ...genuineReceipt(), requestId: `sim-${i}`, simulated: true }, ledger);
+  }
+  try {
+    setLedgerChunkBytes(11);
+    const result = compactLedger(ledger, { keepSimulated: 3 });
+    assert.equal(result.dropped, 7);
+    assert.deepEqual(readLedger(ledger).receipts.map((r) => r.requestId), ['evidence-1', 'sim-7', 'sim-8', 'sim-9']);
+  } finally {
+    setLedgerChunkBytes();
+  }
+});
+
+test('a large ledger with nothing to drop is not re-read every cycle', () => {
+  const ledger = tempLedger();
+  for (let i = 0; i < 5; i++) appendReceipt({ ...genuineReceipt(), requestId: `g-${i}` }, ledger);
+  resetLedgerIndex();
+
+  const first = compactIfLarge(ledger, { maxBytes: 100, keepSimulated: 3 });
+  assert.equal(first.reason, 'nothing to drop');
+  const second = compactIfLarge(ledger, { maxBytes: 100, keepSimulated: 3 });
+  assert.equal(second.reason, 'scanned recently');
+
+  // Growth past another maxBytes earns a fresh look, and the rehearsals go.
+  for (let i = 0; i < 6; i++) appendReceipt({ ...genuineReceipt(), requestId: `sim-${i}`, simulated: true }, ledger);
+  const third = compactIfLarge(ledger, { maxBytes: 100, keepSimulated: 3 });
+  assert.equal(third.compacted, true);
+  assert.equal(third.dropped, 3);
 });

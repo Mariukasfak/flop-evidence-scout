@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { readCodeFingerprint } from '../src/daemon.mjs';
+import { tailLines } from '../src/tail-lines.mjs';
 
 const DATA = 'data/local';
 const AUDIT = path.join(DATA, 'scout-audit.jsonl');
@@ -32,23 +33,6 @@ const fmtAgo = (mins) => {
   if (mins < 90) return `pries ${Math.round(mins)} min.`;
   return `pries ${(mins / 60).toFixed(1)} val.`;
 };
-
-/**
- * Read the tail of the audit log without loading all of it.
- *
- * It is 6 MB and grows every minute; reading the whole file to answer "what
- * happened lately" would make this tool slower the longer the agent has been
- * healthy, which is exactly backwards.
- */
-function tailLines(file, bytes = 400_000) {
-  const size = fs.statSync(file).size;
-  const start = Math.max(0, size - bytes);
-  const fd = fs.openSync(file, 'r');
-  const buf = Buffer.alloc(size - start);
-  fs.readSync(fd, buf, 0, buf.length, start);
-  fs.closeSync(fd);
-  return buf.toString('utf8').split('\n').filter(Boolean);
-}
 
 /**
  * Count matching lines across the whole log, without holding it in memory.
