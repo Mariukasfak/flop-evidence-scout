@@ -79,7 +79,7 @@ function applySet(dataDir, key, value, now) {
 /** Never suppressed, whatever the settings. */
 export const CRITICAL_KINDS = Object.freeze(new Set([
   'foreign_writer_detected', 'host_became_writer', 'operator_mode_changed', 'operator_lock_broken', 'account_conflict',
-  'archive_integrity', 'referee_key_changed', 'write_blocked_attempt', 'actual_write'
+  'archive_integrity', 'referee_key_changed', 'write_blocked_attempt', 'actual_write', 'kibble_paused'
 ]));
 export const IMPORTANT_KINDS = Object.freeze(new Set([
   'evidence_report', 'archive_our_sweeps', 'archive_current', 'archive_advanced', 'unknown_resolved', 'corroboration_changed',

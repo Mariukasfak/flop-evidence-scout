@@ -28,6 +28,7 @@ import { TclkEngine } from './tclk-engine.mjs';
 import { TclkPayer } from './tclk-payer.mjs';
 import { QUESTION_BANK } from './kibble-jobs.mjs';
 import { mirrorConsole } from './console-mirror.mjs';
+import { readPause as readKibblePause } from './kibble-guard.mjs';
 
 /**
  * Every writable path the daemon owns, derived from one base directory.
@@ -1326,7 +1327,14 @@ export async function runScoutDaemon(options = {}) {
           //
           // Sized to end just before the next cycle would start, so it is
           // always awaited below rather than left running into it.
-          const lanes = kibbleLanes();
+          // tools/kibble-guard.mjs writes this on the first fresh not-useful
+          // verdict against our work; only a person removes it.
+          const paused = readKibblePause(config.dataDir);
+          if (paused) {
+            sayOnce('kibble:paused', `[Kibble] PAUSED by the guard (${paused.at}): ${paused.reason}. `
+              + `Delete ${path.join(config.dataDir, 'kibble-paused.json')} to resume.`);
+          }
+          const lanes = paused ? { on: new Set(), unknown: [] } : kibbleLanes();
           if (lanes.unknown.length) {
             sayOnce('kibble:lanes-unknown', `[Kibble] KIBBLE_LANES names unknown lane(s): ${lanes.unknown.join(', ')} — ignored.`);
           }
