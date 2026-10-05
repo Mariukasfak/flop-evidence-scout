@@ -136,6 +136,32 @@ export function parseArgs(argv) {
  * write, a packed ref we cannot resolve, or no .git at all are all reasons to
  * carry on rather than to stand down.
  */
+/** Every lane the kibble step runs once KIBBLE_WRITES is on, in cycle order. */
+export const KIBBLE_LANES = Object.freeze(['fast', 'worker', 'verdict', 'franchise', 'tclk', 'tclk-payer', 'brief', 'poster', 'validator']);
+
+/**
+ * Which of those lanes the operator has turned on.
+ *
+ * KIBBLE_WRITES was all or nothing, and the lanes are not equally safe. Read off
+ * the board's own scorer on 2026-09-29: Scout's answers (`fast` + `worker`) had
+ * 198 results, 9 useful verdicts and 56 not-useful, each of those -3 forever;
+ * Scribe's attestations (`validator`) had 503 given and none contested. Turned
+ * back on for 40 minutes on 2026-10-05, six answers drew 14 not-useful verdicts.
+ * A 3B model racing for a job in a second is not good enough to answer it, and
+ * the switch has to be able to say so without also silencing the lane that works.
+ *
+ * Unset means every lane, which is what KIBBLE_WRITES=true has always meant.
+ */
+export function kibbleLanes(env = process.env) {
+  const raw = String(env.KIBBLE_LANES ?? '').trim();
+  if (!raw) return { on: new Set(KIBBLE_LANES), unknown: [] };
+  const names = raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  return {
+    on: new Set(names.filter((n) => KIBBLE_LANES.includes(n))),
+    unknown: names.filter((n) => !KIBBLE_LANES.includes(n))
+  };
+}
+
 /**
  * What an unsuccessful lease attempt means for this cycle.
  *
@@ -1300,12 +1326,20 @@ export async function runScoutDaemon(options = {}) {
           //
           // Sized to end just before the next cycle would start, so it is
           // always awaited below rather than left running into it.
-          const laneMs = Math.max(5_000, config.intervalMs - (Date.now() - cycleTop) - MIN_LANE_MARGIN_MS);
-          kibbleFastLane = kibbleEngine
-            .runFastLane({ maxMs: laneMs })
-            .catch((err) => ({ action: 'failed', error: err.message }));
+          const lanes = kibbleLanes();
+          if (lanes.unknown.length) {
+            sayOnce('kibble:lanes-unknown', `[Kibble] KIBBLE_LANES names unknown lane(s): ${lanes.unknown.join(', ')} — ignored.`);
+          }
+          sayOnce('kibble:lanes', `[Kibble] Lanes on: ${[...lanes.on].join(', ') || 'none'}`);
 
-          try {
+          const laneMs = Math.max(5_000, config.intervalMs - (Date.now() - cycleTop) - MIN_LANE_MARGIN_MS);
+          if (lanes.on.has('fast')) {
+            kibbleFastLane = kibbleEngine
+              .runFastLane({ maxMs: laneMs })
+              .catch((err) => ({ action: 'failed', error: err.message }));
+          }
+
+          if (lanes.on.has('worker')) try {
             const kibbleWorker = await timed('kibbleWorker', () => kibbleEngine.runWorkerTurn({ backend, real, ledgerPath }));
             if (kibbleWorker.action !== 'no_job') {
               console.log(`[Kibble/Worker] ${kibbleWorker.action}${kibbleWorker.jobId ? ` — ${kibbleWorker.jobId}` : ''}`);
@@ -1314,7 +1348,7 @@ export async function runScoutDaemon(options = {}) {
           } catch (err) {
             console.log(`[Kibble/Worker] Skipped — ${err.message}`);
           }
-          try {
+          if (lanes.on.has('verdict')) try {
             const ownVerdict = await timed('kibbleOwnVerdict',
               () => kibbleEngine.runPosterVerdictTurn({ backend, real, ledgerPath }));
             if (ownVerdict.action === 'rejected_own_job_delivery') {
@@ -1324,7 +1358,7 @@ export async function runScoutDaemon(options = {}) {
           } catch (err) {
             console.log(`[Kibble/Poster] Verdict skipped — ${err.message}`);
           }
-          try {
+          if (lanes.on.has('franchise')) try {
             /**
              * Runs until Scribe has one RESULT of its own, then never again.
              * Its 142 useful verdicts are worth nothing to the agents they
@@ -1339,7 +1373,7 @@ export async function runScoutDaemon(options = {}) {
           } catch (err) {
             console.log(`[Kibble/Franchise] skipped — ${err.message}`);
           }
-          try {
+          if (lanes.on.has('tclk')) try {
             /**
              * One tclk deal at a time, payee side, paper rail. Quiet while it
              * waits; every step that posts something is audited, and the
@@ -1366,7 +1400,7 @@ export async function runScoutDaemon(options = {}) {
           } catch (err) {
             sayOnce('tclk:lane', `[tclk] lane failed: ${err.message}`);
           }
-          try {
+          if (lanes.on.has('tclk-payer')) try {
             /**
              * The payer lane. Same quiet-when-unchanged rule as the payee side,
              * for the same reason: `waiting_for_accept` every minute for an
@@ -1385,7 +1419,7 @@ export async function runScoutDaemon(options = {}) {
           } catch (err) {
             sayOnce('tclk:payer-lane', `[tclk] payer lane failed: ${err.message}`);
           }
-          try {
+          if (lanes.on.has('brief')) try {
             const kibbleBrief = await timed('kibbleBrief', () => kibbleEngine.runBriefTurn());
             if (kibbleBrief.action === 'brief_posted') {
               console.log(`[Kibble/Brief] ${kibbleBrief.headline}`);
@@ -1394,7 +1428,7 @@ export async function runScoutDaemon(options = {}) {
           } catch (err) {
             console.log(`[Kibble/Brief] Skipped — ${err.message}`);
           }
-          try {
+          if (lanes.on.has('poster')) try {
             const kibblePoster = await timed('kibblePoster', () => kibbleEngine.runPosterTurn());
             if (kibblePoster.action === 'job_posted') {
               console.log(`[Kibble/Poster] asked ${kibblePoster.key} (${kibblePoster.jobId})`);
@@ -1403,7 +1437,7 @@ export async function runScoutDaemon(options = {}) {
           } catch (err) {
             console.log(`[Kibble/Poster] Skipped — ${err.message}`);
           }
-          try {
+          if (lanes.on.has('validator')) try {
             /**
              * Whatever this cycle can spare, but never most of it.
              *
