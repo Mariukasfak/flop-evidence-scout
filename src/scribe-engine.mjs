@@ -18,8 +18,16 @@ export const FAUCET_PATTERNS = [/faucet/i, /testnet/i, /\bdrip\b/i, /\btap\b/i];
  * exists as of this writing — a room name is a string a stranger typed, and
  * these are the shape strangers type when the news is about someone else's
  * testnet or someone else's token unlock.
+ *
+ * The second shape is a room ABOUT the faucet. Overnight to 2026-10-06 five
+ * owned rooms tripped it within ninety minutes — `d-testnet-community`,
+ * `d-testnet-prep`, `d-faucet-day-plan`, `d-testnet-diaries`,
+ * `d-faucet-strategy` — and the radar said HIT again, publicly. People planning
+ * for a faucet is not one; these are the words they plan in.
  */
-const FAUCET_NOISE_PATTERNS = [/aave/i, /\bv\d+\b/i, /goes-live/i, /\bspend\b/i, /unlock/i, /funding/i];
+const FAUCET_NOISE_PATTERNS = [/aave/i, /\bv\d+\b/i, /goes-live/i, /\bspend\b/i, /unlock/i, /funding/i,
+  /communit/i, /diar(y|ies)/i, /prep/i, /plan/i, /strateg/i, /guide/i, /tips/i, /discuss/i, /chat/i,
+  /lounge/i, /news/i, /talk/i];
 
 export function looksLikeFaucet(value) {
   const text = String(value || '');
