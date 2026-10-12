@@ -175,6 +175,15 @@ describe('honest validation', () => {
     assert.equal(found.job.jobId, 'k0000000008');
   });
 
+  test('never attests a delivery whose question it cannot see', () => {
+    // The JOB line scrolled out of the window: no title, no body, and on
+    // 2026-10-12 a reason that said the job wanted "null".
+    const jobs = reconstructBoard([
+      { text: 'DELIVER v1 | k0000000012 | Completed work on T successfully.', from: OTHER, seq: 2 }
+    ]);
+    assert.equal(pickThinDelivery(jobs, { selfDid: SELF }), null);
+  });
+
   test('never attests our own delivery', () => {
     const jobs = reconstructBoard([
       { text: 'JOB v1 | k0000000009 | explain | T | Explain the tradeoff between A and B in detail.', from: OTHER, seq: 1 },

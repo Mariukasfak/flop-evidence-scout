@@ -482,6 +482,11 @@ export function pickThinDelivery(jobs, {
 } = {}) {
   for (const job of [...jobs.values()].sort((a, b) => (b.postedSeq ?? 0) - (a.postedSeq ?? 0))) {
     if (skipJobIds.has(job.jobId)) continue;
+    // A verdict needs the question. Jobs whose JOB line scrolled out of the
+    // window have no title or body, and from 2026-10-05 the reason model wrote
+    // "Job wanted 'null'" for them — 127 such lines in 90 minutes on 10-12,
+    // published under Scribe's key.
+    if (!job.known || !job.title) continue;
     if (job.poster && isOneOfOurs(job.poster, selfDid, excludeDids)) continue;
     if (job.attests.some((a) => sameDid(a.from, selfDid))) continue;
 
