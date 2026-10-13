@@ -468,7 +468,11 @@ describe('KibbleEngine asks only questions it actually has', () => {
 
   test('once the bank is spent, asks about a room it has just measured', async () => {
     const client = makeClient();
-    client.listRoomStats = async () => [{ room: 'lobby', last_seq: 1600 }, { room: 'free-airdrop', last_seq: 9000 }];
+    // The listing is stale (it still says 1); the rooms themselves are not.
+    client.listRoomStats = async () => [{ room: 'lobby', last_seq: 1 }, { room: 'free-airdrop', last_seq: 1 }];
+    const live = { lobby: 1600, 'free-airdrop': 9000 };
+    const readRoom = client.readRoom.bind(client);
+    client.readRoom = async (room, opts = {}) => (opts.limit === 1 ? { messages: [], lastSeq: live[room] } : readRoom(room, opts));
     const engine = engineFor(client);
     engine.localState.postedQuestionKeys = QUESTION_BANK.map((q) => q.key);
     engine.roomSnap = { at: Date.now() - 5 * 60_000, seqs: { lobby: 100, 'free-airdrop': 10 } };

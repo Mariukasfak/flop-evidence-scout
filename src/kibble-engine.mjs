@@ -59,6 +59,10 @@ import {
 } from './kibble-pairs.mjs';
 import { nextQuestion, jobLine, jobIdFor, QUESTION_BANK } from './kibble-jobs.mjs';
 import { snapshotOf, measureRates, liveQuestions, liveBriefs, pruneKeys, MIN_WINDOW_MS } from './kibble-live.mjs';
+
+/** Always measured, whatever the listing says; then the most recently active rooms, up to the cap. */
+const LIVE_CORE_ROOMS = ['lobby', 'technocore', 'kibble', 'tclk-offers'];
+const LIVE_ROOMS_READ = 10;
 import { boardBriefs, instrumentBriefs, nextBrief, briefLine } from './kibble-briefs.mjs';
 
 /** How many refused job ids to remember, so a bad answer is not regenerated forever. */
@@ -788,7 +792,24 @@ export class KibbleEngine {
     const now = Date.now();
     if (!this.roomSnap || now - this.roomSnap.at >= MIN_WINDOW_MS) {
       try {
-        const snap = snapshotOf(await this.client.listRoomStats(), now);
+        /**
+         * Names from the listing, seqs from the rooms themselves.
+         *
+         * /rooms is served from a stale copy: on 2026-10-13 it showed lobby at
+         * seq 72,643,735 for over an hour while the room itself was past
+         * 101,636,000, so two listing reads measured every rate as zero. A
+         * one-message read of each room returns its live last_seq.
+         */
+        const names = [...new Set([...LIVE_CORE_ROOMS,
+          ...Object.keys(snapshotOf(await this.client.listRoomStats(), now).seqs)])].slice(0, LIVE_ROOMS_READ);
+        const rows = [];
+        for (const room of names) {
+          try {
+            const { lastSeq } = await this.client.readRoom(room, { limit: 1, format: 'json' });
+            if (Number.isFinite(lastSeq)) rows.push({ room, last_seq: lastSeq });
+          } catch { /* one unreadable room is not a reason to drop the reading */ }
+        }
+        const snap = snapshotOf(rows, Date.now());
         const reading = measureRates(this.roomSnap, snap);
         if (reading) this.lastReading = reading;
         this.roomSnap = snap;
