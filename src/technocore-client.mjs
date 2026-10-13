@@ -249,6 +249,23 @@ export class TechnocoreClient {
    *
    * Names only, and treated as data: a room name is a string a stranger chose.
    */
+  /** The listing's rows as served — room, last_seq, idle time — for measuring rates. Data, not labels. */
+  async listRoomStats() {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await this.fetch(`${this.baseUrl}/rooms?format=json`, {
+        headers: { 'user-agent': 'FLOP-Evidence-Scout/1.0', accept: 'application/json' },
+        signal: controller.signal
+      });
+      if (!response.ok) throw new Error(`Technocore rooms error: HTTP ${response.status}`);
+      const json = await response.json();
+      return (Array.isArray(json) ? json : (json.rooms || [])).filter((row) => row && typeof row === 'object');
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async listRooms() {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);

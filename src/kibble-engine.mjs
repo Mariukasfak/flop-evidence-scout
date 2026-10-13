@@ -57,7 +57,8 @@ import { FACTS } from './flop-facts.mjs';
 import {
   loadPairs, savePairs, cappedWorkers, recordUseful, markPraisedUs, pairSummary, recordNot, notSpentWorkers
 } from './kibble-pairs.mjs';
-import { nextQuestion, jobLine, jobIdFor } from './kibble-jobs.mjs';
+import { nextQuestion, jobLine, jobIdFor, QUESTION_BANK } from './kibble-jobs.mjs';
+import { snapshotOf, measureRates, liveQuestions, liveBriefs, pruneKeys, MIN_WINDOW_MS } from './kibble-live.mjs';
 import { boardBriefs, instrumentBriefs, nextBrief, briefLine } from './kibble-briefs.mjs';
 
 /** How many refused job ids to remember, so a bad answer is not regenerated forever. */
@@ -282,7 +283,7 @@ export class KibbleEngine {
      * Slow on purpose. The bank holds seven real questions, and a board that
      * gets all of them inside an hour is being spammed, not asked.
      */
-    posterGuardrails = new Guardrails({ maxPerHour: 1, minCooldownMs: 45 * 60_000 }),
+    posterGuardrails = new Guardrails({ maxPerHour: 6, minCooldownMs: 9 * 60_000 }),
     /**
      * In line with the room rather than above it: 73 agents posted 409 briefs
      * in one 2.2-hour window, a median of 6 each. Three an hour is ordinary
@@ -778,6 +779,28 @@ export class KibbleEngine {
   }
 
   /**
+   * The latest per-room message rates, from two /rooms reads at least
+   * MIN_WINDOW_MS apart. Held in memory only: the kibble note is near its
+   * size limit, and after a restart the first reading simply comes four
+   * minutes later. Null until there is a reading under 30 minutes old.
+   */
+  async liveReading() {
+    const now = Date.now();
+    if (!this.roomSnap || now - this.roomSnap.at >= MIN_WINDOW_MS) {
+      try {
+        const snap = snapshotOf(await this.client.listRoomStats(), now);
+        const reading = measureRates(this.roomSnap, snap);
+        if (reading) this.lastReading = reading;
+        this.roomSnap = snap;
+      } catch (err) {
+        sayOnce('kibble:rooms-read', `[Kibble] Room listing unreadable: ${err.message}`);
+      }
+    }
+    const fresh = this.lastReading && now - Date.parse(this.lastReading.to) < 30 * 60_000;
+    return fresh ? this.lastReading : null;
+  }
+
+  /**
    * Ask one of the questions we actually want answered.
    *
    * The lever we had never pulled: 0 JOB lines from us against 46 from an agent
@@ -792,8 +815,19 @@ export class KibbleEngine {
   async runPosterTurn() {
     await this.loadRemoteState();
 
-    const question = nextQuestion(this.localState.postedQuestionKeys || []);
+    // The hand-written bank first; then one question per room we just measured
+    // (kibble-live.mjs). Either way a question carries something we know and asks
+    // for something we cannot find out alone.
+    const spentKeys = this.localState.postedQuestionKeys || [];
+    const spent = new Set(spentKeys);
+    const question = nextQuestion(spentKeys)
+      || liveQuestions(await this.liveReading()).find((q) => !spent.has(q.key))
+      || null;
     if (!question) return { action: 'no_questions_left' };
+
+    // Pacing before the board read: most turns are paced, and the read is the expensive part.
+    const pacedEarly = this.posterGuardrails.canSendMessage(jobLine(question));
+    if (!pacedEarly.allowed) return { action: `paced: ${pacedEarly.reason}` };
 
     /**
      * Ask the board, not only our own memory, whether we already asked this.
@@ -838,9 +872,10 @@ export class KibbleEngine {
     }
 
     this.posterGuardrails.recordSent(line);
-    this.localState.postedQuestionKeys = [
-      ...(this.localState.postedQuestionKeys || []), question.key
-    ];
+    this.localState.postedQuestionKeys = pruneKeys(
+      [...(this.localState.postedQuestionKeys || []), question.key],
+      QUESTION_BANK.map((q) => q.key)
+    );
     this.localState.jobsPosted = (this.localState.jobsPosted || 0) + 1;
     await this.saveRemoteState();
 
@@ -873,7 +908,9 @@ export class KibbleEngine {
         },
         claimOutcomes: this.localState.claimOutcomes || []
       }),
-      ...(board ? boardBriefs(board) : [])
+      ...(board ? boardBriefs(board) : []),
+      // Last, so a new board finding always goes first: the rates we measured this hour.
+      ...liveBriefs(await this.liveReading())
     ];
     const brief = nextBrief(candidates, this.localState.postedBriefKeys || []);
     if (!brief) return { action: 'nothing_new_to_report' };
@@ -890,7 +927,9 @@ export class KibbleEngine {
     }
 
     this.briefGuardrails.recordSent(line);
-    this.localState.postedBriefKeys = [...(this.localState.postedBriefKeys || []), brief.key];
+    // Hourly rate briefs never recur, so only their tail is kept; every other key is about a fixed finding and stays.
+    const briefKeys = [...(this.localState.postedBriefKeys || []), brief.key];
+    this.localState.postedBriefKeys = pruneKeys(briefKeys, briefKeys.filter((k) => !k.startsWith('rates-')));
     this.localState.briefsPosted = (this.localState.briefsPosted || 0) + 1;
 
     /**

@@ -466,6 +466,27 @@ describe('KibbleEngine asks only questions it actually has', () => {
     assert.equal(client.posts.length, 0);
   });
 
+  test('once the bank is spent, asks about a room it has just measured', async () => {
+    const client = makeClient();
+    client.listRoomStats = async () => [{ room: 'lobby', last_seq: 1600 }, { room: 'free-airdrop', last_seq: 9000 }];
+    const engine = engineFor(client);
+    engine.localState.postedQuestionKeys = QUESTION_BANK.map((q) => q.key);
+    engine.roomSnap = { at: Date.now() - 5 * 60_000, seqs: { lobby: 100, 'free-airdrop': 10 } };
+
+    const result = await engine.runPosterTurn();
+    assert.equal(result.action, 'job_posted');
+    assert.match(client.posts[0].text, /\/r\/lobby run at ~300 msgs\/min/);
+    assert.match(client.posts[0].text, /seq 100 to 1600/, 'the question carries our own reading');
+    assert.match(client.posts[0].text, /Success:/);
+    assert.doesNotMatch(client.posts[0].text, /airdrop/, 'a scam-shaped room name is never promoted');
+
+    // Same room, same hour: never asked twice, even after the pacing clears.
+    engine.posterGuardrails.minCooldownMs = 0;
+    engine.posterGuardrails.recentHashes?.clear?.();
+    const again = await engine.runPosterTurn();
+    assert.notEqual(again.action, 'job_posted');
+  });
+
   test('every banked question states a checkable success condition', () => {
     for (const q of QUESTION_BANK) {
       assert.match(q.body, /Success:/, `${q.key} has no success condition`);
