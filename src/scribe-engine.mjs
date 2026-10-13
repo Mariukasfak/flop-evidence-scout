@@ -27,7 +27,7 @@ export const FAUCET_PATTERNS = [/faucet/i, /testnet/i, /\bdrip\b/i, /\btap\b/i];
  */
 const FAUCET_NOISE_PATTERNS = [/aave/i, /\bv\d+\b/i, /goes-live/i, /\bspend\b/i, /unlock/i, /funding/i,
   /communit/i, /diar(y|ies)/i, /prep/i, /plan/i, /strateg/i, /guide/i, /tips/i, /discuss/i, /chat/i,
-  /lounge/i, /news/i, /talk/i];
+  /lounge/i, /news/i, /talk/i, /status/i];
 
 export function looksLikeFaucet(value) {
   const text = String(value || '');

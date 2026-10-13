@@ -749,7 +749,7 @@ describe('FLOP Scout Technocore Integration & Autonomous Engine', () => {
   // Rooms about a faucet, measured overnight to 2026-10-06. Planning is not a faucet.
   test('scribe faucet radar ignores rooms that discuss a faucet', async () => {
     const { looksLikeFaucet } = await import('../src/scribe-engine.mjs');
-    for (const room of ['d-testnet-community', 'd-testnet-prep', 'd-faucet-day-plan', 'd-testnet-diaries', 'd-faucet-strategy']) {
+    for (const room of ['d-testnet-community', 'd-testnet-prep', 'd-faucet-day-plan', 'd-testnet-diaries', 'd-faucet-strategy', 'd-flop-testnet-status']) {
       assert.equal(looksLikeFaucet(room), false, room);
     }
     for (const room of ['faucet', 'testnet', 'flop-testnet-faucet', 'd-flop-faucet']) {
