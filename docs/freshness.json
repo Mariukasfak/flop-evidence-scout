@@ -1,5 +1,5 @@
 {
-  "checkedAt": "2026-10-19T07:48:23.049Z",
+  "checkedAt": "2026-10-19T15:37:38.458Z",
   "stale": 0,
   "combined": {
     "cycles": 250,
@@ -9,11 +9,11 @@
     "totals": {
       "lo": 5642,
       "gh": 1,
-      "xx": 59349
+      "xx": 59818
     },
     "spend": {
       "flop": 0,
-      "sessions": 543421
+      "sessions": 548654
     },
     "windowHours": 4.15,
     "expected": 17,
@@ -32,19 +32,19 @@
       "file": "docs/measurements/timeseries.json",
       "cadenceMin": 140,
       "toleranceMin": 480,
-      "newest": "2026-10-19T07:47:00.000Z",
-      "ageMin": 1.3737666666666666,
+      "newest": "2026-10-19T15:36:00.000Z",
+      "ageMin": 1.6307666666666667,
       "blockedBy": null,
       "state": "FRESH",
       "duty": {
-        "records": 282,
-        "spanHours": 1313.7833333333333,
-        "expected": 563,
-        "ratio": 0.5008880994671403,
-        "meanGapMin": 280.52313167259786,
-        "medianGapMin": 270,
+        "records": 283,
+        "spanHours": 1321.6,
+        "expected": 566,
+        "ratio": 0.5,
+        "meanGapMin": 281.1914893617021,
+        "medianGapMin": 273,
         "worstGapMin": 1262,
-        "apparentlyMissed": 283
+        "apparentlyMissed": 285
       }
     },
     {
@@ -53,8 +53,8 @@
       "file": "docs/watch/state.json",
       "cadenceMin": 140,
       "toleranceMin": 480,
-      "newest": "2026-10-19T07:47:03.733Z",
-      "ageMin": 1.3115833333333333,
+      "newest": "2026-10-19T15:36:20.467Z",
+      "ageMin": 1.2896833333333333,
       "blockedBy": null,
       "state": "FRESH",
       "duty": null
@@ -65,19 +65,19 @@
       "file": "docs/audit-history.json",
       "cadenceMin": 15,
       "toleranceMin": 90,
-      "newest": "2026-10-19T06:56:52.827Z",
-      "ageMin": 51.49335,
+      "newest": "2026-10-19T14:28:26.052Z",
+      "ageMin": 69.19661666666667,
       "blockedBy": null,
       "state": "FRESH",
       "duty": {
         "records": 100,
-        "spanHours": 509.73753944444445,
-        "expected": 2039,
-        "ratio": 0.04904364884747425,
-        "meanGapMin": 308.9318420875421,
+        "spanHours": 511.49729666666667,
+        "expected": 2046,
+        "ratio": 0.04887585532746823,
+        "meanGapMin": 309.9983616161616,
         "medianGapMin": 285.56288333333333,
         "worstGapMin": 1015.7918,
-        "apparentlyMissed": 1942
+        "apparentlyMissed": 1949
       }
     },
     {
@@ -87,7 +87,7 @@
       "cadenceMin": 240,
       "toleranceMin": 2880,
       "newest": "2026-08-28T00:00:46.187Z",
-      "ageMin": 75347.60403333334,
+      "ageMin": 75816.86103333333,
       "blockedBy": null,
       "state": "QUIET",
       "duty": null
