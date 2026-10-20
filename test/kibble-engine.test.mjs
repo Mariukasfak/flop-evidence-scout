@@ -491,6 +491,26 @@ describe('KibbleEngine asks only questions it actually has', () => {
     assert.notEqual(again.action, 'job_posted');
   });
 
+  test('posts no job while the scorer has stopped reading the tape, and resumes when it moves', async () => {
+    const client = makeClient();
+    let engineSeq = 9_997_001;
+    const tapeSeq = 18_000_000;
+    const readRoom = client.readRoom.bind(client);
+    client.readRoom = async (room, opts = {}) => (opts.limit === 1 ? { messages: [], lastSeq: tapeSeq } : readRoom(room, opts));
+    const engine = new KibbleEngine({
+      workerIdentity: generateIdentity(), validatorIdentity: generateIdentity(), client,
+      scoreApi: 'https://scorer.test/api/score',
+      fetchFn: async () => ({ json: async () => ({ engine_seq: engineSeq }) })
+    });
+
+    assert.equal((await engine.runPosterTurn()).action, 'scorer_stalled');
+    assert.equal(client.posts.length, 0);
+
+    engineSeq = tapeSeq - 1_000;
+    engine.scorerCheck = null;                     // the 30-minute cache, expired
+    assert.equal((await engine.runPosterTurn()).action, 'job_posted');
+  });
+
   test('every banked question states a checkable success condition', () => {
     for (const q of QUESTION_BANK) {
       assert.match(q.body, /Success:/, `${q.key} has no success condition`);

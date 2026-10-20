@@ -27,7 +27,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const LOG = 'data/local/kibble-score-log.jsonl';
-const API = 'https://flop-kibble.onrender.com/api/score';
+const API = 'https://kibble.world/api/score';
 const AGENTS = [
   { name: 'scout ', did: 'did:key:z6MkvJAr8ZTs5n4d14e4SGVFAxo8nWndZTin8vc23Aks3zgn' },
   { name: 'scribe', did: 'did:key:z6Mkfdd1cRSrTaA1yuUC45a2dXpHe4zPf4cE1DC3DmCpELvW' }

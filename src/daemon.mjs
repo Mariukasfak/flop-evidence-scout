@@ -553,7 +553,9 @@ export async function runScoutDaemon(options = {}) {
     workerIdentity: scoutIdentity, validatorIdentity: scribeIdentity, client,
     // The attestor->worker budget. Named here rather than defaulted in the
     // engine, so nothing but the running agent ever writes the live book.
-    pairsPath: config.kibblePairsPath
+    pairsPath: config.kibblePairsPath,
+    // Moved from flop-kibble.onrender.com (now 404) to kibble.world by 2026-10-12.
+    scoreApi: 'https://kibble.world/api/score'
   });
   // Scout takes the deals; Scribe's key is named so its offers are never ours to accept.
   const tclkEngine = new TclkEngine({

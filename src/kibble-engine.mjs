@@ -63,6 +63,9 @@ import { snapshotOf, measureRates, liveQuestions, liveBriefs, pruneKeys, MIN_WIN
 /** Always measured, whatever the listing says; then the most recently active rooms, up to the cap. */
 const LIVE_CORE_ROOMS = ['lobby', 'technocore', 'kibble', 'tclk-offers'];
 const LIVE_ROOMS_READ = 10;
+
+/** How far the tape may run ahead of the scorer before we call it stalled: a few hours of /r/kibble. */
+const SCORER_STALL_GAP = 500_000;
 import { boardBriefs, instrumentBriefs, nextBrief, briefLine } from './kibble-briefs.mjs';
 
 /** How many refused job ids to remember, so a bad answer is not regenerated forever. */
@@ -313,7 +316,12 @@ export class KibbleEngine {
      * started failing the first time this file was exercised twice in a row.
      */
     pairsPath = null,
-    fetchFn = globalThis.fetch
+    fetchFn = globalThis.fetch,
+    /**
+     * Where to ask whether the scorer is still reading the tape. Null in tests
+     * and anywhere else that should not reach the network on its own.
+     */
+    scoreApi = null
   }) {
     if (!workerIdentity?.did || !workerIdentity?.privateKeyPem) {
       throw new Error('Valid Ed25519 workerIdentity is required for KibbleEngine');
@@ -346,6 +354,7 @@ export class KibbleEngine {
     this.ownRoom = ownRoom;
     this.repoUrl = repoUrl;
     this.fetchFn = fetchFn;
+    this.scoreApi = scoreApi;
     this.localState = {
       totalWorkerTurns: 0,
       totalValidatorTurns: 0,
@@ -788,6 +797,35 @@ export class KibbleEngine {
    * size limit, and after a restart the first reading simply comes four
    * minutes later. Null until there is a reading under 30 minutes old.
    */
+  async scorerStalled() {
+    /**
+     * Whether the board's scorer has stopped reading the tape.
+     *
+     * From 2026-09-29 /api/score sat at engine_seq 9,997,001 for every agent
+     * while /r/kibble passed 18 million, so three weeks of jobs scored nothing,
+     * and the room is a ring that keeps about ninety minutes: a scorer that
+     * resumes from where it stopped will not find them. Posting six jobs an hour
+     * into that only crowds the board. Checked every 30 minutes; any failure to
+     * check answers "not stalled", which is how this lane behaved before.
+     */
+    if (!this.scoreApi) return false;
+    const now = Date.now();
+    if (this.scorerCheck && now - this.scorerCheck.at < 30 * 60_000) return this.scorerCheck.stalled;
+    let stalled = false;
+    try {
+      const response = await this.fetchFn(`${this.scoreApi}?did=${encodeURIComponent(this.workerIdentity.did)}`,
+        { signal: AbortSignal.timeout(45_000) });
+      const engineSeq = (await response.json())?.engine_seq;
+      const { lastSeq } = await this.client.readRoom(this.room, { limit: 1, format: 'json' });
+      stalled = Number.isFinite(engineSeq) && Number.isFinite(lastSeq) && lastSeq - engineSeq > SCORER_STALL_GAP;
+      if (stalled) {
+        sayOnce('kibble:scorer-stalled', `[Kibble] Scorer stalled at seq ${engineSeq} (tape at ${lastSeq}) — not posting jobs until it moves.`);
+      }
+    } catch { /* see above */ }
+    this.scorerCheck = { at: now, stalled };
+    return stalled;
+  }
+
   async liveReading() {
     const now = Date.now();
     if (!this.roomSnap || now - this.roomSnap.at >= MIN_WINDOW_MS) {
@@ -845,6 +883,7 @@ export class KibbleEngine {
       || liveQuestions(await this.liveReading()).find((q) => !spent.has(q.key))
       || null;
     if (!question) return { action: 'no_questions_left' };
+    if (await this.scorerStalled()) return { action: 'scorer_stalled' };
 
     // Pacing before the board read: most turns are paced, and the read is the expensive part.
     const pacedEarly = this.posterGuardrails.canSendMessage(jobLine(question));
