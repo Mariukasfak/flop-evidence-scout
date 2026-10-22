@@ -1,6 +1,6 @@
 {
-  "checkedAt": "2026-10-22T20:08:24.216Z",
-  "stale": 0,
+  "checkedAt": "2026-10-22T23:24:03.064Z",
+  "stale": 1,
   "combined": {
     "cycles": 250,
     "byHolder": {
@@ -20,7 +20,7 @@
     "dutyCycle": 1,
     "medianGapMin": 1,
     "worstGapMin": 2,
-    "ageMin": 3134,
+    "ageMin": 3330,
     "share": {
       "xx": 1
     }
@@ -32,16 +32,16 @@
       "file": "docs/measurements/timeseries.json",
       "cadenceMin": 140,
       "toleranceMin": 480,
-      "newest": "2026-10-22T20:07:00.000Z",
-      "ageMin": 1.3898,
+      "newest": "2026-10-22T23:22:00.000Z",
+      "ageMin": 2.0453,
       "blockedBy": null,
       "state": "FRESH",
       "duty": {
-        "records": 298,
-        "spanHours": 1398.1166666666666,
-        "expected": 599,
-        "ratio": 0.4974958263772955,
-        "meanGapMin": 282.44781144781143,
+        "records": 299,
+        "spanHours": 1401.3666666666666,
+        "expected": 601,
+        "ratio": 0.49750415973377704,
+        "meanGapMin": 282.1543624161074,
         "medianGapMin": 276,
         "worstGapMin": 1262,
         "apparentlyMissed": 299
@@ -53,8 +53,8 @@
       "file": "docs/watch/state.json",
       "cadenceMin": 140,
       "toleranceMin": 480,
-      "newest": "2026-10-22T20:06:58.707Z",
-      "ageMin": 1.4113666666666667,
+      "newest": "2026-10-22T23:22:42.192Z",
+      "ageMin": 1.3421166666666666,
       "blockedBy": null,
       "state": "FRESH",
       "duty": null
@@ -66,9 +66,9 @@
       "cadenceMin": 15,
       "toleranceMin": 90,
       "newest": "2026-10-22T19:56:41.491Z",
-      "ageMin": 11.698316666666667,
+      "ageMin": 207.35381666666666,
       "blockedBy": null,
-      "state": "FRESH",
+      "state": "STALE",
       "duty": {
         "records": 80,
         "spanHours": 388.4733233333333,
@@ -87,7 +87,7 @@
       "cadenceMin": 240,
       "toleranceMin": 2880,
       "newest": "2026-08-28T00:00:46.187Z",
-      "ageMin": 80407.62005,
+      "ageMin": 80603.27555,
       "blockedBy": null,
       "state": "QUIET",
       "duty": null
