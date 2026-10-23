@@ -127,6 +127,19 @@ const SOURCES = [
   { id: 'yellowpaper-decisions', url: 'https://raw.githubusercontent.com/flop-labs/yellowpaper/main/decisions/v0.5.md', kind: 'text' },
   { id: 'yellowpaper-changelog', url: 'https://raw.githubusercontent.com/flop-labs/yellowpaper/main/CHANGELOG.md', kind: 'text' },
   /**
+   * The faucet this project spent two months watching rooms for, found on
+   * 2026-10-23 in a tclk commit rather than by any watcher here.
+   *
+   * A devnet faucet at faucet.flop.network had already funded Flop Labs' own
+   * FLOP HTLC test escrows (tclk #210, 2026-10-22). Every radar in this repo
+   * looked for a room named like a faucet; the real one was an HTTP service.
+   * `/chain` carries the genesis hash, so a devnet reset — or a testnet entry in
+   * the network registry — changes its digest. `/health` is deliberately not
+   * watched: its balance moves with every grant.
+   */
+  { id: 'flop-faucet-chain', url: 'https://faucet.flop.network/chain', kind: 'json' },
+  { id: 'tclk-flop-rail', url: 'https://raw.githubusercontent.com/flop-labs/tclk/main/flop/README.md', kind: 'text' },
+  /**
    * Hayes writes here, and this list did not have him.
    *
    * Everything above watches Flop Labs the organisation — its site, its teaser,

@@ -43,6 +43,27 @@ export const STATUS = Object.freeze({
  */
 export const FACTS = Object.freeze([
   {
+    id: 'devnet-faucet',
+    status: STATUS.CONFIRMED,
+    claim: 'A FLOP devnet runs with a public faucet at faucet.flop.network: chain "FLOP Devnet", genesis 0x99c172c095340ace980631f9123544c6bebd4839f3437e463533422d8be2d631, RPC wss://rpc.devnet.flop.network, 18 decimals, SS58 prefix 42. An anonymous grant is 25 test FLOP per address per day; a verified-human grant (BrightID or Self) is 500 to 2,000. Devnet tokens have no value, and a devnet reset invalidates everything before it. This is not the testnet the airdrop counts',
+    source: 'GET https://faucet.flop.network/chain and /health, and the page config, read 2026-10-23; flop-labs/tclk flop/VERIFICATION.md',
+    asOf: '2026-10-23'
+  },
+  {
+    id: 'flop-htlc-rail-devnet',
+    status: STATUS.CONFIRMED,
+    claim: 'tclk has a value-bearing settlement rail: @flop-labs/tclk-flop opens, claims and refunds native FLOP HTLC escrows (hasStation pallet), devnet by default. A party\'s FLOP account is the Ed25519 key in its did:key, so any agent with a did:key already has a FLOP address. Flop Labs settled four test escrows on devnet with 0.001 FLOP. Testnet and mainnet need an operator-published RPC and genesis, and the network registry still marks both as planned',
+    source: 'https://github.com/flop-labs/tclk commit for #210 (2026-10-22) and flop/README.md, read 2026-10-23',
+    asOf: '2026-10-22'
+  },
+  {
+    id: 'agent-unlock-spend',
+    status: STATUS.CONFIRMED,
+    claim: 'The Yellow Paper draft (unreleased changes, synced 2026-10-13) specifies the Agent airdrop unlock as spend-to-unlock: an Agent grant unlocks nothing at its start and has no end block; it unlocks 1 FLOP per 3 FLOP of its locked principal spent in the gross payable of settled inference sessions, after every fraud dispute in the window resolves, and locked compute spend is capped at three quarters of principal. Draft text, not a release',
+    source: 'https://github.com/flop-labs/yellowpaper/blob/main/CHANGELOG.md [Unreleased] (R8.7, R8.8, D-0522), read 2026-10-23',
+    asOf: '2026-10-13'
+  },
+  {
     id: 'yellowpaper-repo',
     status: STATUS.CONFIRMED,
     claim: 'The Yellow Paper has a public source repository, github.com/flop-labs/yellowpaper, created 2026-09-04. flop.finance/intro/yellowpaper/ is a mirror of it. On 2026-09-10 at 02:16Z commit 3eaf2f2 synced a 29-file verified 0.5.0 research draft from the private flop-core tree, adding a claim ledger, v0.5 decision records and standalone reproducers. The commit states it "updates the private draft without creating a release": still 0.5.0, still a draft, no new tokenomics and no release',
