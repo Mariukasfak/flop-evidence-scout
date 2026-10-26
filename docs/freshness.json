@@ -1,5 +1,5 @@
 {
-  "checkedAt": "2026-10-25T22:34:51.542Z",
+  "checkedAt": "2026-10-26T01:12:12.642Z",
   "stale": 0,
   "combined": {
     "cycles": 250,
@@ -9,18 +9,18 @@
     "totals": {
       "lo": 5642,
       "gh": 1,
-      "xx": 65052
+      "xx": 65209
     },
     "spend": {
       "flop": 0,
-      "sessions": 608043
+      "sessions": 610002
     },
-    "windowHours": 4.183333333333334,
+    "windowHours": 4.166666666666667,
     "expected": 17,
     "dutyCycle": 1,
     "medianGapMin": 1,
     "worstGapMin": 3,
-    "ageMin": 0,
+    "ageMin": 1,
     "share": {
       "xx": 1
     }
@@ -32,16 +32,16 @@
       "file": "docs/measurements/timeseries.json",
       "cadenceMin": 140,
       "toleranceMin": 480,
-      "newest": "2026-10-25T22:33:00.000Z",
-      "ageMin": 1.8546666666666667,
+      "newest": "2026-10-26T01:11:00.000Z",
+      "ageMin": 1.19835,
       "blockedBy": null,
       "state": "FRESH",
       "duty": {
-        "records": 317,
-        "spanHours": 1472.55,
-        "expected": 631,
-        "ratio": 0.5023771790808241,
-        "meanGapMin": 279.5981012658228,
+        "records": 318,
+        "spanHours": 1475.1833333333334,
+        "expected": 632,
+        "ratio": 0.5031645569620253,
+        "meanGapMin": 279.2145110410095,
         "medianGapMin": 275,
         "worstGapMin": 1262,
         "apparentlyMissed": 310
@@ -53,8 +53,8 @@
       "file": "docs/watch/state.json",
       "cadenceMin": 140,
       "toleranceMin": 480,
-      "newest": "2026-10-25T22:33:37.267Z",
-      "ageMin": 1.2335666666666667,
+      "newest": "2026-10-26T01:10:50.982Z",
+      "ageMin": 1.3486833333333332,
       "blockedBy": null,
       "state": "FRESH",
       "duty": null
@@ -65,21 +65,20 @@
       "file": "docs/audit-history.json",
       "cadenceMin": 15,
       "toleranceMin": 90,
-      "newest": "2026-10-25T20:28:47.848Z",
-      "ageMin": 126.05725,
+      "newest": "2026-10-26T01:01:08.178Z",
+      "ageMin": 11.062116666666666,
       "blockedBy": null,
-      "state": "STANDING DOWN",
+      "state": "FRESH",
       "duty": {
         "records": 77,
-        "spanHours": 334.1853036111111,
-        "expected": 1337,
-        "ratio": 0.05759162303664921,
-        "meanGapMin": 263.8305028508772,
-        "medianGapMin": 254.49535,
+        "spanHours": 328.9980644444444,
+        "expected": 1316,
+        "ratio": 0.05851063829787234,
+        "meanGapMin": 259.73531403508775,
+        "medianGapMin": 248.29723333333334,
         "worstGapMin": 973.6744333333334,
-        "apparentlyMissed": 1265
-      },
-      "detail": "this machine's log is 126 min old, but the shared record shows a cycle 0 min ago — another holder has the lease"
+        "apparentlyMissed": 1244
+      }
     },
     {
       "id": "feed",
@@ -88,7 +87,7 @@
       "cadenceMin": 240,
       "toleranceMin": 2880,
       "newest": "2026-08-28T00:00:46.187Z",
-      "ageMin": 84874.08493333333,
+      "ageMin": 85031.42863333333,
       "blockedBy": null,
       "state": "QUIET",
       "duty": null
