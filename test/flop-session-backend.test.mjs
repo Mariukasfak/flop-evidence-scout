@@ -164,3 +164,99 @@ test('concurrency is not Ollama\'s one, because the network is many machines', (
   assert.ok(flopSessionBackend({ url: 'http://x' }).maxConcurrency > 1,
     'a single-card ceiling against a network of miners would leave the faucet unspent');
 });
+
+/**
+ * The gateway, api.flop.network/v1/chat/completions, as its OpenAPI publishes it.
+ *
+ * Wallet enrollment returns a JSON key file; the backend reads the bearer from it,
+ * checks quota at GET /v1/keys/me, sends an Idempotency-Key and asks the gateway
+ * to queue (max_wait_ms with max_cost_flop) instead of refusing at once.
+ */
+async function startGateway({ status = 200, quota = 20000, retryAfter = '1' } = {}) {
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      seen.push({ method: req.method, url: req.url, headers: req.headers, body: body ? JSON.parse(body) : null });
+      if (req.headers.authorization !== 'Bearer gw-test-key') { res.writeHead(401).end('{}'); return; }
+      if (req.method === 'GET' && req.url === '/v1/keys/me') {
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ remaining_quota: quota }));
+        return;
+      }
+      if (req.method === 'POST' && req.url === '/v1/chat/completions') {
+        if (status !== 200) {
+          res.writeHead(status, { 'content-type': 'application/json', 'retry-after': retryAfter })
+            .end(JSON.stringify({ error: { code: 'overloaded', message: 'gateway channel pool is full' } }));
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
+          id: 'gen_test_1', object: 'chat.completion', created: 1, model: 'qwen/qwen2.5-0.5b-instruct',
+          choices: [{ index: 0, message: { role: 'assistant', content: 'hello from a miner' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 21, completion_tokens: 4, total_tokens: 25, cost_flop: 0.048 }
+        }));
+        return;
+      }
+      res.writeHead(404).end('{}');
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}/v1`;
+  return { url: `${base}/chat/completions`, server, seen };
+}
+
+function keyFile(expiresAt = Date.now() + 3_600_000) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flop-gw-'));
+  const file = path.join(dir, 'flop-gateway.json');
+  fs.writeFileSync(file, JSON.stringify({ key: 'gw-test-key', model: 'qwen/qwen2.5-0.5b-instruct', expires_at: expiresAt }));
+  return file;
+}
+
+test('gateway: key from the enrollment file, quota checked, chat request sent the published way', async () => {
+  const gw = await startGateway();
+  try {
+    const backend = flopSessionBackend({ url: gw.url, tokenFile: keyFile(), model: 'qwen/qwen2.5-0.5b-instruct', newRequestId: () => 'req-1' });
+    assert.equal(await backend.available(), true);
+    assert.equal(gw.seen[0].url, '/v1/keys/me', 'availability is the documented quota read, not a probe of the completion route');
+
+    const out = await backend.generate({ prompt: 'Say hello.', request: { maxTokens: 16 } });
+    const sent = gw.seen.at(-1);
+    assert.equal(sent.headers['idempotency-key'], 'req-1');
+    assert.deepEqual(sent.body.messages, [{ role: 'user', content: 'Say hello.' }]);
+    assert.equal(sent.body.max_tokens, 16);
+    assert.ok(sent.body.max_cost_flop > 0 && sent.body.max_wait_ms > 0, 'queue instead of an instant 429');
+    assert.equal(out.text, 'hello from a miner');
+    assert.equal(out.promptTokens, 21);
+    assert.equal(out.raw.reportedFeeFlop, 0.048, "the gateway's cost_flop is the figure to reconcile");
+    assert.equal(out.raw.sessionId, 'gen_test_1');
+    assert.equal(out.raw.requestId, 'req-1', 'kept so the receipt can be read back from /v1/keys/me/receipts');
+  } finally {
+    gw.server.close();
+  }
+});
+
+test('gateway: an expired key, a missing key or spent quota is unavailable, so the local model takes the work', async () => {
+  const gw = await startGateway({ quota: 0 });
+  try {
+    assert.equal(await flopSessionBackend({ url: gw.url, tokenFile: keyFile(Date.now() - 1000) }).available(), false);
+    assert.equal(await flopSessionBackend({ url: gw.url, tokenFile: path.join(os.tmpdir(), 'no-such-key.json') }).available(), false);
+    assert.equal(await flopSessionBackend({ url: gw.url, tokenFile: keyFile() }).available(), false, 'quota 0');
+  } finally {
+    gw.server.close();
+  }
+});
+
+test('gateway: a pool-full 429 takes it out of rotation for ten minutes despite Retry-After: 1', async () => {
+  const gw = await startGateway({ status: 429, retryAfter: '1' });
+  let clock = 1_000_000;
+  try {
+    const backend = flopSessionBackend({ url: gw.url, tokenFile: keyFile(Date.now() + 86_400_000), now: () => clock });
+    await assert.rejects(() => backend.generate({ prompt: 'x' }), /429 overloaded/);
+    clock += 5 * 60_000;
+    assert.equal(await backend.available(), false, 'still cooling after five minutes');
+    clock += 6 * 60_000;
+    assert.equal(await backend.available(), true, 'back after ten');
+  } finally {
+    gw.server.close();
+  }
+});

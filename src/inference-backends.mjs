@@ -19,6 +19,7 @@
  */
 
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -415,17 +416,55 @@ export function apiBackend({ config = loadApiConfig(), timeoutMs = 60_000 } = {}
  * ledger, spend totals, the budget that stops the burst — is already proven by
  * `test/flop-session-backend.test.mjs` against a stand-in server.
  */
+/**
+ * The bearer for the gateway, from the environment or from a key file.
+ *
+ * A wallet-enrolled gateway key is a secret that expires in 24 hours, so it
+ * lives in `.secrets/` as the JSON the enrollment returned (`key`,
+ * `expires_at`), never in `.env.local`. A plain-text file holding only the
+ * token works too.
+ */
+export function readSessionToken({ token, tokenFile } = {}) {
+  if (token) return { token, expiresAt: null };
+  if (!tokenFile) return { token: null, expiresAt: null };
+  try {
+    const text = fs.readFileSync(tokenFile, 'utf8').trim();
+    if (!text.startsWith('{')) return { token: text || null, expiresAt: null };
+    const j = JSON.parse(text);
+    return { token: j.key ?? j.token ?? null, expiresAt: Number(j.expires_at ?? j.expiresAt) || null };
+  } catch {
+    return { token: null, expiresAt: null };
+  }
+}
+
+/** True for the OpenAI-compatible gateway route, api.flop.network/v1/chat/completions. */
+export const isChatCompletionsUrl = (url) => /\/chat\/completions\/?$/.test(new URL(url).pathname);
+
 export function flopSessionBackend({
   url = process.env.FLOP_SESSION_URL,
   token = process.env.FLOP_SESSION_TOKEN,
+  tokenFile = process.env.FLOP_SESSION_TOKEN_FILE,
   model = process.env.FLOP_SESSION_MODEL || 'flop-default',
   maxConcurrency = Number(process.env.FLOP_SESSION_CONCURRENCY) || 4,
-  timeoutMs = 120_000
+  maxCostFlop = Number(process.env.FLOP_SESSION_MAX_COST_FLOP) || 1,
+  maxWaitMs = Number(process.env.FLOP_SESSION_MAX_WAIT_MS) || 120_000,
+  timeoutMs = 120_000,
+  now = () => Date.now(),
+  newRequestId = () => crypto.randomUUID()
 } = {}) {
-  const headers = () => ({
+  const chat = Boolean(url) && isChatCompletionsUrl(url);
+  // Re-read on every call: the key file is replaced when the agent re-enrolls,
+  // and the daemon must not need a restart for that.
+  const auth = () => readSessionToken({ token, tokenFile });
+  const headers = (bearer) => ({
     'content-type': 'application/json',
-    ...(token ? { authorization: `Bearer ${token}` } : {})
+    ...(bearer ? { authorization: `Bearer ${bearer}` } : {})
   });
+  // A refused gateway (pool full, broker down) stays out of rotation for a
+  // while, so a cycle falls through to the local model instead of hammering an
+  // overloaded network once per task.
+  let coolUntil = 0;
+  const keysMeUrl = () => new URL('../keys/me', url).href;
 
   return {
     id: 'flop-session',
@@ -441,11 +480,29 @@ export function flopSessionBackend({
      * exists to avoid. Any answer below 500 counts as reachable, because a route
      * that refuses a bare GET with 404 or 405 is still a route that is there;
      * only a dead socket or a broken server is not.
+     *
+     * The gateway is the exception, because its contract is published: it is
+     * available only with an unexpired key that still has quota, read from the
+     * documented `GET /v1/keys/me`, and not while it is cooling after a 429/503.
      */
     async available() {
       if (!url) return false;
+      if (chat) {
+        const { token: bearer, expiresAt } = auth();
+        if (!bearer) return false;
+        if (expiresAt && expiresAt <= now() + 60_000) return false;
+        if (now() < coolUntil) return false;
+        try {
+          const res = await fetch(keysMeUrl(), { headers: headers(bearer), signal: AbortSignal.timeout(8000) });
+          if (!res.ok) return false;
+          const me = await res.json();
+          return !(Number(me.remaining_quota) <= 0);
+        } catch {
+          return false;
+        }
+      }
       try {
-        const res = await fetch(url, { method: 'GET', headers: headers(), signal: AbortSignal.timeout(4000) });
+        const res = await fetch(url, { method: 'GET', headers: headers(auth().token), signal: AbortSignal.timeout(4000) });
         return res.status < 500;
       } catch {
         return false;
@@ -461,14 +518,61 @@ export function flopSessionBackend({
           + 'rather than guessing it. Set FLOP_SESSION_URL once it is.'
         );
       }
+      const maxTokens = request?.maxTokens ?? 512;
+      const bearer = auth().token;
+
+      if (chat) {
+        // One id per task, sent as the Idempotency-Key, so a retried request is
+        // charged once and its receipt can be read back from /v1/keys/me/receipts.
+        const requestId = newRequestId();
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { ...headers(bearer), 'idempotency-key': requestId },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: 'user', content: prompt }],
+            max_tokens: maxTokens,
+            // max_wait_ms asks the gateway to queue for a miner instead of
+            // answering 429 at once; the API requires max_cost_flop beside it.
+            max_cost_flop: maxCostFlop,
+            max_wait_ms: maxWaitMs
+          }),
+          signal: AbortSignal.timeout(maxWaitMs + timeoutMs)
+        });
+        if (!res.ok) {
+          let code = '';
+          try { code = (await res.json())?.error?.code ?? ''; } catch { /* the body is optional */ }
+          if (res.status === 429 || res.status === 503) {
+            const after = Number(res.headers.get('retry-after'));
+            // Retry-After: 1 was sent through 30-minute outages (flop-labs/network#31),
+            // so never cool for less than ten minutes.
+            coolUntil = now() + Math.max(10 * 60_000, Number.isFinite(after) ? after * 1000 : 0);
+          }
+          throw new Error(`flop gateway returned ${res.status}${code ? ` ${code}` : ''} (request ${requestId})`);
+        }
+        const body = await res.json();
+        return {
+          text: body.choices?.[0]?.message?.content ?? '',
+          modelId: body.model ?? model,
+          promptTokens: body.usage?.prompt_tokens,
+          completionTokens: body.usage?.completion_tokens,
+          parameters: null,
+          raw: {
+            reportedFeeFlop: body.usage?.cost_flop ?? null,
+            sessionId: body.id ?? requestId,
+            requestId,
+            minerId: null
+          }
+        };
+      }
 
       const res = await fetch(url, {
         method: 'POST',
-        headers: headers(),
+        headers: headers(bearer),
         body: JSON.stringify({
           model,
           prompt,
-          max_tokens: request?.maxTokens ?? 512
+          max_tokens: maxTokens
         }),
         signal: AbortSignal.timeout(Math.min(timeoutMs, (request?.maxLatencyMs ?? timeoutMs) * 2))
       });

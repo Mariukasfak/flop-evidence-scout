@@ -140,6 +140,13 @@ const SOURCES = [
   { id: 'flop-faucet-chain', url: 'https://faucet.flop.network/chain', kind: 'json' },
   { id: 'tclk-flop-rail', url: 'https://raw.githubusercontent.com/flop-labs/tclk/main/flop/README.md', kind: 'text' },
   /**
+   * The gateway contract our agent buys inference through (src/flop-gateway.mjs,
+   * flopSessionBackend's chat mode). Enrollment, quota and receipt shapes have
+   * changed between devnet releases; a change here is the cue to re-read them
+   * before the testnet allowance, which is the one that counts.
+   */
+  { id: 'flop-gateway-openapi', url: 'https://api.flop.network/openapi.json', kind: 'json' },
+  /**
    * Hayes writes here, and this list did not have him.
    *
    * Everything above watches Flop Labs the organisation — its site, its teaser,
