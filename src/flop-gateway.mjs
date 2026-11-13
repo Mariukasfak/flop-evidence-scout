@@ -15,7 +15,8 @@ import crypto from 'node:crypto';
 
 import { flopAddressOfDid } from './flop-address.mjs';
 
-export const GATEWAY = 'https://api.flop.network';
+// Testnet may get its own gateway origin; switching is one env line, not a deploy.
+export const GATEWAY = process.env.FLOP_GATEWAY || 'https://api.flop.network';
 
 /** The <Bytes> wrapper polkadot wallets apply before signing a raw message. */
 export const wrapBytes = (message) => `<Bytes>${message}</Bytes>`;

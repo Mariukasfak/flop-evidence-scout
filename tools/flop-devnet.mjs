@@ -10,7 +10,7 @@
  */
 import { flopAddressOfDid } from '../src/flop-address.mjs';
 
-const FAUCET = 'https://faucet.flop.network';
+const FAUCET = process.env.FLOP_FAUCET || 'https://faucet.flop.network';
 const AGENTS = [
   ['scout', 'did:key:z6MkvJAr8ZTs5n4d14e4SGVFAxo8nWndZTin8vc23Aks3zgn'],
   ['scribe', 'did:key:z6Mkfdd1cRSrTaA1yuUC45a2dXpHe4zPf4cE1DC3DmCpELvW']
