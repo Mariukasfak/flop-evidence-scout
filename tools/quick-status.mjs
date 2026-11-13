@@ -27,6 +27,7 @@ const HEARTBEAT = path.join(DATA, 'scout-heartbeat.json');
 const GREEN = '\x1b[32m', RED = '\x1b[31m', YEL = '\x1b[33m', DIM = '\x1b[2m', OFF = '\x1b[0m';
 
 const minutesAgo = (iso) => (Date.now() - new Date(iso).getTime()) / 60000;
+const SIGNAL_FRESH_MINUTES = 7 * 24 * 60;
 const fmtAgo = (mins) => {
   if (!Number.isFinite(mins)) return 'nezinoma';
   if (mins < 1) return 'ka tik';
@@ -262,7 +263,13 @@ function main() {
   const surface = signal || lastMatching(AUDIT, /"agent":"surface"/);
   if (surface) {
     const when = fmtAgo(minutesAgo(surface.timestamp));
-    if (surface.action === 'capability_signal') {
+    // A signal keeps its place until something louder arrives, but not its
+    // alarm: on 2026-11-13 the screen still shouted about a 72-day-old
+    // /patterns.md edit that had long been read. After a week it is history.
+    const stale = minutesAgo(surface.timestamp) > SIGNAL_FRESH_MINUTES;
+    if (surface.action === 'capability_signal' && stale) {
+      console.log(`\n  ${DIM}Paskutinis serverio signalas: ${surface.surface} (${when}), jau perskaitytas.${OFF}`);
+    } else if (surface.action === 'capability_signal') {
       console.log('\n----------------------------------------------------------------');
       console.log(`  ${RED}!! SERVERIS PASKELBE KAZKA NAUJA${OFF}  ${DIM}(${surface.surface}, ${when})${OFF}`);
       // Three lines, because this is an alert and not the document. The whole
