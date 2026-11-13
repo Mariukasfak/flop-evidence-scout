@@ -1,0 +1,10 @@
+{
+  "name": "flop-evidence-scout-chain",
+  "private": true,
+  "type": "module",
+  "description": "On-chain FLOP scripts for our agents. Kept apart so the main checkout stays dependency-free. Same set as the proven C:\\FlopChain install (2026-11-13).",
+  "dependencies": {
+    "@flop-labs/sdk": "0.6.0",
+    "@polkadot/api": "17.0.2"
+  }
+}
