@@ -44,3 +44,33 @@ test('a timed-out enrollment is reported as status 0 "timeout" at its stage, nev
   const down = await enrollWallet(id, { fetchFn: async () => { throw new TypeError('fetch failed'); }, gateway: 'https://gw.test' });
   assert.equal(down.code, 'network_error');
 });
+
+test('rehearse retries enrollment at most once per scheduled run, not once per UTC day', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const tool = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'tools', 'flop-gateway.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flop-gw-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'data', 'local'), { recursive: true });
+    const recent = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    fs.writeFileSync(path.join(dir, 'data', 'local', 'flop-gateway-log.jsonl'),
+      `${JSON.stringify({ at: recent, agent: 'scribe', event: 'enroll_refused', status: 503 })}\n`);
+    // A refusal 30 min ago blocks this run without touching the network or the (absent) identity.
+    const out = spawnSync(process.execPath, [tool, 'rehearse', '--agent', 'scribe'], { cwd: dir, encoding: 'utf8', timeout: 20_000 });
+    assert.equal(out.status, 0, out.stderr);
+    assert.match(out.stdout, /last enrollment attempt .* next after /);
+    // A refusal earlier the same day but over 100 min ago no longer blocks: the run goes on to
+    // enroll, which here fails fast reading the missing identity file instead of waiting a day.
+    const old = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    fs.writeFileSync(path.join(dir, 'data', 'local', 'flop-gateway-log.jsonl'),
+      `${JSON.stringify({ at: old, agent: 'scribe', event: 'enroll_refused', status: 503 })}\n`);
+    const again = spawnSync(process.execPath, [tool, 'rehearse', '--agent', 'scribe'], { cwd: dir, encoding: 'utf8', timeout: 20_000 });
+    assert.doesNotMatch(again.stdout, /last enrollment attempt/);
+    assert.match(again.stderr + again.stdout, /scribe-identity\.json/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

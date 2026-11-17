@@ -28,6 +28,10 @@ const keyPath = path.join(secrets, agent === 'scout' ? 'flop-gateway.json' : `fl
 const identityPath = path.join(secrets, `${agent}-identity.json`);
 const logPath = path.resolve('data/local/flop-gateway-log.jsonl');
 const REHEARSAL_SERVED = 3;
+// Bounded enrollment retries: at most one attempt per scheduled run (task every 2 h).
+// Cap refusals clear for wallets that keep retrying, without operator action
+// (flop-labs/network#334); one try per UTC day was too sparse to land.
+const ENROLL_RETRY_MS = 100 * 60 * 1000;
 const REHEARSAL_PROMPT = 'In one sentence, what does a compute channel settle on the FLOP network?';
 
 const log = (entry) => {
@@ -78,7 +82,7 @@ async function status() {
 
 /**
  * The devnet rehearsal, for a scheduled task. At most one enrollment attempt per
- * UTC day while the daily cap refuses (flop-labs/network#141), then one request
+ * run (ENROLL_RETRY_MS apart) while the cap refuses (flop-labs/network#141), then one request
  * per run until three are served, then nothing. Devnet spend earns no airdrop
  * weight; the point is one end-to-end served-and-settled session before testnet,
  * where the same code spends the allowance that counts.
@@ -89,9 +93,9 @@ async function rehearse() {
   if (served >= REHEARSAL_SERVED) { console.log(`${agent}: rehearsal done (${served} served)`); return 0; }
   const key = held();
   if (!key.token) {
-    const today = new Date().toISOString().slice(0, 10);
-    if (entries.some((e) => e.event.startsWith('enroll') && e.at.startsWith(today))) {
-      console.log(`${agent}: already tried enrolling today (${today} UTC)`);
+    const last = entries.filter((e) => e.event.startsWith('enroll')).reduce((m, e) => Math.max(m, Date.parse(e.at) || 0), 0);
+    if (Date.now() - last < ENROLL_RETRY_MS) {
+      console.log(`${agent}: last enrollment attempt ${new Date(last).toISOString()}, next after ${new Date(last + ENROLL_RETRY_MS).toISOString()}`);
       return 0;
     }
     const code = await enroll();
