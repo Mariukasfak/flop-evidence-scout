@@ -34,14 +34,26 @@ const json = async (res) => {
  * One enrollment attempt. Returns { ok, status, code, body } and never throws for
  * an HTTP refusal: `wallet_enrollment_cap_reached` and `_unavailable` are the
  * daily cap and a paused service (flop-labs/network#123, #141), both "later".
+ * A timeout or network failure is reported the same way (status 0), not thrown.
  */
 export async function enrollWallet(identity, { gateway = GATEWAY, fetchFn = fetch } = {}) {
   const address = flopAddressOfDid(identity.did);
+  let stage = 'challenge';
+  try {
+    return await attemptEnrollment(identity, address, gateway, fetchFn, (s) => { stage = s; });
+  } catch (err) {
+    const code = err?.name === 'TimeoutError' ? 'timeout' : 'network_error';
+    return { ok: false, stage, status: 0, code, address };
+  }
+}
+
+async function attemptEnrollment(identity, address, gateway, fetchFn, setStage) {
   const ch = await fetchFn(`${gateway}/v1/enroll/wallet/challenge?address=${address}`, { signal: AbortSignal.timeout(30_000) });
   const challenge = await json(ch);
   if (!ch.ok || !challenge.message) {
     return { ok: false, stage: 'challenge', status: ch.status, code: challenge.error ?? challenge.code ?? null, address };
   }
+  setStage('enroll');
   const res = await fetchFn(`${gateway}/v1/enroll/wallet`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

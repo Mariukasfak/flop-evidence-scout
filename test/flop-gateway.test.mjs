@@ -30,3 +30,17 @@ test('one attempt: a capped day is reported, not retried, and the address is the
   assert.equal(calls[1].body.address, flopAddressOfDid(id.did));
   assert.ok(calls[0].url.endsWith(`address=${flopAddressOfDid(id.did)}`));
 });
+
+test('a timed-out enrollment is reported as status 0 "timeout" at its stage, never thrown', async () => {
+  const id = generateIdentity();
+  const timeout = () => { const e = new Error('The operation was aborted due to timeout'); e.name = 'TimeoutError'; throw e; };
+  const atChallenge = await enrollWallet(id, { fetchFn: async () => timeout(), gateway: 'https://gw.test' });
+  assert.deepEqual([atChallenge.ok, atChallenge.stage, atChallenge.status, atChallenge.code], [false, 'challenge', 0, 'timeout']);
+  const atPost = await enrollWallet(id, {
+    gateway: 'https://gw.test',
+    fetchFn: async (url) => (url.includes('/challenge') ? new Response(JSON.stringify({ message: 'm' }), { status: 200 }) : timeout())
+  });
+  assert.deepEqual([atPost.stage, atPost.status, atPost.code], ['enroll', 0, 'timeout']);
+  const down = await enrollWallet(id, { fetchFn: async () => { throw new TypeError('fetch failed'); }, gateway: 'https://gw.test' });
+  assert.equal(down.code, 'network_error');
+});

@@ -8,7 +8,7 @@
  *   node tools/flop-gateway.mjs rehearse [--agent]         the scheduled devnet rehearsal (below)
  *
  * Exit codes: 0 done or nothing to do, 2 refused for now (daily cap, paused,
- * overloaded), 1 anything else. A key file that exists is never overwritten:
+ * overloaded, timed out), 1 anything else. A key file that exists is never overwritten:
  * re-enrolling an address rotates the bearer without renewing the allowance,
  * so a second attempt buys nothing.
  */
@@ -48,7 +48,7 @@ async function enroll() {
   if (!out.ok) {
     log({ event: 'enroll_refused', stage: out.stage, status: out.status, code: out.code });
     console.log(`${agent}: enrollment refused at ${out.stage}: HTTP ${out.status} ${out.code ?? ''}`);
-    return [429, 503].includes(out.status) ? 2 : 1;
+    return [0, 429, 503].includes(out.status) ? 2 : 1;
   }
   fs.writeFileSync(keyPath, JSON.stringify({ ...out.body, address: out.address, enrolledAt: new Date().toISOString() }, null, 2), { mode: 0o600 });
   log({ event: 'enrolled', address: out.address, model: out.body.model, quota: out.body.remaining_quota, expires_at: out.body.expires_at });
