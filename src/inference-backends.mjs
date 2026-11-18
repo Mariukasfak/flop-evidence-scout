@@ -425,15 +425,21 @@ export function apiBackend({ config = loadApiConfig(), timeoutMs = 60_000 } = {}
  * token works too.
  */
 export function readSessionToken({ token, tokenFile } = {}) {
-  if (token) return { token, expiresAt: null };
-  if (!tokenFile) return { token: null, expiresAt: null };
+  if (token) return { token, expiresAt: null, model: null };
+  if (!tokenFile) return { token: null, expiresAt: null, model: null };
   try {
     const text = fs.readFileSync(tokenFile, 'utf8').trim();
-    if (!text.startsWith('{')) return { token: text || null, expiresAt: null };
+    if (!text.startsWith('{')) return { token: text || null, expiresAt: null, model: null };
     const j = JSON.parse(text);
-    return { token: j.key ?? j.token ?? null, expiresAt: Number(j.expires_at ?? j.expiresAt) || null };
+    return {
+      token: j.key ?? j.token ?? null,
+      expiresAt: Number(j.expires_at ?? j.expiresAt) || null,
+      // The model the enrollment issued the key for. A wallet-enrolled key carries
+      // a one-model allowlist and the gateway answers 401 for any other model.
+      model: typeof j.model === 'string' && j.model ? j.model : null
+    };
   } catch {
-    return { token: null, expiresAt: null };
+    return { token: null, expiresAt: null, model: null };
   }
 }
 
@@ -444,7 +450,7 @@ export function flopSessionBackend({
   url = process.env.FLOP_SESSION_URL,
   token = process.env.FLOP_SESSION_TOKEN,
   tokenFile = process.env.FLOP_SESSION_TOKEN_FILE,
-  model = process.env.FLOP_SESSION_MODEL || 'flop-default',
+  model: configuredModel = process.env.FLOP_SESSION_MODEL || null,
   maxConcurrency = Number(process.env.FLOP_SESSION_CONCURRENCY) || 4,
   maxCostFlop = Number(process.env.FLOP_SESSION_MAX_COST_FLOP) || 1,
   maxWaitMs = Number(process.env.FLOP_SESSION_MAX_WAIT_MS) || 120_000,
@@ -456,6 +462,9 @@ export function flopSessionBackend({
   // Re-read on every call: the key file is replaced when the agent re-enrolls,
   // and the daemon must not need a restart for that.
   const auth = () => readSessionToken({ token, tokenFile });
+  // With no model configured, ask for the one the key was issued for; a key's
+  // allowlist can differ per enrollment (qwen 0.5b, qwen3-8b, arete-27b so far).
+  const modelNow = () => configuredModel || auth().model || 'flop-default';
   const headers = (bearer) => ({
     'content-type': 'application/json',
     ...(bearer ? { authorization: `Bearer ${bearer}` } : {})
@@ -469,7 +478,7 @@ export function flopSessionBackend({
   return {
     id: 'flop-session',
     simulated: false,
-    model,
+    get model() { return modelNow(); },
     maxConcurrency,
 
     /**
@@ -520,6 +529,7 @@ export function flopSessionBackend({
       }
       const maxTokens = request?.maxTokens ?? 512;
       const bearer = auth().token;
+      const model = modelNow();
 
       if (chat) {
         // One id per task, sent as the Idempotency-Key, so a retried request is

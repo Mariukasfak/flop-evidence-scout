@@ -61,7 +61,11 @@ async function enroll() {
 }
 
 async function ask(prompt) {
-  const backend = flopSessionBackend({ url: `${GATEWAY}/v1/chat/completions`, tokenFile: keyPath, model: 'qwen/qwen2.5-0.5b-instruct' });
+  // No model named: the backend asks for the one this key was enrolled for
+  // (the gateway refuses any other with 401), else the smallest catalog model.
+  const backend = flopSessionBackend({
+    url: `${GATEWAY}/v1/chat/completions`, tokenFile: keyPath, model: held().model ?? 'qwen/qwen2.5-0.5b-instruct'
+  });
   try {
     const out = await backend.generate({ prompt, request: { maxTokens: 64 } });
     log({ event: 'served', request_id: out.raw.requestId, id: out.raw.sessionId, cost_flop: out.raw.reportedFeeFlop, completion_tokens: out.completionTokens });

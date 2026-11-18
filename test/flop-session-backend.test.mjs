@@ -235,6 +235,30 @@ test('gateway: key from the enrollment file, quota checked, chat request sent th
   }
 });
 
+test('gateway: with no model configured, the request names the model the key was enrolled for', async () => {
+  const gw = await startGateway();
+  try {
+    const file = keyFile();
+    fs.writeFileSync(file, JSON.stringify({ key: 'gw-test-key', model: 'nousresearch/arete-27b', expires_at: Date.now() + 3_600_000 }));
+    const saved = process.env.FLOP_SESSION_MODEL;
+    delete process.env.FLOP_SESSION_MODEL;
+    try {
+      const backend = flopSessionBackend({ url: gw.url, tokenFile: file });
+      assert.equal(backend.model, 'nousresearch/arete-27b');
+      await backend.generate({ prompt: 'x' });
+      assert.equal(gw.seen.at(-1).body.model, 'nousresearch/arete-27b', 'any other model is a 401 on an allowlisted key');
+
+      const pinned = flopSessionBackend({ url: gw.url, tokenFile: file, model: 'qwen/qwen3-14b' });
+      await pinned.generate({ prompt: 'x' });
+      assert.equal(gw.seen.at(-1).body.model, 'qwen/qwen3-14b', 'an explicit model still wins');
+    } finally {
+      if (saved !== undefined) process.env.FLOP_SESSION_MODEL = saved;
+    }
+  } finally {
+    gw.server.close();
+  }
+});
+
 test('gateway: an expired key, a missing key or spent quota is unavailable, so the local model takes the work', async () => {
   const gw = await startGateway({ quota: 0 });
   try {
