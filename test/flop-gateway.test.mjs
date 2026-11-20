@@ -28,7 +28,7 @@ test('one attempt: a capped day is reported, not retried, and the address is the
   assert.equal(out.code, 'wallet_enrollment_cap_reached');
   assert.equal(calls.length, 2, 'one challenge, one POST');
   assert.equal(calls[1].body.address, flopAddressOfDid(id.did));
-  assert.ok(calls[0].url.endsWith(`address=${flopAddressOfDid(id.did)}`));
+  assert.ok(calls[0].url.includes(`address=${flopAddressOfDid(id.did)}`));
 });
 
 test('a timed-out enrollment is reported as status 0 "timeout" at its stage, never thrown', async () => {
@@ -73,4 +73,14 @@ test('rehearse retries enrollment at most once per scheduled run, not once per U
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('enrollment asks for the hermes-tools-v1 purpose by default, so the allowance lands on a live model', async () => {
+  const id = generateIdentity();
+  const seen = [];
+  const fetchFn = async (url) => { seen.push(url); return new Response(JSON.stringify({ error: 'wallet_enrollment_unavailable' }), { status: 503 }); };
+  await enrollWallet(id, { fetchFn, gateway: 'https://gw.test' });
+  assert.match(seen[0], /\/v1\/enroll\/wallet\/challenge\?address=5\w+&purpose=hermes-tools-v1$/);
+  await enrollWallet(id, { fetchFn, gateway: 'https://gw.test', purpose: '' });
+  assert.match(seen[1], /\/challenge\?address=5\w+$/);
 });

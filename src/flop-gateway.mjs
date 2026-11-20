@@ -18,6 +18,16 @@ import { flopAddressOfDid } from './flop-address.mjs';
 // Testnet may get its own gateway origin; switching is one env line, not a deploy.
 export const GATEWAY = process.env.FLOP_GATEWAY || 'https://api.flop.network';
 
+/**
+ * Without a purpose the gateway keeps the legacy v1 statement, which scopes the
+ * allowance to the registry's first model even when nothing serves it: Scribe's
+ * 2026-11-17 allowance went to nousresearch/arete-27b, absent from /v1/models, and
+ * every request answered 404 model_not_found (network#346, #362, #373). The
+ * hermes-tools-v1 purpose grants a currently live compatible model instead.
+ * FLOP_ENROLL_PURPOSE='' restores the legacy statement.
+ */
+export const ENROLL_PURPOSE = process.env.FLOP_ENROLL_PURPOSE ?? 'hermes-tools-v1';
+
 /** The <Bytes> wrapper polkadot wallets apply before signing a raw message. */
 export const wrapBytes = (message) => `<Bytes>${message}</Bytes>`;
 
@@ -36,19 +46,20 @@ const json = async (res) => {
  * daily cap and a paused service (flop-labs/network#123, #141), both "later".
  * A timeout or network failure is reported the same way (status 0), not thrown.
  */
-export async function enrollWallet(identity, { gateway = GATEWAY, fetchFn = fetch } = {}) {
+export async function enrollWallet(identity, { gateway = GATEWAY, fetchFn = fetch, purpose = ENROLL_PURPOSE } = {}) {
   const address = flopAddressOfDid(identity.did);
   let stage = 'challenge';
   try {
-    return await attemptEnrollment(identity, address, gateway, fetchFn, (s) => { stage = s; });
+    return await attemptEnrollment(identity, address, gateway, fetchFn, (s) => { stage = s; }, purpose);
   } catch (err) {
     const code = err?.name === 'TimeoutError' ? 'timeout' : 'network_error';
     return { ok: false, stage, status: 0, code, address };
   }
 }
 
-async function attemptEnrollment(identity, address, gateway, fetchFn, setStage) {
-  const ch = await fetchFn(`${gateway}/v1/enroll/wallet/challenge?address=${address}`, { signal: AbortSignal.timeout(30_000) });
+async function attemptEnrollment(identity, address, gateway, fetchFn, setStage, purpose) {
+  const query = purpose ? `address=${address}&purpose=${encodeURIComponent(purpose)}` : `address=${address}`;
+  const ch = await fetchFn(`${gateway}/v1/enroll/wallet/challenge?${query}`, { signal: AbortSignal.timeout(30_000) });
   const challenge = await json(ch);
   if (!ch.ok || !challenge.message) {
     return { ok: false, stage: 'challenge', status: ch.status, code: challenge.error ?? challenge.code ?? null, address };

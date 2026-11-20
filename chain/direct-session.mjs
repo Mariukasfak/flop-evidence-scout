@@ -4,8 +4,11 @@
  * path that books compute spend on the account registered as the agent.
  *
  *   node direct-session.mjs --miner <ss58> --endpoint https://… [--model qwen/qwen2.5-0.5b-instruct]
- *        [--escrow-milli 10] [--agent scout] [--via auto|offer|force] [--prompt "…"] [--check]
+ *        [--escrow-milli 10] [--agent scout] [--via auto|offer|force] [--prompt "…"] [--lifetime 600] [--check]
  *
+ * --lifetime sets the force-open channel lifetime in seconds (SDK 0.7+, needs --via force).
+ * The SDK default 120 s is what network#166 saw end in AttestationStale; settled
+ * examples there ran 600 s.
  * --check stops after the genesis and balance check: nothing is signed.
  *
  * Network comes from env: FLOP_RPC (default devnet) and FLOP_FAUCET, whose /chain
@@ -42,6 +45,8 @@ const endpoint = opt('endpoint');
 const model = opt('model', 'qwen/qwen2.5-0.5b-instruct');
 const via = opt('via', 'auto');
 const milli = BigInt(opt('escrow-milli', '10'));
+const lifetime = opt('lifetime') ? Number(opt('lifetime')) : undefined;
+if (lifetime !== undefined && (!Number.isSafeInteger(lifetime) || lifetime < 60 || lifetime > 3600 || via !== 'force')) { console.log('--lifetime must be 60..3600 seconds and needs --via force'); process.exit(1); }
 const prompt = opt('prompt', 'In one sentence, what does a compute channel settle on the FLOP network?');
 if (!miner || !endpoint) { console.log('need --miner <ss58> and --endpoint https://…'); process.exit(1); }
 if (milli <= 0n || milli > 100n) { console.log('escrow must be 1..100 milli-FLOP (0.001..0.1)'); process.exit(1); }
@@ -73,7 +78,7 @@ log({ event: 'start', chain: chainInfo.chain, genesis: chainInfo.genesisHash, fr
 
 let exit = 0;
 try {
-  const r = await runDirectSession({ api, signer, miner, model, endpoint, maxFlop, maxTokens: 64, via, indexerUrl: INDEXER, prompt });
+  const r = await runDirectSession({ api, signer, miner, model, endpoint, maxFlop, maxTokens: 64, via, indexerUrl: INDEXER, prompt, ...(lifetime ? { maxDurationSeconds: lifetime } : {}) });
   const after = await free();
   const rc = r.receipts[0] ?? {};
   const out = {
