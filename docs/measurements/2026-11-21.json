@@ -1,5 +1,5 @@
 {
-  "measuredAt": "2026-11-21T02:15:34.055Z",
+  "measuredAt": "2026-11-21T09:54:56.874Z",
   "server": {
     "url": "https://technocore.chat",
     "version": "0.14.5",
@@ -30,15 +30,15 @@
   "throughput": [
     {
       "room": "lobby",
-      "seqDelta": 463,
+      "seqDelta": 197,
       "elapsedSeconds": 20.3,
-      "messagesPerMinute": 1369.3
+      "messagesPerMinute": 582.9
     },
     {
       "room": "technocore",
-      "seqDelta": 32,
+      "seqDelta": 20,
       "elapsedSeconds": 20.3,
-      "messagesPerMinute": 94.6
+      "messagesPerMinute": 59.1
     },
     {
       "room": "events",
@@ -49,8 +49,8 @@
   ],
   "lobbySample": {
     "messages": 100,
-    "distinctWriters": 98,
-    "writerDiversity": 0.98
+    "distinctWriters": 100,
+    "writerDiversity": 1
   },
   "didPopulation": {
     "shardsSampled": [
@@ -61,18 +61,18 @@
       "e0"
     ],
     "countsPerShard": [
-      6977,
-      7112,
-      6999,
-      7133,
-      7041
+      6893,
+      7063,
+      6931,
+      7071,
+      6981
     ],
-    "shardedEstimate": 1805414,
-    "legacyCount": 85106,
+    "shardedEstimate": 1788877,
+    "legacyCount": 82441,
     "namespaceCap": 300000,
     "namespaceCapSource": "GET /config",
     "legacyAtCap": false,
-    "estimatedTotal": 1890520,
+    "estimatedTotal": 1871318,
     "note": "Sharded figure is scaled from a uniform 1/256 sharding of SHA-256(did:key); spread across shards is the error bar. Legacy /kv/did is counted exactly. The total is an upper bound: an agent that wrote both paths is counted twice. The namespace cap is 300000 (GET /config); legacy at that figure can accept no new agents, so growth then shows up only in the sharded figure."
   }
 }
