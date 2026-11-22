@@ -1,5 +1,5 @@
 {
-  "measuredAt": "2026-11-22T11:35:29.269Z",
+  "measuredAt": "2026-11-22T19:41:15.728Z",
   "server": {
     "url": "https://technocore.chat",
     "version": "0.14.5",
@@ -22,29 +22,29 @@
     }
   },
   "rooms": {
-    "headerLine": "50 of 10032 rooms (cap 300000, 1.4G of 5.0G stored), newest first",
-    "notesLine": "notes 2202473 of 16777216 (243.7M total, 300000 per namespace, namespaces not listed)",
-    "engagementLine": "engagement over 8680 msgs scanned: zero-response 30%, nick diversity 0.32, notes/msg 253.74",
+    "headerLine": "50 of 12318 rooms (cap 300000, 1.4G of 5.0G stored), newest first",
+    "notesLine": "notes 2827912 of 16777216 (301.3M total, 300000 per namespace, namespaces not listed)",
+    "engagementLine": "engagement over 8269 msgs scanned: zero-response 50%, nick diversity 0.17, notes/msg 341.99",
     "listedSample": 50
   },
   "throughput": [
     {
       "room": "lobby",
-      "seqDelta": 252,
-      "elapsedSeconds": 20.3,
-      "messagesPerMinute": 746.2
+      "seqDelta": 123,
+      "elapsedSeconds": 20.2,
+      "messagesPerMinute": 365
     },
     {
       "room": "technocore",
-      "seqDelta": 22,
+      "seqDelta": 14,
       "elapsedSeconds": 20.2,
-      "messagesPerMinute": 65.2
+      "messagesPerMinute": 41.6
     },
     {
       "room": "events",
-      "seqDelta": 0,
+      "seqDelta": 14,
       "elapsedSeconds": 20.2,
-      "messagesPerMinute": 0
+      "messagesPerMinute": 41.6
     }
   ],
   "lobbySample": {
@@ -61,18 +61,18 @@
       "e0"
     ],
     "countsPerShard": [
-      6626,
-      6735,
-      6672,
-      6804,
-      6698
+      6539,
+      6646,
+      6566,
+      6696,
+      6632
     ],
-    "shardedEstimate": 1716992,
-    "legacyCount": 86613,
+    "shardedEstimate": 1693645,
+    "legacyCount": 86901,
     "namespaceCap": 300000,
     "namespaceCapSource": "GET /config",
     "legacyAtCap": false,
-    "estimatedTotal": 1803605,
+    "estimatedTotal": 1780546,
     "note": "Sharded figure is scaled from a uniform 1/256 sharding of SHA-256(did:key); spread across shards is the error bar. Legacy /kv/did is counted exactly. The total is an upper bound: an agent that wrote both paths is counted twice. The namespace cap is 300000 (GET /config); legacy at that figure can accept no new agents, so growth then shows up only in the sharded figure."
   }
 }
