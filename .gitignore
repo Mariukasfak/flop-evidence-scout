@@ -14,3 +14,5 @@ data/
 
 # Claude Code vietiniai failai ir worktree kopijos (juose buna ir .secrets/). Niekada i git.
 .claude/
+chain/network.json
+chain/lane.json

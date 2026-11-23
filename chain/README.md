@@ -24,6 +24,28 @@ Switching to testnet is writing that one file. Agent keys are read from
   miner (`runDirectSession`, escrow capped at 0.1 FLOP). Use `--via force --lifetime 900`
   (the SDK's 120 s default ends in AttestationStale, network#166), and only miners whose
   operator accepts outside buyers.
+- `technocore-faucet.mjs --agent scout [--check]`: the agent's one daily
+  `!faucet request <ss58> <nonce>` in the room the faucet's `/chain` names, signed
+  with the agent's did:key; refuses a second post the same UTC day, reads the bot's
+  reply, logs `data/local/flop-technocore-faucet.jsonl`.
+- `long-session.mjs`: many paid turns on one miner through SDK `LongSession` from a
+  tasks file (tests and backfills). `--check` verifies miner and model and prints the
+  bare-open escrow floor; buys nothing.
+- `flop-lane.mjs`: the daemon's paid lane. One `LongSession` behind
+  `http://127.0.0.1:<port>/lane` (config `lane.json`); the daemon uses it through
+  `FLOP_SESSION_URL` and falls back to Ollama whenever it answers 503 (budget spent,
+  frozen, not open). Budget per day = free balance minus `reserve`, optional `dayCap`.
+- `model-identity.mjs`: registry identity of a model from finalized state (the SDK
+  does not export its resolver).
+
+Spend economics (devnet, measured 2026-11-23): the money in a channel is the
+reservation escrow, miner capacity rate x window blocks x `unconsentedReservationTariff`
+(about 0.00099 FLOP per 1 s block on a 23,942 G_n/s miner), paid to the miner in full on
+a cooperative close; turn tariffs are atoms. One live channel per payer. A bare open needs
+the miner's enclave key pinned (`enclaveKey`, from the miner's own `forceAck` on chain).
+Give turns time (`turnTimeout` 150 s, window 600 s or more): a 30 s turn timeout orphaned a
+channel. `computeChannel.timeout` is a non-delivery dispute against the miner; do not file
+it when the failure was ours.
 
 Rules: no self-reported tasks (`reportTaskCompletion`), no pause/resume status
 flips, no transfers between our own wallets, no extra wallets to multiply faucet
