@@ -20,6 +20,10 @@
  * reserves the miner's capacity (flop-labs/network#255). Results append to
  * data/local/flop-direct-sessions.jsonl under FLOP_DATA_DIR. Never prints keys.
  *
+ * First settled session 2026-11-23 (SDK 0.9.0, --via force --lifetime 900, escrow 0.01):
+ * miner 5HdTbhVY… (miner.ecamliflop.fyi), channel 0xb2623cb5…cd8e, cooperative settle
+ * at block 4441082, minerPaid 0.0085 FLOP, aggregate G_n 81, about 7 minutes end to end.
+ *
  * Devnet rehearsal 2026-11-13 (miner 5Hb5PRJP…, m1.flop.ariabrain.com): force-open
  * and automatic expiry refund both worked on chain; the miner never acknowledged
  * (two models tried), fees 0.014 FLOP per attempt. Even acknowledged force-opens
@@ -50,9 +54,12 @@ if (milli <= 0n || milli > 100n) { console.log('escrow must be 1..100 milli-FLOP
 const maxFlop = milli * 10n ** 15n;
 
 const logPath = path.join(DATA, 'data/local/flop-direct-sessions.jsonl');
+// Receipts carry bigint fields (completionTokens and others). 2026-11-23 a settled,
+// paid session was reported FAILED because JSON.stringify threw on one of them.
+const jsonSafe = (_k, v) => (typeof v === 'bigint' ? v.toString() : v);
 const log = (e) => {
   fs.mkdirSync(path.dirname(logPath), { recursive: true });
-  fs.appendFileSync(logPath, `${JSON.stringify({ at: new Date().toISOString(), agent, rpc: RPC, miner, model, maxFlop: maxFlop.toString(), ...e })}\n`);
+  fs.appendFileSync(logPath, `${JSON.stringify({ at: new Date().toISOString(), agent, rpc: RPC, miner, model, maxFlop: maxFlop.toString(), ...e }, jsonSafe)}\n`);
 };
 
 const signer = await agentSigner(agent);
@@ -73,11 +80,11 @@ try {
     event: 'settled', channelId: u8aToHex(r.channelId), settleTx: r.settleTx,
     minerPaid: r.settlement.minerPaid?.toString() ?? null, burned: r.settlement.burned?.toString() ?? null,
     aggregateGn: r.settlement.aggregateGn?.toString() ?? null, cooperative: r.settlement.cooperative ?? null,
-    finishReason: rc.finishReason ?? null, completionTokens: rc.completionTokens ?? null,
+    finishReason: rc.finishReason ?? null, completionTokens: rc.completionTokens?.toString() ?? null,
     freeAfter: after.toString(), spentTotal: (before - after).toString(), reply: r.reply.slice(0, 300)
   };
   log(out);
-  console.log(JSON.stringify(out, null, 2));
+  console.log(JSON.stringify(out, jsonSafe, 2));
 } catch (err) {
   exit = 2;
   const after = await free().catch(() => null);
