@@ -1,8 +1,8 @@
 {
-  "checkedAt": "2026-11-09T06:31:18.289Z",
+  "checkedAt": "2026-11-23T09:07:55.623Z",
   "summary": {
-    "ready": 1,
-    "action": 11,
+    "ready": 2,
+    "action": 10,
     "blocked": 2,
     "unreachable": 0
   },
@@ -11,14 +11,14 @@
       "id": "did-scout",
       "label": "Scout identity published",
       "state": "ACTION",
-      "detail": "/kv/did-36/abc8515f992b6a → 404",
+      "detail": "/kv/did-52/9d118d57d12056 → 404",
       "fix": "Run the daemon once so it republishes its DID note."
     },
     {
       "id": "did-scribe",
       "label": "Scribe identity published",
       "state": "ACTION",
-      "detail": "/kv/did-b0/c01d659e6c39e3 → 404",
+      "detail": "/kv/did-84/9573f90b997381 → 404",
       "fix": "Run the daemon once so it republishes its DID note."
     },
     {
@@ -73,9 +73,9 @@
     {
       "id": "source-watch",
       "label": "Source watcher baseline is readable",
-      "state": "ACTION",
-      "detail": "28 baselined, 1 blind: hayes-substack (HTTP 403)",
-      "fix": "A blind source keeps its last digest, so it can never report a change. Check whether the block is on the runner IP; if it is, the source cannot be watched from CI at all and should be moved or dropped rather than left looking watched."
+      "state": "READY",
+      "detail": "29 sources baselined",
+      "fix": "A corrupt baseline makes every run report \"first run\" and detect nothing. Delete it and re-run."
     },
     {
       "id": "faucet-route",
