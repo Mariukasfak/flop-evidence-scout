@@ -40,6 +40,11 @@ Switching to testnet is writing that one file. Agent keys are read from
   each channel while `retireMarginSeconds` of its window remain, so the cooperative
   settle has time to finalize (`windowSeconds` must be at least twice that). The daemon
   sends it one request at a time (`FLOP_SESSION_CONCURRENCY=1` in `.env.local`).
+- `pick-miners.mjs [--window 3600]`: read-only ranking of miners that publish signed session
+  offers (their consent to outside buyers): settlement record, ghost probes, capacity rate and
+  the bare-open escrow per window and per hour, enclave key from the offer, the model served,
+  and the offer venue as endpoint when verified. Prints a `miners` block for lane.json. There
+  is no public endpoint list: an endpoint must be one the operator publishes.
 - `model-identity.mjs`: registry identity of a model from finalized state (the SDK
   does not export its resolver).
 

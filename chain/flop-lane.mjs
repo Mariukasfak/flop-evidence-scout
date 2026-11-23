@@ -43,7 +43,6 @@ const conf = JSON.parse(fs.readFileSync(opt(args, 'config', path.join(here, 'lan
 const P = (flopAmount) => BigInt(Math.round(Number(flopAmount) * 1e6)) * 10n ** 12n;
 const c = {
   agent: conf.agent ?? 'scout',
-  model: conf.model ?? 'qwen/qwen2.5-0.5b-instruct', backendModel: conf.backendModel ?? 'Qwen/Qwen2.5-0.5B-Instruct',
   windowSeconds: Number(conf.windowSeconds ?? 900), channel: P(conf.channel ?? 1), topUp: P(conf.topUp ?? 0.1),
   turnAtoms: BigInt(conf.turnAtoms ?? 1_000_000), turnTimeout: Number(conf.turnTimeout ?? 60), reserve: P(conf.reserve ?? 2),
   dayCap: conf.dayCap == null ? null : P(conf.dayCap), port: Number(conf.port ?? 8790), maxTokens: Number(conf.maxTokens ?? 512)
@@ -53,7 +52,12 @@ const c = {
 // `minerCooldownMinutes` and the lane moves to the next one: devnet 2026-11-23 the only
 // miner went "signer is fenced" (503) mid-channel and the lane had nowhere else to go.
 c.miners = (Array.isArray(conf.miners) && conf.miners.length ? conf.miners : [{ miner: conf.miner, endpoint: conf.endpoint, enclaveKey: conf.enclaveKey }])
-  .map((m) => ({ miner: m.miner, endpoint: m.endpoint, enclaveKey: m.enclaveKey ?? null }));
+  .map((m) => ({
+    miner: m.miner, endpoint: m.endpoint, enclaveKey: m.enclaveKey ?? null,
+    // Miners serve different models; each entry may name its own (registry name), else the top-level one.
+    model: m.model ?? conf.model ?? 'qwen/qwen2.5-0.5b-instruct',
+    backendModel: m.backendModel ?? (m.model ?? conf.backendModel ?? 'Qwen/Qwen2.5-0.5B-Instruct')
+  }));
 for (const m of c.miners) {
   if (!m.miner || !m.endpoint) throw new Error('lane.json needs miner and endpoint for every miner');
   if (m.enclaveKey && !/^0x[0-9a-fA-F]{64}$/.test(m.enclaveKey)) throw new Error(`enclaveKey of ${m.miner} must be 0x + 64 hex`);
@@ -61,7 +65,7 @@ for (const m of c.miners) {
 c.cooldownMs = Number(conf.minerCooldownMinutes ?? 30) * 60_000;
 let cur = 0;
 const resting = new Map();
-for (const k of ['miner', 'endpoint', 'enclaveKey']) Object.defineProperty(c, k, { get: () => c.miners[cur][k], enumerable: true });
+for (const k of ['miner', 'endpoint', 'enclaveKey', 'model', 'backendModel']) Object.defineProperty(c, k, { get: () => c.miners[cur][k], enumerable: true });
 // The first miner in preference order that is not resting; null when all are.
 function pickMiner() {
   const now = Date.now();
@@ -77,7 +81,15 @@ function restMiner(why) {
 const cfg = networkConfig();
 const { api, info } = await connect(cfg);
 const signer = await agentSigner(c.agent);
-const modelIdentity = await resolveModelIdentity(api, c.model, c.backendModel);
+// Registry identity per model, resolved on first use (a wrong identity is a wrong purchase,
+// so the resolver refuses anything ambiguous). Fails here at start for the first miner.
+const identities = new Map();
+async function identityFor(model, backendModel) {
+  const k = `${model}|${backendModel}`;
+  if (!identities.has(k)) identities.set(k, await resolveModelIdentity(api, model, backendModel));
+  return identities.get(k);
+}
+await identityFor(c.model, c.backendModel);
 const journal = new computeChannel.FileSpendJournal(path.join(DATA, 'data/local/flop-journal', c.agent), info.genesisHash, signer.address);
 const submitter = new computeChannel.FlopChainSubmitter(api, signer, true);
 const dayFile = path.join(DATA, 'data/local', `flop-lane-day-${c.agent}-${info.genesisHash.slice(2, 10)}.json`);
@@ -114,7 +126,7 @@ function today(debit) {
 async function open() {
   if (st.frozen) return;
   const opened = await computeChannel.LongSession.open({
-    api, submitter, journal, miner: c.miner, endpoint: c.endpoint, modelIdentity,
+    api, submitter, journal, miner: c.miner, endpoint: c.endpoint, modelIdentity: await identityFor(c.model, c.backendModel),
     windowSeconds: c.windowSeconds, maxLockSeconds: Math.max(c.windowSeconds, 3600),
     maxChannelPlanck: c.channel, topUpPlanck: c.topUp, budgetPlanck: await sizeBudget(),
     maxTurns: 1024, worstCaseTurnPlanck: () => c.turnAtoms, turnTimeoutSeconds: c.turnTimeout,
