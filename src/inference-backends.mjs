@@ -473,7 +473,10 @@ export function flopSessionBackend({
   token = process.env.FLOP_SESSION_TOKEN,
   tokenFile = process.env.FLOP_SESSION_TOKEN_FILE,
   model: configuredModel = process.env.FLOP_SESSION_MODEL || null,
-  maxConcurrency = Number(process.env.FLOP_SESSION_CONCURRENCY) || 4,
+  // Read like the URL, per selection: the loopback lane (chain/flop-lane.mjs) is one
+  // channel and serves turns one at a time, so it is set to 1 there; four queued
+  // requests timed out behind each other (2026-11-23).
+  maxConcurrency = Number(envLocalValue('FLOP_SESSION_CONCURRENCY')) || 4,
   maxCostFlop = Number(process.env.FLOP_SESSION_MAX_COST_FLOP) || 1,
   maxWaitMs = Number(process.env.FLOP_SESSION_MAX_WAIT_MS) || 120_000,
   timeoutMs = 120_000,

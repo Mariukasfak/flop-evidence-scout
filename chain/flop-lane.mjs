@@ -59,7 +59,23 @@ const journal = new computeChannel.FileSpendJournal(path.join(DATA, 'data/local/
 const submitter = new computeChannel.FlopChainSubmitter(api, signer, true);
 const dayFile = path.join(DATA, 'data/local', `flop-lane-day-${c.agent}-${info.genesisHash.slice(2, 10)}.json`);
 
-const st = { session: null, budget: 0n, reason: 'starting', served: 0, failed: 0, frozen: false, lastChannel: null, startedAt: new Date().toISOString() };
+// The SDK retires a channel only when less than one turn timeout of window is left,
+// and a cooperative close started that late did not finalize (2026-11-23, channel
+// 0x608f… orphaned with 20 verified turns). The lane closes the session itself while
+// `retireMargin` seconds are still left, so the miner has time to settle.
+c.retireMargin = Number(conf.retireMarginSeconds ?? Math.max(300, 2 * c.turnTimeout));
+if (c.retireMargin * 2 > c.windowSeconds) throw new Error(`windowSeconds ${c.windowSeconds} must be at least twice retireMarginSeconds ${c.retireMargin}`);
+const blockMs = (() => {
+  try {
+    const babe = api.consts.babe?.expectedBlockTime;
+    if (babe) return Number(babe.toString());
+    const min = api.consts.timestamp?.minimumPeriod;
+    if (min) return Number(min.toString()) * 2;
+  } catch { /* fall through */ }
+  return 6000;
+})();
+
+const st = { session: null, budget: 0n, reason: 'starting', served: 0, failed: 0, skipped: 0, frozen: false, lastChannel: null, turnStartedAt: null, pending: 0, startedAt: new Date().toISOString() };
 const free = async () => (await api.query.system.account(signer.address)).data.free.toBigInt();
 const debited = () => { try { return BigInt(journal.state().debited ?? '0'); } catch { return null; } };
 
@@ -123,6 +139,20 @@ async function closeSession(why) {
   }
 }
 
+// What one bare open on this miner locks now: capacity rate x window blocks x tariff
+// (as long-session.mjs --check prints). Null when the chain does not say.
+async function openFloor() {
+  const head = await api.rpc.chain.getFinalizedHead();
+  const cc = (await api.at(head)).consts.computeChannel;
+  const cap = await computeChannel.readMinerCapacity(api, c.miner, head);
+  const tariff = BigInt(cc.unconsentedReservationTariff?.toString() ?? '0');
+  if (!cap || tariff <= 0n) return null;
+  const maxBlocks = BigInt(cc.maxUnconsentedSessionBlocks?.toString() ?? '0');
+  let wb = BigInt(Math.ceil(c.windowSeconds * 1000 / blockMs));
+  if (maxBlocks > 0n && wb > maxBlocks) wb = maxBlocks;
+  return cap.rate * wb * tariff;
+}
+
 async function refresh() {
   if (st.session || st.frozen) return;
   try {
@@ -137,6 +167,9 @@ async function refresh() {
     }
     const room = st.budget - (debited() ?? knownDebit);
     if (room <= 0n) { await closeSession(`no room: budget ${flop(st.budget)} debited ${flop(debited() ?? knownDebit)}`); return; }
+    // Room below what one bare open locks buys nothing: stay 503 instead of failing each request.
+    const floor = await openFloor().catch(() => null);
+    if (floor !== null && room < floor) { await closeSession(`room ${flop(room)} below the open floor ${flop(floor)}`); return; }
     logLine('flop-lane.jsonl', { event: 'open', agent: c.agent, miner: c.miner, model: c.model, budget: st.budget.toString(), room: room.toString() });
   } catch (err) {
     st.session = null;
@@ -149,12 +182,38 @@ async function refresh() {
 let chain = Promise.resolve();
 function serialised(fn) { const p = chain.then(fn, fn); chain = p.catch(() => {}); return p; }
 
-async function serve(body) {
+// The live channel is the journal's one `open` record; its endBlock is when the window ends.
+async function windowLeftMs() {
+  let live = null;
+  try { live = journal.state().channels.find((x) => x.state === 'open' && x.endBlock); } catch { return null; }
+  if (!live) return null;
+  const head = (await api.rpc.chain.getHeader(await api.rpc.chain.getFinalizedHead())).number.toBigInt();
+  return { channel: live.channel, ms: Number(BigInt(live.endBlock) - head) * blockMs };
+}
+
+async function rollIfEnding() {
+  if (!st.session) return;
+  const left = await windowLeftMs().catch(() => null);
+  if (!left || left.ms > c.retireMargin * 1000) return;
+  logLine('flop-lane.jsonl', { event: 'roll', agent: c.agent, channel: left.channel, secondsLeft: Math.round(left.ms / 1000) });
+  await closeSession(`window ending: ${left.channel.slice(0, 10)}… ${Math.round(left.ms / 1000)} s left`);
+  await refresh();
+}
+
+// The SDK refuses an open past the lifetime budget with a plain Error, not BudgetExceededError.
+const isBudgetRefusal = (err) => err instanceof computeChannel.BudgetExceededError || /would pass the lifetime budget/.test(String(err?.message));
+
+async function serve(body, gone) {
+  if (!st.session) throw Object.assign(new Error(st.reason ?? 'lane closed'), { status: 503 });
+  // The daemon gave up on this request while it queued: a turn now would be paid for and thrown away.
+  if (gone()) { st.skipped += 1; throw Object.assign(new Error('client gone'), { status: 499 }); }
+  await rollIfEnding();
   if (!st.session) throw Object.assign(new Error(st.reason ?? 'lane closed'), { status: 503 });
   const prompt = String(body.prompt ?? '');
   if (!prompt || prompt.length > 32_000) throw Object.assign(new Error('prompt empty or too long'), { status: 400 });
   const envelope = { version: 'flop.chat-turn.v1', model: c.model, messages: [{ role: 'user', content: prompt }], max_tokens: Math.min(Number(body.max_tokens) || c.maxTokens, c.maxTokens) };
   const requestId = crypto.randomUUID();
+  st.turnStartedAt = Date.now();
   try {
     const r = await st.session.turn(envelope, { requestId });
     const text = computeChannel.renderDirectChat(r.receipt, envelope).content;
@@ -165,23 +224,42 @@ async function serve(body) {
     st.failed += 1;
     logLine('flop-lane.jsonl', { event: 'turn-failed', agent: c.agent, requestId, error: err.message, code: err.code ?? null });
     if (err instanceof computeChannel.SpendingFrozenError) { st.frozen = true; await closeSession(`frozen: ${err.message}`); }
-    else if (err instanceof computeChannel.BudgetExceededError) await closeSession('budget spent');
+    else if (isBudgetRefusal(err)) await closeSession('budget spent');
     throw Object.assign(err, { status: 502 });
+  } finally {
+    st.turnStartedAt = null;
   }
+}
+
+// 503 while a turn has run longer than a normal turn (a rollover or a slow miner) or
+// requests pile up, so the daemon's next selection uses Ollama instead of queueing.
+function busy() {
+  if (st.turnStartedAt && Date.now() - st.turnStartedAt > 45_000) return `busy: a turn has run ${Math.round((Date.now() - st.turnStartedAt) / 1000)} s`;
+  if (st.pending > 2) return `busy: ${st.pending} requests waiting`;
+  return null;
 }
 
 const json = (res, status, obj) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))); };
 const server = http.createServer(async (req, res) => {
   try {
-    if (req.method === 'GET' && req.url === '/lane') return st.session ? json(res, 200, { ok: true }) : json(res, 503, { ok: false, reason: st.reason });
+    if (req.method === 'GET' && req.url === '/lane') {
+      if (!st.session) return json(res, 503, { ok: false, reason: st.reason });
+      const b = busy();
+      return b ? json(res, 503, { ok: false, reason: b }) : json(res, 200, { ok: true });
+    }
     if (req.method === 'GET' && req.url === '/lane/status') {
       const d = debited() ?? knownDebit;
-      return json(res, 200, { agent: c.agent, address: signer.address, chain: info.chain, miner: c.miner, model: c.model, open: Boolean(st.session), reason: st.reason, frozen: st.frozen, budget: flop(st.budget), debited: flop(d), today: debitKnown ? flop(today(d)) : null, served: st.served, failed: st.failed, lastChannel: st.lastChannel, startedAt: st.startedAt });
+      return json(res, 200, { agent: c.agent, address: signer.address, chain: info.chain, miner: c.miner, model: c.model, open: Boolean(st.session), reason: st.reason, frozen: st.frozen, budget: flop(st.budget), debited: flop(d), today: debitKnown ? flop(today(d)) : null, served: st.served, failed: st.failed, skipped: st.skipped, pending: st.pending, busy: busy(), lastChannel: st.lastChannel, startedAt: st.startedAt });
     }
     if (req.method === 'POST' && req.url === '/lane') {
       let raw = '';
       for await (const chunk of req) { raw += chunk; if (raw.length > 64_000) return json(res, 413, { error: 'too large' }); }
-      const out = await serialised(() => serve(JSON.parse(raw || '{}')));
+      const body = JSON.parse(raw || '{}');
+      let gone = false;
+      res.on('close', () => { if (!res.writableEnded) gone = true; });
+      st.pending += 1;
+      let out;
+      try { out = await serialised(() => serve(body, () => gone)); } finally { st.pending -= 1; }
       return json(res, 200, out);
     }
     return json(res, 404, { error: 'not found' });
@@ -193,6 +271,8 @@ const server = http.createServer(async (req, res) => {
 await refresh();
 server.listen(c.port, '127.0.0.1', () => console.log(`flop-lane ${c.agent} ${signer.address} on ${info.chain}: http://127.0.0.1:${c.port}/lane (${st.session ? 'open' : st.reason})`));
 setInterval(() => { serialised(refresh); }, 10 * 60_000).unref();
+// Idle too: a channel must not reach its window end just because no request came.
+setInterval(() => { serialised(rollIfEnding).catch(() => {}); }, 30_000).unref();
 
 const stop = async () => { server.close(); await serialised(() => closeSession('shutdown')); await api.disconnect(); process.exit(0); };
 process.on('SIGINT', stop);
