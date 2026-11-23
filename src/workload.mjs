@@ -114,6 +114,9 @@ export const TASKS = Object.freeze({
     id: 'classify-message',
     untrusted: true,
     maxLatencyMs: 30_000,
+    // The answer is one line like `QUESTION|HIGH`. Without a ceiling a 0.5B model on the
+    // paid FLOP lane ran to 256 tokens every time (2026-11-23), 10-40 s a turn.
+    maxTokens: 16,
     build({ text, room }) {
       /**
        * Named placeholders, then examples — because a small model answers with
@@ -510,6 +513,7 @@ export function buildTask(taskId, input, { model = 'qwen2.5:3b', feeFlop = 0 } =
     model,
     task: taskId,
     maxLatencyMs: task.maxLatencyMs,
+    maxTokens: task.maxTokens ?? null,
     // Nothing here is confidential. The flag exists because the network has it,
     // and claiming confidentiality we do not need would be noise in the metering.
     confidential: false,

@@ -449,3 +449,47 @@ test('work-settled readiness only reports gaps; a simulated receipt is never rea
   assert.equal(sim.ready, false);
   assert.ok(sim.missing.includes('evidence_of_work') && sim.missing.includes('not_simulated'));
 });
+
+/**
+ * A task may name a completion ceiling. Classification answers one line, and on
+ * the paid FLOP lane a 0.5B model ran to 256 tokens every turn without one
+ * (2026-11-23). Tasks without a ceiling keep the request they always had, so
+ * their request ids do not move.
+ */
+test('a task ceiling reaches the request, and requests without one are unchanged', () => {
+  const capped = buildTask('classify-message', { text: 'gm', room: 'lobby' });
+  assert.equal(capped.request.maxTokens, 16);
+  const plain = createSessionRequest({ prompt: 'x', model: 'm', createdAt: 'T' });
+  assert.equal('maxTokens' in plain.request, false);
+  for (const bad of [0, -1, 2.5, '16', null]) {
+    const r = createSessionRequest({ prompt: 'x', model: 'm', createdAt: 'T', maxTokens: bad });
+    assert.equal('maxTokens' in r.request, false, `maxTokens ${bad}`);
+  }
+});
+
+test('the ollama backend asks for the task ceiling, 512 without one', async () => {
+  const http = await import('node:http');
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      if (req.url.startsWith('/api/generate')) seen.push(JSON.parse(body));
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ response: 'QUESTION|HIGH', prompt_eval_count: 5, eval_count: 3, models: [] }));
+    });
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  try {
+    const backend = ollamaBackend({ host: `http://127.0.0.1:${server.address().port}` });
+    const capped = buildTask('classify-message', { text: 'gm', room: 'lobby' }, { model: 'qwen2.5:0.5b' });
+    await backend.generate({ prompt: capped.prompt, request: capped.request });
+    const plain = createSessionRequest({ prompt: 'hello', model: 'qwen2.5:0.5b' });
+    await backend.generate({ prompt: plain.prompt, request: plain.request });
+  } finally {
+    server.close();
+  }
+  assert.equal(seen.length, 2);
+  assert.equal(seen[0].options.num_predict, 16);
+  assert.equal(seen[1].options.num_predict, 512);
+});

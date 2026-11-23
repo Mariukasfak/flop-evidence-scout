@@ -95,7 +95,8 @@ let debitKnown = false;
 async function sizeBudget() {
   const d = debited() ?? knownDebit;
   if (debited() !== null) { knownDebit = d; debitKnown = true; }
-  if (!debitKnown) { st.budget = d; return d; }
+  // One atom: the SDK wants a positive budget, and no escrow fits in one atom.
+  if (!debitKnown) { st.budget = d + 1n; return st.budget; }
   const bal = await free();
   let room = bal > c.reserve ? bal - c.reserve : 0n;
   const spentToday = today(d);

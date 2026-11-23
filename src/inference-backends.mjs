@@ -204,7 +204,7 @@ export function ollamaBackend({ model = process.env.OLLAMA_MODEL || 'qwen2.5:3b'
             // Bounded output. A model fed untrusted text must not be able to
             // produce an unbounded response, and every downstream consumer here
             // has a length cap anyway.
-            num_predict: 512,
+            num_predict: request?.maxTokens ?? 512,
             temperature: 0.2
           }
         }),
@@ -329,7 +329,7 @@ export function apiBackend({ config = loadApiConfig(), timeoutMs = 60_000 } = {}
         body: JSON.stringify({
           model: config.model,
           messages: [{ role: 'user', content: prompt }],
-          max_tokens: 512,
+          max_tokens: request?.maxTokens ?? 512,
           temperature: 0.2
         }),
         signal: AbortSignal.timeout(Math.min(timeoutMs, (request?.maxLatencyMs ?? timeoutMs) * 2))

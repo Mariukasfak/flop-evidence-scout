@@ -61,6 +61,7 @@ export function createSessionRequest({
   confidential = false,
   feeFlop = 0,
   budgetFlops = null,
+  maxTokens = null,
   task = 'generic',
   createdAt = new Date().toISOString()
 } = {}) {
@@ -85,6 +86,8 @@ export function createSessionRequest({
     budgetFlops,
     promptHash: sha256(prompt),
     promptChars: prompt.length,
+    // Only when the task names one, so requests of tasks without a ceiling hash as before.
+    ...(Number.isInteger(maxTokens) && maxTokens > 0 ? { maxTokens } : {}),
     createdAt
   };
 
