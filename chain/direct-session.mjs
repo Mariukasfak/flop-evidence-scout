@@ -11,8 +11,9 @@
  * examples there ran 600 s.
  * --check stops after the genesis and balance check: nothing is signed.
  *
- * Network comes from env: FLOP_RPC (default devnet) and FLOP_FAUCET, whose /chain
- * must report the same genesis as the RPC — a mismatch stops before signing.
+ * Network comes from net.mjs (network.json beside the script, env FLOP_FAUCET /
+ * FLOP_RPC / FLOP_INDEXER_URL, devnet fallback); the faucet's /chain must report
+ * the same genesis as the RPC, and a mismatch stops before signing.
  * Escrow is capped at 0.1 FLOP per run; a cooperative settle pays the escrow.
  *
  * Only open channels to miners whose operator agreed to outside buyers: an open
@@ -26,19 +27,15 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
-import { ApiPromise, WsProvider } from '@polkadot/api';
-import { Keyring } from '@polkadot/keyring';
-import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { u8aToHex } from '@polkadot/util';
 import { runDirectSession } from '@flop-labs/sdk';
+import { networkConfig, connect, agentSigner, DATA } from './net.mjs';
 
 const args = process.argv.slice(2);
 const opt = (name, dflt) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args[i + 1] : dflt; };
-const RPC = process.env.FLOP_RPC || 'wss://rpc.devnet.flop.network';
-const FAUCET = process.env.FLOP_FAUCET || 'https://faucet.flop.network';
-const INDEXER = process.env.FLOP_INDEXER_URL || 'https://explorer.devnet.flop.network';
-const DATA = process.env.FLOP_DATA_DIR || 'C:/TriAgent';
+const cfg = networkConfig();
+const INDEXER = cfg.indexer;
+let RPC = cfg.rpc;
 const agent = opt('agent', 'scout');
 const miner = opt('miner');
 const endpoint = opt('endpoint');
@@ -58,18 +55,9 @@ const log = (e) => {
   fs.appendFileSync(logPath, `${JSON.stringify({ at: new Date().toISOString(), agent, rpc: RPC, miner, model, maxFlop: maxFlop.toString(), ...e })}\n`);
 };
 
-const id = JSON.parse(fs.readFileSync(path.join(DATA, '.secrets', `${agent}-identity.json`), 'utf8'));
-const seed = Buffer.from(crypto.createPrivateKey(id.privateKeyPem).export({ format: 'jwk' }).d, 'base64url');
-await cryptoWaitReady();
-const signer = new Keyring({ type: 'ed25519', ss58Format: 42 }).addFromSeed(seed);
-
-const chainInfo = await (await fetch(`${FAUCET}/chain`, { signal: AbortSignal.timeout(30_000) })).json();
-const api = await ApiPromise.create({ provider: new WsProvider(RPC), noInitWarn: true });
-if (api.genesisHash.toHex() !== chainInfo.genesisHash) {
-  console.log(`genesis mismatch: rpc ${api.genesisHash.toHex()} faucet ${chainInfo.genesisHash}`);
-  await api.disconnect();
-  process.exit(1);
-}
+const signer = await agentSigner(agent);
+let api; let chainInfo;
+try { ({ api, info: chainInfo, rpc: RPC } = await connect(cfg)); } catch (err) { console.log(err.message); process.exit(1); }
 const free = async () => (await api.query.system.account(signer.address)).data.free.toBigInt();
 const before = await free();
 console.log(`${new Date().toISOString()} ${agent} ${signer.address} free ${before} escrow ${maxFlop} model ${model} miner ${miner} (${chainInfo.chain})`);

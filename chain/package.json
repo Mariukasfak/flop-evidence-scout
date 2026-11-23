@@ -2,9 +2,9 @@
   "name": "flop-evidence-scout-chain",
   "private": true,
   "type": "module",
-  "description": "On-chain FLOP scripts for our agents. Kept apart so the main checkout stays dependency-free. Same set as the proven mini PC install; SDK 0.7.2 since 2026-11-20 (0.7.1 and older refuse runtime 1014029+).",
+  "description": "On-chain FLOP scripts for our agents. Kept apart so the main checkout stays dependency-free. Same set as the proven mini PC install; SDK 0.9.0 since 2026-11-23 (devnet runtime 1014034; SDK admission is exact per spec version).",
   "dependencies": {
-    "@flop-labs/sdk": "0.7.2",
+    "@flop-labs/sdk": "0.9.0",
     "@polkadot/api": "17.0.2"
   }
 }
