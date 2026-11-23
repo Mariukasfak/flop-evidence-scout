@@ -35,6 +35,11 @@ Switching to testnet is writing that one file. Agent keys are read from
   `http://127.0.0.1:<port>/lane` (config `lane.json`); the daemon uses it through
   `FLOP_SESSION_URL` and falls back to Ollama whenever it answers 503 (budget spent,
   frozen, not open). Budget per day = free balance minus `reserve`, optional `dayCap`.
+  Several miners may be listed (`miners`, in preference order); one whose turn or open
+  fails rests `minerCooldownMinutes` and the lane buys from the next. The lane closes
+  each channel while `retireMarginSeconds` of its window remain, so the cooperative
+  settle has time to finalize (`windowSeconds` must be at least twice that). The daemon
+  sends it one request at a time (`FLOP_SESSION_CONCURRENCY=1` in `.env.local`).
 - `model-identity.mjs`: registry identity of a model from finalized state (the SDK
   does not export its resolver).
 

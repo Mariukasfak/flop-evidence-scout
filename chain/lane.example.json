@@ -1,12 +1,18 @@
 {
   "agent": "scout",
-  "miner": "5HdTbhVY9jZCsfJVFENYF89hRfkBvoby2YxPest3XLLRhnrt",
-  "endpoint": "https://miner.ecamliflop.fyi",
-  "enclaveKey": "0xaa0f5b5cfba6ce984b70e8361226b734984260871227a3ddc076fb35be357c45",
+  "miners": [
+    {
+      "miner": "5HdTbhVY9jZCsfJVFENYF89hRfkBvoby2YxPest3XLLRhnrt",
+      "endpoint": "https://miner.ecamliflop.fyi",
+      "enclaveKey": "0xaa0f5b5cfba6ce984b70e8361226b734984260871227a3ddc076fb35be357c45"
+    }
+  ],
+  "minerCooldownMinutes": 30,
   "model": "qwen/qwen2.5-0.5b-instruct",
   "backendModel": "Qwen/Qwen2.5-0.5B-Instruct",
-  "windowSeconds": 900,
-  "channel": 1,
+  "windowSeconds": 3600,
+  "retireMarginSeconds": 300,
+  "channel": 4,
   "topUp": 0.1,
   "turnAtoms": 1000000,
   "turnTimeout": 150,

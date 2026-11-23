@@ -42,14 +42,37 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const conf = JSON.parse(fs.readFileSync(opt(args, 'config', path.join(here, 'lane.json')), 'utf8'));
 const P = (flopAmount) => BigInt(Math.round(Number(flopAmount) * 1e6)) * 10n ** 12n;
 const c = {
-  agent: conf.agent ?? 'scout', miner: conf.miner, endpoint: conf.endpoint, enclaveKey: conf.enclaveKey ?? null,
+  agent: conf.agent ?? 'scout',
   model: conf.model ?? 'qwen/qwen2.5-0.5b-instruct', backendModel: conf.backendModel ?? 'Qwen/Qwen2.5-0.5B-Instruct',
   windowSeconds: Number(conf.windowSeconds ?? 900), channel: P(conf.channel ?? 1), topUp: P(conf.topUp ?? 0.1),
   turnAtoms: BigInt(conf.turnAtoms ?? 1_000_000), turnTimeout: Number(conf.turnTimeout ?? 60), reserve: P(conf.reserve ?? 2),
   dayCap: conf.dayCap == null ? null : P(conf.dayCap), port: Number(conf.port ?? 8790), maxTokens: Number(conf.maxTokens ?? 512)
 };
-if (!c.miner || !c.endpoint) throw new Error('lane.json needs miner and endpoint');
-if (c.enclaveKey && !/^0x[0-9a-fA-F]{64}$/.test(c.enclaveKey)) throw new Error('enclaveKey must be 0x + 64 hex');
+// Miners in order of preference: `miners: [{miner, endpoint, enclaveKey}]`, or the single
+// top-level miner/endpoint/enclaveKey. A miner whose turn or open fails rests for
+// `minerCooldownMinutes` and the lane moves to the next one: devnet 2026-11-23 the only
+// miner went "signer is fenced" (503) mid-channel and the lane had nowhere else to go.
+c.miners = (Array.isArray(conf.miners) && conf.miners.length ? conf.miners : [{ miner: conf.miner, endpoint: conf.endpoint, enclaveKey: conf.enclaveKey }])
+  .map((m) => ({ miner: m.miner, endpoint: m.endpoint, enclaveKey: m.enclaveKey ?? null }));
+for (const m of c.miners) {
+  if (!m.miner || !m.endpoint) throw new Error('lane.json needs miner and endpoint for every miner');
+  if (m.enclaveKey && !/^0x[0-9a-fA-F]{64}$/.test(m.enclaveKey)) throw new Error(`enclaveKey of ${m.miner} must be 0x + 64 hex`);
+}
+c.cooldownMs = Number(conf.minerCooldownMinutes ?? 30) * 60_000;
+let cur = 0;
+const resting = new Map();
+for (const k of ['miner', 'endpoint', 'enclaveKey']) Object.defineProperty(c, k, { get: () => c.miners[cur][k], enumerable: true });
+// The first miner in preference order that is not resting; null when all are.
+function pickMiner() {
+  const now = Date.now();
+  const i = c.miners.findIndex((m) => (resting.get(m.miner) ?? 0) <= now);
+  if (i >= 0) cur = i;
+  return i >= 0 ? c.miners[i] : null;
+}
+function restMiner(why) {
+  resting.set(c.miner, Date.now() + c.cooldownMs);
+  logLine('flop-lane.jsonl', { event: 'miner-rest', agent: c.agent, miner: c.miner, minutes: c.cooldownMs / 60_000, why: String(why).slice(0, 300) });
+}
 
 const cfg = networkConfig();
 const { api, info } = await connect(cfg);
@@ -155,6 +178,15 @@ async function openFloor() {
 
 async function refresh() {
   if (st.session || st.frozen) return;
+  for (let tries = 0; tries < c.miners.length; tries++) {
+    if (!pickMiner()) { st.reason = 'every miner is resting after a failure'; return; }
+    const before = c.miner;
+    await refreshOn();
+    if (st.session || st.frozen || !st.reason?.startsWith('open refused') || resting.has(before) === false) return;
+  }
+}
+
+async function refreshOn() {
   try {
     await open();
     if (!debitKnown) {
@@ -175,7 +207,8 @@ async function refresh() {
     st.session = null;
     st.reason = `open refused: ${err.message}`;
     if (err instanceof computeChannel.SpendingFrozenError) st.frozen = true;
-    logLine('flop-lane.jsonl', { event: 'open-refused', agent: c.agent, error: err.message });
+    else if (!isBudgetRefusal(err) && !/budgetPlanck/.test(err.message)) restMiner(`open: ${err.message}`);
+    logLine('flop-lane.jsonl', { event: 'open-refused', agent: c.agent, miner: c.miner, error: err.message });
   }
 }
 
@@ -199,6 +232,12 @@ async function rollIfEnding() {
   await closeSession(`window ending: ${left.channel.slice(0, 10)}… ${Math.round(left.ms / 1000)} s left`);
   await refresh();
 }
+
+// A failure on the miner's side of a turn: its endpoint answered an error or did not answer.
+const minerFault = (err) => {
+  const m = String(err?.message ?? '');
+  return m.includes(c.endpoint) || /(?:^|[^0-9])5\d\d(?:[^0-9]|$)|timeout|timed out|aborted|ECONNREFUSED|ECONNRESET|fetch failed|info proof/i.test(m);
+};
 
 // The SDK refuses an open past the lifetime budget with a plain Error, not BudgetExceededError.
 const isBudgetRefusal = (err) => err instanceof computeChannel.BudgetExceededError || /would pass the lifetime budget/.test(String(err?.message));
@@ -225,6 +264,13 @@ async function serve(body, gone) {
     logLine('flop-lane.jsonl', { event: 'turn-failed', agent: c.agent, requestId, error: err.message, code: err.code ?? null });
     if (err instanceof computeChannel.SpendingFrozenError) { st.frozen = true; await closeSession(`frozen: ${err.message}`); }
     else if (isBudgetRefusal(err)) await closeSession('budget spent');
+    else if (minerFault(err)) {
+      // The SDK has already left the channel to the miner's force settlement; close the
+      // session and buy from the next miner on the next request.
+      restMiner(err.message);
+      await closeSession(`miner ${c.miner.slice(0, 8)}… failed: ${err.message.slice(0, 160)}`);
+      await refresh();
+    }
     throw Object.assign(err, { status: 502 });
   } finally {
     st.turnStartedAt = null;
