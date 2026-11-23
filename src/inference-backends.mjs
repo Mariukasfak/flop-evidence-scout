@@ -444,10 +444,32 @@ export function readSessionToken({ token, tokenFile } = {}) {
 }
 
 /** True for the OpenAI-compatible gateway route, api.flop.network/v1/chat/completions. */
+/**
+ * One key from `.env.local`, read now rather than at process start.
+ *
+ * The launcher (paleisti-nuolat.bat) copies `.env.local` into the environment once,
+ * outside its restart loop, and a running batch file must not be edited. So a lane
+ * switched on after launch (FLOP_SESSION_URL for the paid FLOP lane, 2026-11-23) would
+ * stay invisible until someone restarted the scheduled task. Reading the file per
+ * backend selection makes it one line, effective on the next cycle. The real
+ * environment still wins when it sets the key.
+ */
+export function envLocalValue(key, { file = path.resolve('.env.local'), env = process.env } = {}) {
+  if (env[key]) return env[key];
+  try {
+    for (const line of fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '').split(/\r?\n/)) {
+      if (!line || line.startsWith('#')) continue;
+      const i = line.indexOf('=');
+      if (i > 0 && line.slice(0, i).trim() === key) return line.slice(i + 1).trim() || undefined;
+    }
+  } catch { /* no file: unset */ }
+  return undefined;
+}
+
 export const isChatCompletionsUrl = (url) => /\/chat\/completions\/?$/.test(new URL(url).pathname);
 
 export function flopSessionBackend({
-  url = process.env.FLOP_SESSION_URL,
+  url = envLocalValue('FLOP_SESSION_URL'),
   token = process.env.FLOP_SESSION_TOKEN,
   tokenFile = process.env.FLOP_SESSION_TOKEN_FILE,
   model: configuredModel = process.env.FLOP_SESSION_MODEL || null,

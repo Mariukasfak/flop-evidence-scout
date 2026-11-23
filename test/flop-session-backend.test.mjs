@@ -284,3 +284,41 @@ test('gateway: a pool-full 429 takes it out of rotation for ten minutes despite 
     gw.server.close();
   }
 });
+
+test('envLocalValue reads .env.local per call, environment first, BOM and CRLF tolerated', async () => {
+  const { envLocalValue } = await import('../src/inference-backends.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'envlocal-'));
+  const file = path.join(dir, '.env.local');
+  assert.equal(envLocalValue('FLOP_SESSION_URL', { file, env: {} }), undefined, 'no file: unset');
+  fs.writeFileSync(file, '﻿# comment\r\nOTHER=1\r\nFLOP_SESSION_URL=http://127.0.0.1:8790/lane\r\n');
+  assert.equal(envLocalValue('FLOP_SESSION_URL', { file, env: {} }), 'http://127.0.0.1:8790/lane');
+  assert.equal(envLocalValue('FLOP_SESSION_URL', { file, env: { FLOP_SESSION_URL: 'http://x/y' } }), 'http://x/y');
+  fs.writeFileSync(file, 'FLOP_SESSION_URL=\n');
+  assert.equal(envLocalValue('FLOP_SESSION_URL', { file, env: {} }), undefined, 'empty value: unset');
+});
+
+test('a lane answering 503 on GET is unavailable, 200 available, and its POST reply is read', async () => {
+  let open = false;
+  const server = http.createServer(async (req, res) => {
+    if (req.method === 'GET') { res.writeHead(open ? 200 : 503, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ ok: open })); }
+    let raw = ''; for await (const c of req) raw += c;
+    const body = JSON.parse(raw);
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ text: `QUESTION|HIGH`, model: 'qwen/qwen2.5-0.5b-instruct', prompt_tokens: 12, completion_tokens: 3, session_id: '0xabc', miner: '5Hd', fee_flop: null, echo: body.max_tokens }));
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${server.address().port}/lane`;
+  try {
+    const backend = flopSessionBackend({ url });
+    assert.equal(await backend.available(), false, '503 means use Ollama');
+    open = true;
+    assert.equal(await backend.available(), true);
+    const out = await backend.generate({ prompt: 'classify', request: { maxTokens: 8, maxLatencyMs: 30_000 } });
+    assert.equal(out.text, 'QUESTION|HIGH');
+    assert.equal(out.completionTokens, 3);
+    assert.equal(out.raw.sessionId, '0xabc');
+    assert.equal(out.raw.minerId, '5Hd');
+  } finally {
+    server.close();
+  }
+});
