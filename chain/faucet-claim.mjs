@@ -24,6 +24,8 @@ const free = async () => (await api.query.system.account(pair.address)).data.fre
 const before = await free();
 console.log(`${new Date().toISOString()} ${agent} ${pair.address} on ${info.chain} free ${flop(before)} FLOP`);
 if (args.includes('--check')) { await api.disconnect(); process.exit(0); }
+// A chain read through the pin alone has no faucet to ask (and must not ask one on another chain).
+if (!info.faucetLive) { console.log(`no faucet for this chain yet: ${info.faucetError}`); await api.disconnect(); process.exit(2); }
 
 let status = 0; let body = {}; let retryAfter = null; let outcome;
 try {

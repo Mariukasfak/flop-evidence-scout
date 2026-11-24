@@ -1,0 +1,8 @@
+{
+  "network": "devnet",
+  "genesis": "0x99c172c095340ace980631f9123544c6bebd4839f3437e463533422d8be2d631",
+  "rpc": "wss://rpc.devnet.flop.network",
+  "faucet": "https://faucet.flop.network",
+  "indexer": "https://explorer.devnet.flop.network",
+  "gateway": "https://api.flop.network"
+}

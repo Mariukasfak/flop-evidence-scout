@@ -10,9 +10,19 @@ scripts (`{"faucet": …, "rpc": …, "indexer": …, "gateway": …}`, or the f
 by `FLOP_NETWORK_FILE`), overridden by env `FLOP_FAUCET`, `FLOP_RPC`,
 `FLOP_INDEXER_URL`, `FLOP_GATEWAY`, with devnet as the fallback. The faucet's
 `/chain` names the RPC and genesis; a different RPC genesis stops before signing.
-Switching to testnet is writing that one file. Agent keys are read from
+`"genesis"` in that file (or `FLOP_GENESIS`) pins the chain: a faucet serving another
+chain is refused, and with `"rpc"` set the scripts read the chain before any faucet
+exists (`faucet-claim.mjs` then stops: nothing to ask). `network.testnet.json` and
+`network.devnet.json` carry both; `node use-network.mjs testnet [--dry]` checks the
+RPC genesis and SDK admission, then copies one over `network.json` (old one kept as
+`.bak`). The public testnet RPC answers 429 "Too many connections" at busy times;
+`connect()` tries ten times over about two minutes. Agent keys are read from
 `$FLOP_DATA_DIR/.secrets/<agent>-identity.json` (default `C:/TriAgent`) and never printed.
 
+- `flop-lane.mjs`: the daemon's paid lane. Before each open it reads the model's
+  per-G_n price and caps the turn's worst case (`turnGn`) to what fits `turnShare`
+  (0.25) of one channel, refusing below `minTurnGn` (16384) or twice the largest
+  G_n served (`lane-price.mjs`); `/lane/status` shows the price it used.
 - `testnet-ready.mjs`: read-only launch-day picture (faucet tiers, genesis, runtime
   spec and whether the installed SDK admits it, our balances and registration,
   gateway models and enroll offer, session offers with a venue) ending in a TODO list.

@@ -18,7 +18,13 @@
  *   { "agent": "scout", "miner": "<ss58>", "endpoint": "https://…", "enclaveKey": "0x…",
  *     "model": "qwen/qwen2.5-0.5b-instruct", "backendModel": "Qwen/Qwen2.5-0.5B-Instruct",
  *     "windowSeconds": 900, "channel": 1, "topUp": 0.1, "turnGn": 1000000, "turnTimeout": 60,
- *     "reserve": 2, "dayCap": null, "port": 8790, "maxTokens": 512 }
+ *     "reserve": 2, "dayCap": null, "port": 8790, "maxTokens": 512,
+ *     "turnShare": 0.25, "minTurnGn": 16384 }
+ *
+ * Price: before each open the lane reads the model's per-G_n price and BasePerTurn
+ * from finalized state and hands the SDK min(turnGn, what fits turnShare of one
+ * channel) as the worst case of a turn. Below max(minTurnGn, 2 x the largest G_n
+ * served) it does not open and answers 503 "price too high" (lane-price.mjs).
  *
  * Money: the SDK journal (data/local/flop-journal/<agent>) holds the lifetime debit.
  * The session budget is that debit plus what may still go today:
@@ -36,6 +42,7 @@ import { fileURLToPath } from 'node:url';
 import { computeChannel } from '@flop-labs/sdk';
 import { networkConfig, connect, agentSigner, logLine, DATA, flop, opt } from './net.mjs';
 import { resolveModelIdentity } from './model-identity.mjs';
+import { turnGnCap, effectiveTurnGn, turnGnFloor } from './lane-price.mjs';
 
 const args = process.argv.slice(2);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -47,7 +54,9 @@ const c = {
   // SDK 0.10: a turn is priced as BasePerTurn + price x G_n, so the ceiling is in G_n now (turnGn).
   // turnAtoms is the pre-0.10 name; on devnet one G_n cost one atom, so the number carries over.
   turnGn: BigInt(conf.turnGn ?? conf.turnAtoms ?? 1_000_000), turnTimeout: Number(conf.turnTimeout ?? 60), reserve: P(conf.reserve ?? 2),
-  dayCap: conf.dayCap == null ? null : P(conf.dayCap), port: Number(conf.port ?? 8790), maxTokens: Number(conf.maxTokens ?? 512)
+  dayCap: conf.dayCap == null ? null : P(conf.dayCap), port: Number(conf.port ?? 8790), maxTokens: Number(conf.maxTokens ?? 512),
+  // A worst-case turn may take this share of one channel; below minTurnGn G_n the lane does not open.
+  turnShare: Number(conf.turnShare ?? 0.25), minTurnGn: BigInt(conf.minTurnGn ?? 16_384)
 };
 // Miners in order of preference: `miners: [{miner, endpoint, enclaveKey}]`, or the single
 // top-level miner/endpoint/enclaveKey. A miner whose turn or open fails rests for
@@ -112,7 +121,7 @@ const blockMs = (() => {
   return 6000;
 })();
 
-const st = { session: null, budget: 0n, reason: 'starting', served: 0, failed: 0, skipped: 0, frozen: false, lastChannel: null, turnStartedAt: null, pending: 0, startedAt: new Date().toISOString() };
+const st = { turnGn: null, maxGn: 0n, price: null, session: null, budget: 0n, reason: 'starting', served: 0, failed: 0, skipped: 0, frozen: false, lastChannel: null, turnStartedAt: null, pending: 0, startedAt: new Date().toISOString() };
 const free = async () => (await api.query.system.account(signer.address)).data.free.toBigInt();
 const debited = () => { try { return BigInt(journal.state().debited ?? '0'); } catch { return null; } };
 
@@ -131,12 +140,31 @@ async function open() {
     api, submitter, journal, miner: c.miner, endpoint: c.endpoint, modelIdentity: await identityFor(c.model, c.backendModel),
     windowSeconds: c.windowSeconds, maxLockSeconds: Math.max(c.windowSeconds, 3600),
     maxChannelPlanck: c.channel, topUpPlanck: c.topUp, budgetPlanck: await sizeBudget(),
-    maxTurns: 1024, worstCaseTurnGn: () => c.turnGn, turnTimeoutSeconds: c.turnTimeout,
+    maxTurns: 1024, worstCaseTurnGn: () => st.turnGn ?? c.turnGn, turnTimeoutSeconds: c.turnTimeout,
     indexerUrl: cfg.indexer ?? undefined,
     ...(c.enclaveKey ? { enclaveKey: Uint8Array.from(Buffer.from(c.enclaveKey.slice(2), 'hex')) } : {})
   });
   st.session = opened;
   st.reason = null;
+}
+
+// The worst case of one turn at the price a channel opened now would pin. A price the
+// chain does not expose leaves the configured turnGn (the SDK refuses the open itself then).
+async function priceTurn() {
+  const at = await api.at(await api.rpc.chain.getFinalizedHead());
+  const id = await identityFor(c.model, c.backendModel);
+  let pricePerGn = null;
+  try { pricePerGn = await computeChannel.readModelPricePerGn(at, id.modelHash); } catch { /* unknowable: configured turnGn */ }
+  const basePerTurn = BigInt(at.consts.computeChannel?.basePerTurn?.toString() ?? '0');
+  const cap = turnGnCap({ basePerTurn, pricePerGn, channel: c.channel, share: c.turnShare });
+  const floor = turnGnFloor(c.minTurnGn, st.maxGn);
+  const r = effectiveTurnGn({ configured: c.turnGn, cap, floor });
+  const was = st.price?.turnGn;
+  st.price = { model: c.model, pricePerGn: pricePerGn?.toString() ?? null, basePerTurn: basePerTurn.toString(), turnGn: r.gn.toString(), floor: floor.toString(), ok: r.ok, why: r.why };
+  if (was !== st.price.turnGn || !r.ok) logLine('flop-lane.jsonl', { event: 'price', agent: c.agent, ...st.price });
+  if (!r.ok) return r.why;
+  st.turnGn = r.gn;
+  return null;
 }
 
 // Lifetime debit + today's room. The journal state is readable only under the lock
@@ -201,6 +229,9 @@ async function refresh() {
 }
 
 async function refreshOn() {
+  // A price that leaves no room for a real turn holds for the model, not the miner: no rest.
+  const priced = await priceTurn().catch((err) => { st.price = { ok: null, why: `price read failed: ${err.message}` }; return null; });
+  if (priced) { st.session = null; st.reason = priced; return; }
   try {
     await open();
     if (!debitKnown) {
@@ -271,6 +302,7 @@ async function serve(body, gone) {
     const r = await st.session.turn(envelope, { requestId });
     const text = computeChannel.renderDirectChat(r.receipt, envelope).content;
     st.served += 1; st.lastChannel = r.channelId;
+    if (r.receipt.gN != null && BigInt(r.receipt.gN) > st.maxGn) st.maxGn = BigInt(r.receipt.gN);
     logLine('flop-lane.jsonl', { event: 'turn', agent: c.agent, requestId, channel: r.channelId, promptChars: prompt.length, completionTokens: r.receipt.completionTokens?.toString() ?? null, gN: r.receipt.gN?.toString() ?? null });
     return { text, model: c.model, prompt_tokens: r.receipt.promptTokens != null ? Number(r.receipt.promptTokens) : null, completion_tokens: r.receipt.completionTokens != null ? Number(r.receipt.completionTokens) : null, session_id: r.channelId, miner: c.miner, fee_flop: null };
   } catch (err) {
@@ -309,7 +341,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && req.url === '/lane/status') {
       const d = debited() ?? knownDebit;
-      return json(res, 200, { agent: c.agent, address: signer.address, chain: info.chain, miner: c.miner, model: c.model, open: Boolean(st.session), reason: st.reason, frozen: st.frozen, budget: flop(st.budget), debited: flop(d), today: debitKnown ? flop(today(d)) : null, served: st.served, failed: st.failed, skipped: st.skipped, pending: st.pending, busy: busy(), lastChannel: st.lastChannel, startedAt: st.startedAt });
+      return json(res, 200, { agent: c.agent, address: signer.address, chain: info.chain, miner: c.miner, model: c.model, open: Boolean(st.session), reason: st.reason, frozen: st.frozen, budget: flop(st.budget), debited: flop(d), today: debitKnown ? flop(today(d)) : null, served: st.served, failed: st.failed, skipped: st.skipped, pending: st.pending, busy: busy(), lastChannel: st.lastChannel, price: st.price, maxGn: st.maxGn, startedAt: st.startedAt });
     }
     if (req.method === 'POST' && req.url === '/lane') {
       let raw = '';

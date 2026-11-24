@@ -22,7 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { networkConfig, getJson, agentIdentity, agentSigner, logLine, DATA, opt } from './net.mjs';
+import { networkConfig, getJson, resolveChainInfo, agentIdentity, agentSigner, logLine, DATA, opt } from './net.mjs';
 
 const args = process.argv.slice(2);
 const agent = opt(args, 'agent', 'scout');
@@ -30,6 +30,11 @@ const check = args.includes('--check');
 const cfg = networkConfig();
 
 const chain = (await getJson(`${cfg.faucet}/chain`)).body;
+// Only the bot of the pinned chain: a faucet still on another chain names that chain's room.
+if (cfg.genesis) {
+  try { if (!resolveChainInfo(cfg, { status: 200, body: chain }).faucetLive) throw new Error('faucet gave no genesis'); }
+  catch (err) { console.log(`${err.message}; nothing posted`); process.exit(2); }
+}
 const bot = chain?.technocoreBot;
 if (!bot?.room || !bot?.did) { console.log(`faucet ${cfg.faucet}/chain names no technocoreBot room/did; nothing posted`); process.exit(2); }
 const network = chain.network ?? 'unknown';

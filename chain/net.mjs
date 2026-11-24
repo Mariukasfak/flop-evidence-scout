@@ -6,6 +6,11 @@
  * gateway }; env FLOP_FAUCET / FLOP_RPC / FLOP_INDEXER_URL / FLOP_GATEWAY win over
  * it; devnet is the fallback. The faucet's /chain names the RPC and genesis, and
  * connect() refuses an RPC whose genesis differs from it.
+ *
+ * `genesis` (or FLOP_GENESIS) pins the chain: a faucet that serves another chain is
+ * refused (testnet opened 2026-11-24 while faucet.flop.network still served devnet),
+ * and with `rpc` set the scripts read the chain before any faucet exists.
+ * network.testnet.json / network.devnet.json hold both; use-network.mjs switches.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -36,7 +41,9 @@ export function networkConfig() {
     faucet,
     rpc: process.env.FLOP_RPC || f.rpc || (onDevnet ? DEVNET.rpc : null),
     indexer: process.env.FLOP_INDEXER_URL || f.indexer || (onDevnet ? DEVNET.indexer : null),
-    gateway: process.env.FLOP_GATEWAY || f.gateway || DEVNET.gateway
+    gateway: process.env.FLOP_GATEWAY || f.gateway || DEVNET.gateway,
+    genesis: (process.env.FLOP_GENESIS || f.genesis || '').toLowerCase() || null,
+    network: f.network ?? (onDevnet ? 'devnet' : null)
   };
 }
 
@@ -48,11 +55,28 @@ export async function getJson(url, ms = 30_000) {
   return { status: res.status, body };
 }
 
-/** The faucet's view of its chain; throws when it does not answer with a genesis. */
+/**
+ * Which chain to trust, from the faucet's /chain answer (or its failure) and the pin.
+ * A faucet on another chain than the pin is refused. Without a faucet answer the pin
+ * with an rpc stands in ({ faucetLive: false }); without a pin the faucet must answer.
+ */
+export function resolveChainInfo(cfg, { status = null, body = null, error = null } = {}) {
+  const answered = !error && status === 200 && body?.genesisHash;
+  if (answered) {
+    const g = String(body.genesisHash).toLowerCase();
+    if (cfg.genesis && g !== cfg.genesis) throw new Error(`faucet ${cfg.faucet} serves ${body.chain ?? body.network ?? 'another chain'} (genesis ${g.slice(0, 12)}…), not the pinned ${cfg.genesis.slice(0, 12)}…`);
+    return { ...body, genesisHash: g, faucetLive: true };
+  }
+  const why = error ? `faucet ${cfg.faucet}/chain failed: ${error}` : `faucet ${cfg.faucet}/chain answered ${status}`;
+  if (cfg.genesis && cfg.rpc) return { chain: null, network: cfg.network ?? null, genesisHash: cfg.genesis, rpc: cfg.rpc, faucetLive: false, faucetError: why };
+  throw new Error(why);
+}
+
+/** The faucet's view of its chain, checked against the pin; the pin alone when no faucet answers. */
 export async function chainInfo(cfg = networkConfig()) {
-  const { status, body } = await getJson(`${cfg.faucet}/chain`);
-  if (status !== 200 || !body?.genesisHash) throw new Error(`faucet ${cfg.faucet}/chain answered ${status}`);
-  return body;
+  let r;
+  try { r = await getJson(`${cfg.faucet}/chain`, 15_000); } catch (err) { r = { error: err?.cause?.code || err?.message || String(err) }; }
+  return resolveChainInfo(cfg, r);
 }
 
 /** Connect to the network's RPC and refuse a genesis that differs from the faucet's. */
@@ -61,7 +85,17 @@ export async function connect(cfg = networkConfig()) {
   const info = await chainInfo(cfg);
   const rpc = cfg.rpc || info.rpc;
   if (!rpc) throw new Error('no RPC: set rpc in network.json or FLOP_RPC');
-  const api = await ApiPromise.create({ provider: new WsProvider(rpc), noInitWarn: true, throwOnConnect: true });
+  // The public testnet RPC answers "Too many connections" now and then: a few spaced tries.
+  let api;
+  for (let i = 0; ; i++) {
+    const provider = new WsProvider(rpc);
+    try { api = await ApiPromise.create({ provider, noInitWarn: true, throwOnConnect: true }); break; } catch (err) {
+      await provider.disconnect().catch(() => {});
+      if (i >= 9) throw new Error(`rpc ${rpc}: ${err?.message || 'connect failed'} (busy public RPC: 429 Too many connections; try again later)`);
+      await new Promise((res) => setTimeout(res, Math.min(3000 * (i + 1), 15_000)));
+    }
+  }
+  if (!info.chain) info.chain = (await api.rpc.system.chain()).toString();
   if (api.genesisHash.toHex() !== info.genesisHash) {
     const got = api.genesisHash.toHex();
     await api.disconnect();
