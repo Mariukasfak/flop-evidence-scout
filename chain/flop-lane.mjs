@@ -17,7 +17,7 @@
  * lane.json (beside this script), amounts in FLOP:
  *   { "agent": "scout", "miner": "<ss58>", "endpoint": "https://…", "enclaveKey": "0x…",
  *     "model": "qwen/qwen2.5-0.5b-instruct", "backendModel": "Qwen/Qwen2.5-0.5B-Instruct",
- *     "windowSeconds": 900, "channel": 1, "topUp": 0.1, "turnAtoms": 1000000, "turnTimeout": 60,
+ *     "windowSeconds": 900, "channel": 1, "topUp": 0.1, "turnGn": 1000000, "turnTimeout": 60,
  *     "reserve": 2, "dayCap": null, "port": 8790, "maxTokens": 512 }
  *
  * Money: the SDK journal (data/local/flop-journal/<agent>) holds the lifetime debit.
@@ -44,7 +44,9 @@ const P = (flopAmount) => BigInt(Math.round(Number(flopAmount) * 1e6)) * 10n ** 
 const c = {
   agent: conf.agent ?? 'scout',
   windowSeconds: Number(conf.windowSeconds ?? 900), channel: P(conf.channel ?? 1), topUp: P(conf.topUp ?? 0.1),
-  turnAtoms: BigInt(conf.turnAtoms ?? 1_000_000), turnTimeout: Number(conf.turnTimeout ?? 60), reserve: P(conf.reserve ?? 2),
+  // SDK 0.10: a turn is priced as BasePerTurn + price x G_n, so the ceiling is in G_n now (turnGn).
+  // turnAtoms is the pre-0.10 name; on devnet one G_n cost one atom, so the number carries over.
+  turnGn: BigInt(conf.turnGn ?? conf.turnAtoms ?? 1_000_000), turnTimeout: Number(conf.turnTimeout ?? 60), reserve: P(conf.reserve ?? 2),
   dayCap: conf.dayCap == null ? null : P(conf.dayCap), port: Number(conf.port ?? 8790), maxTokens: Number(conf.maxTokens ?? 512)
 };
 // Miners in order of preference: `miners: [{miner, endpoint, enclaveKey}]`, or the single
@@ -129,7 +131,7 @@ async function open() {
     api, submitter, journal, miner: c.miner, endpoint: c.endpoint, modelIdentity: await identityFor(c.model, c.backendModel),
     windowSeconds: c.windowSeconds, maxLockSeconds: Math.max(c.windowSeconds, 3600),
     maxChannelPlanck: c.channel, topUpPlanck: c.topUp, budgetPlanck: await sizeBudget(),
-    maxTurns: 1024, worstCaseTurnPlanck: () => c.turnAtoms, turnTimeoutSeconds: c.turnTimeout,
+    maxTurns: 1024, worstCaseTurnGn: () => c.turnGn, turnTimeoutSeconds: c.turnTimeout,
     indexerUrl: cfg.indexer ?? undefined,
     ...(c.enclaveKey ? { enclaveKey: Uint8Array.from(Buffer.from(c.enclaveKey.slice(2), 'hex')) } : {})
   });

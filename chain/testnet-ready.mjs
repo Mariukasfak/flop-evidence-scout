@@ -20,7 +20,7 @@ const agents = opt(args, 'agents', 'scout,scribe').split(',').filter(Boolean);
 const cfg = networkConfig();
 const out = { at: new Date().toISOString(), cfg, todo: [] };
 const todo = (s) => out.todo.push(s);
-const safe = async (fn) => { try { return await fn(); } catch (err) { return { error: err.message }; } };
+const safe = async (fn) => { try { return await fn(); } catch (err) { return { error: err?.message || String(err) || 'unknown error' }; } };
 
 // Faucet
 out.faucet = {

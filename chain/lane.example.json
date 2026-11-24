@@ -14,7 +14,7 @@
   "retireMarginSeconds": 300,
   "channel": 4,
   "topUp": 0.1,
-  "turnAtoms": 1000000,
+  "turnGn": 1000000,
   "turnTimeout": 150,
   "reserve": 2,
   "dayCap": null,

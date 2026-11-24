@@ -5,11 +5,11 @@
  *
  *   node long-session.mjs --miner <ss58> --endpoint https://… --tasks tasks.jsonl
  *        [--model qwen/qwen2.5-0.5b-instruct] [--backend-model Qwen/Qwen2.5-0.5B-Instruct]
- *        [--agent scout] [--budget 0.05] [--channel 0.02] [--topup 0.01] [--turn-atoms 1000000]
+ *        [--agent scout] [--budget 0.05] [--channel 0.02] [--topup 0.01] [--turn-gn 1000000]
  *        [--window 900] [--max-turns 64] [--max-tokens 256] [--turn-timeout 60]
  *        [--enclave-key 0x…] [--check]
  *
- * Amounts are in FLOP (turn-atoms in FLOP atoms). tasks.jsonl holds one real task per line:
+ * Amounts are in FLOP (turn-gn in G_n, the largest one turn can meter). tasks.jsonl holds one real task per line:
  * {"id":"…","prompt":"…"} or {"id":"…","messages":[…],"max_tokens":256}. Answers append to
  * data/local/flop-long-answers.jsonl, spends to the SDK's owner-only journal under
  * data/local/flop-journal/<agent>. Ids are idempotent: an answered id replays, never buys again.
@@ -47,10 +47,10 @@ const budget = planck('budget', '0.05');
 
 const channelCap = planck('channel', '0.02');
 const topUp = planck('topup', '0.01');
-// Worst-case tariff of one turn in FLOP atoms: BasePerTurn (1) plus the turn's largest G_n.
-// 1 G_n costs 1 atom, so this is tiny; the money is the reservation escrow. It must fit the
-// miner's calibrated allowance (capacity rate x window blocks) or the SDK refuses the turn.
-const turnWorst = BigInt(opt(args, 'turn-atoms', '1000000'));
+// Largest G_n one turn can meter (SDK 0.10: worstCaseTurnGn). The SDK prices it as
+// BasePerTurn + price x G_n at the model price, then the channel's pinned price. The money is
+// mostly the reservation escrow; the turn's worst case must still fit one channel's ceiling.
+const turnWorstGn = BigInt(opt(args, 'turn-gn', opt(args, 'turn-atoms', '1000000')));
 const windowSeconds = Number(opt(args, 'window', '900'));
 const maxTurns = Number(opt(args, 'max-turns', '64'));
 const maxTokens = Number(opt(args, 'max-tokens', '256'));
@@ -94,7 +94,7 @@ try {
     api, submitter, journal, miner, endpoint, modelIdentity,
     windowSeconds, maxLockSeconds: Math.max(windowSeconds, 3600),
     maxChannelPlanck: channelCap, topUpPlanck: topUp, budgetPlanck: budget,
-    maxTurns, worstCaseTurnPlanck: () => turnWorst, turnTimeoutSeconds: turnTimeout,
+    maxTurns, worstCaseTurnGn: () => turnWorstGn, turnTimeoutSeconds: turnTimeout,
     indexerUrl: cfg.indexer ?? undefined,
     ...(enclaveKeyHex ? { enclaveKey: Uint8Array.from(Buffer.from(enclaveKeyHex.slice(2), 'hex')) } : {})
   });
