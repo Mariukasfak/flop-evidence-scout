@@ -18,8 +18,9 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+// faucet.flop.network serves testnet since 2026-11-25 ~07:00 UTC; devnet moved to faucet.devnet.
 const DEVNET = {
-  faucet: 'https://faucet.flop.network',
+  faucet: 'https://faucet.devnet.flop.network',
   rpc: 'wss://rpc.devnet.flop.network',
   indexer: 'https://explorer.devnet.flop.network',
   gateway: 'https://api.flop.network'

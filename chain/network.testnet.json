@@ -2,7 +2,7 @@
   "network": "testnet",
   "genesis": "0x918abd58fb16306b30ef3886514cfaebffecb4de43e82b6f8ec4795c43cfd800",
   "rpc": "wss://testnet.flop.network/",
-  "faucet": "https://faucet.testnet.flop.network",
+  "faucet": "https://faucet.flop.network",
   "indexer": "https://testnet.flopscan.io",
   "gateway": "https://api.flop.network"
 }
