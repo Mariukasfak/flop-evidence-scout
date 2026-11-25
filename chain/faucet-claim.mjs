@@ -45,8 +45,13 @@ if (claimedToday(lines, { agent, genesis: info.genesisHash })) {
 }
 
 let limits = null;
-try { limits = await getJson(`${cfg.faucet}/limits`); } catch (err) { console.log(`faucet /limits unreadable: ${err.message}`); }
+try {
+  const r = await getJson(`${cfg.faucet}/limits`);
+  if (r.status === 200 && r.body?.faucet) limits = r.body; else console.log(`faucet /limits answered ${r.status}`);
+} catch (err) { console.log(`faucet /limits unreadable: ${err.message}`); }
 const plan = claimPlan(limits);
+// Without readable limits the route is unknown (testnet closed /fund): request nothing.
+if (!limits) plan.ready = false;
 if (!plan.ready) {
   console.log(`faucet not ready (status ${plan.status}); nothing requested`);
   logLine('flop-faucet.jsonl', { agent, address: pair.address, chain: info.chain, genesis: info.genesisHash, mode: plan.mode, outcome: 'not-ready', error: plan.status });
