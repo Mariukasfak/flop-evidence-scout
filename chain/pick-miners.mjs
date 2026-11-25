@@ -29,6 +29,8 @@ async function indexer(path) {
   for (let i = 0; i < 6; i++) {
     const r = await getJson(`${cfg.indexer}${path}`).catch(() => null);
     if (r?.body?.data) return r.body.data;
+    // An explorer without this route (testnet flopscan has no /api/session-offers) means none.
+    if (r?.status === 404) return [];
     await new Promise((res) => setTimeout(res, 4000));
   }
   throw new Error(`${cfg.indexer}${path} gave no data`);
