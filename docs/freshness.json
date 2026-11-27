@@ -1,5 +1,5 @@
 {
-  "checkedAt": "2026-11-27T00:36:17.556Z",
+  "checkedAt": "2026-11-27T09:42:04.584Z",
   "stale": 0,
   "combined": {
     "cycles": 250,
@@ -9,11 +9,11 @@
     "totals": {
       "lo": 5642,
       "gh": 1,
-      "xx": 111189
+      "xx": 111735
     },
     "spend": {
       "flop": 0,
-      "sessions": 1177406
+      "sessions": 1184403
     },
     "windowHours": 4.15,
     "expected": 17,
@@ -32,19 +32,19 @@
       "file": "docs/measurements/timeseries.json",
       "cadenceMin": 140,
       "toleranceMin": 480,
-      "newest": "2026-11-27T00:35:00.000Z",
-      "ageMin": 1.2876333333333334,
+      "newest": "2026-11-27T09:40:00.000Z",
+      "ageMin": 2.071466666666667,
       "blockedBy": null,
       "state": "FRESH",
       "duty": {
-        "records": 431,
-        "spanHours": 2242.5833333333335,
-        "expected": 961,
-        "ratio": 0.44849115504682624,
-        "meanGapMin": 312.9186046511628,
+        "records": 432,
+        "spanHours": 2251.6666666666665,
+        "expected": 965,
+        "ratio": 0.44766839378238343,
+        "meanGapMin": 313.4570765661253,
         "medianGapMin": 300,
         "worstGapMin": 1262,
-        "apparentlyMissed": 528
+        "apparentlyMissed": 531
       }
     },
     {
@@ -53,8 +53,8 @@
       "file": "docs/watch/state.json",
       "cadenceMin": 140,
       "toleranceMin": 480,
-      "newest": "2026-11-27T00:34:56.450Z",
-      "ageMin": 1.3468333333333333,
+      "newest": "2026-11-27T09:40:44.744Z",
+      "ageMin": 1.3258166666666666,
       "blockedBy": null,
       "state": "FRESH",
       "duty": null
@@ -65,21 +65,21 @@
       "file": "docs/audit-history.json",
       "cadenceMin": 15,
       "toleranceMin": 90,
-      "newest": "2026-11-26T20:25:12.497Z",
-      "ageMin": 251.07938333333334,
+      "newest": "2026-11-27T03:05:58.852Z",
+      "ageMin": 396.0907,
       "blockedBy": null,
       "state": "STANDING DOWN",
       "duty": {
         "records": 99,
-        "spanHours": 658.7244944444444,
+        "spanHours": 658.8312041666667,
         "expected": 2635,
         "ratio": 0.03757115749525617,
-        "meanGapMin": 403.3007108843537,
-        "medianGapMin": 394.37,
+        "meanGapMin": 403.3660433673469,
+        "medianGapMin": 394.44665,
         "worstGapMin": 1697.7088,
-        "apparentlyMissed": 2536
+        "apparentlyMissed": 2537
       },
-      "detail": "this machine's log is 251 min old, but the shared record shows a cycle 1 min ago — another holder has the lease"
+      "detail": "this machine's log is 396 min old, but the shared record shows a cycle 1 min ago — another holder has the lease"
     },
     {
       "id": "feed",
@@ -88,7 +88,7 @@
       "cadenceMin": 240,
       "toleranceMin": 2880,
       "newest": "2026-08-28T00:00:46.187Z",
-      "ageMin": 131075.51788333332,
+      "ageMin": 131621.30178333333,
       "blockedBy": null,
       "state": "QUIET",
       "duty": null
