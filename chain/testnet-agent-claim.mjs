@@ -29,12 +29,20 @@ const agent = opt(args, 'agent', 'scout');
 const check = args.includes('--check');
 if (!['scout', 'scribe'].includes(agent)) { console.log('agent must be scout or scribe'); process.exit(2); }
 
-const get = (u) => getJson(u, 30_000).then((r) => r.body).catch((err) => { console.log(`faucet ${u} did not answer (${err.message}); nothing sent`); process.exit(2); });
-const chain = await get(`${FAUCET}/chain`);
-if (chain?.network !== 'testnet' || String(chain?.genesisHash).toLowerCase() !== GENESIS) {
-  console.log(`faucet /chain is ${chain?.network} ${String(chain?.genesisHash).slice(0, 12)}…, not the pinned testnet; nothing sent`); process.exit(2);
+// The faucet sometimes answers an error body (RPC overload); ask up to 5 times, 30 s apart.
+async function get(u, ok) {
+  let last = null;
+  for (let i = 0; i < 5; i++) {
+    try { const r = await getJson(u, 30_000); last = r.body; if (ok(last)) return last; } catch (err) { last = { error: err.message }; }
+    await new Promise((r) => setTimeout(r, 30_000));
+  }
+  return last;
 }
-const limits = await get(`${FAUCET}/limits`);
+const chain = await get(`${FAUCET}/chain`, (b) => b?.genesisHash);
+if (chain?.network !== 'testnet' || String(chain?.genesisHash).toLowerCase() !== GENESIS) {
+  console.log(`faucet /chain is ${chain?.network} ${String(chain?.genesisHash).slice(0, 12)}… ${chain?.error ?? ''}, not the pinned testnet; nothing sent`); process.exit(2);
+}
+const limits = await get(`${FAUCET}/limits`, (b) => b?.faucet?.status === 'open');
 const claimPath = limits?.faucet?.agent?.claimPath;
 if (limits?.faucet?.status !== 'open' || claimPath !== '/v1/testnet/agent-claims') {
   console.log(`faucet status ${limits?.faucet?.status}, claimPath ${claimPath}; nothing sent`); process.exit(2);
