@@ -70,3 +70,18 @@ it when the failure was ours.
 Rules: no self-reported tasks (`reportTaskCompletion`), no pause/resume status
 flips, no transfers between our own wallets, no extra wallets to multiply faucet
 grants. Only settled compute spend counts.
+
+## tclk deals in test FLOP (flop-htlc rail)
+
+- `flop-rail.mjs`: local HTTP service on 127.0.0.1:8791 (FLOP-rail task on the mini PC)
+  wrapping `@flop-labs/tclk-flop` (built from github flop-labs/tclk, not on npm), pinned to
+  FLOP Testnet's genesis. `POST /rail/lock|verify|refund` sign with the Scribe key,
+  `POST /rail/claim` with the Scout key, `GET /rail/status` reads. Every attempt is journaled
+  in `data/local/flop-rail-journal.jsonl` before it is signed.
+- `rail-policy.mjs`: what the service will sign. Native FLOP hash locks only, Scribe pays,
+  the payee is never one of our own keys, one attempt per contract (an uncertain one counts),
+  0.25 FLOP per deal, 1 FLOP per rolling 24 h, refund window within 3 h.
+- The daemon's payer lane uses it when `TCLK_RAIL=flop-htlc` (and `tclk-payer` is in
+  `KIBBLE_LANES`); `TCLK_FLOP_AMOUNT` in base units, default 0.1 FLOP.
+- `readiness-watch.mjs`: every 10 minutes (FLOP-readiness task) records the official signals
+  that would open the agent spend path; changes wait in `flop-readiness.json` until acked.

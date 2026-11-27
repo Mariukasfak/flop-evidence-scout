@@ -26,6 +26,7 @@ import { checkOneSurface } from './surface-watch.mjs';
 import { OFFER_ROOM as TCLK_OFFER_ROOM } from './tclk.mjs';
 import { TclkEngine } from './tclk-engine.mjs';
 import { TclkPayer } from './tclk-payer.mjs';
+import { FlopRailClient } from './flop-rail-client.mjs';
 import { QUESTION_BANK } from './kibble-jobs.mjs';
 import { mirrorConsole } from './console-mirror.mjs';
 import { readPause as readKibblePause } from './kibble-guard.mjs';
@@ -578,10 +579,21 @@ export async function runScoutDaemon(options = {}) {
    * (42 offers, 28 accepts, 3 locks, 3 reveals) while still being short of
    * anyone posting real work to be done.
    */
+  /**
+   * TCLK_RAIL=flop-htlc moves test FLOP on FLOP Testnet through the local rail
+   * service (C:\FlopChain\flop-rail.mjs, FLOP-rail task), which caps every lock
+   * and refuses deals with our own keys. Operator approval 2026-11-27. Unset,
+   * the lane stays on the paper rail as before.
+   */
+  const flopRail = process.env.TCLK_RAIL === 'flop-htlc';
   const tclkPayer = new TclkPayer({
     identity: scribeIdentity, client, statePath: config.tclkPayerStatePath,
     otherDids: [scoutIdentity.did], questionBank: QUESTION_BANK,
-    roomBudgetPath: config.roomBudgetPath
+    roomBudgetPath: config.roomBudgetPath,
+    ...(flopRail ? {
+      rail: 'flop-htlc', asset: 'FLOP', amount: process.env.TCLK_FLOP_AMOUNT || '100000000000000000',
+      railClient: new FlopRailClient({ url: process.env.TCLK_RAIL_URL || 'http://127.0.0.1:8791' })
+    } : {})
   });
 
   // The DID note has advertised a mailbox from the start; this is what finally

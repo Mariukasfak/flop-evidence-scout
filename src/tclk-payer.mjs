@@ -20,8 +20,10 @@
  * room, that is a measurement worth publishing, not a reason to relabel it.
  *
  * What this lane will never do:
- *   - lock on any rail but `paper`; a rail that holds value is the operator's
- *     decision, never this file's (PROJEKTAS.md section 7e)
+ *   - lock on any rail but `paper` unless the operator chose `flop-htlc`
+ *     (TCLK_RAIL, operator approval 2026-11-27). That rail moves test FLOP on
+ *     FLOP Testnet only through the local rail service, whose policy caps each
+ *     deal and each day and refuses any payee that is one of our own keys
  *   - accept an acceptance from our own keys — the deal would be two processes
  *     shaking hands, and every number it produced would be worthless
  *   - claim on the rail; the claim is the payee's, and publishing a secret we
@@ -103,11 +105,25 @@ export class TclkPayer {
      */
     roomBudgetPath = null,
     now = Date.now,
-    minOfferGapMs = MIN_OFFER_GAP_MS
+    minOfferGapMs = MIN_OFFER_GAP_MS,
+    /**
+     * The settlement rail. `paper` (the default) holds nothing. `flop-htlc` moves
+     * test FLOP on FLOP Testnet through `railClient` (src/flop-rail-client.mjs ->
+     * C:\FlopChain\flop-rail.mjs), which applies its own caps and refuses any deal
+     * with our own keys. Operator approval for test FLOP: 2026-11-27.
+     */
+    rail = 'paper',
+    railClient = null
   } = {}) {
     if (!identity?.did) throw new Error('TclkPayer needs an identity');
     if (!client) throw new Error('TclkPayer needs a client');
     if (!statePath) throw new Error('TclkPayer needs a statePath');
+    if (!['paper', 'flop-htlc'].includes(rail)) throw new Error(`TclkPayer: unknown rail ${rail}`);
+    if (rail === 'flop-htlc' && (!railClient || asset !== 'FLOP' || !/^[1-9][0-9]{0,30}$/.test(String(amount)))) {
+      throw new Error('TclkPayer: the flop-htlc rail needs a railClient, asset FLOP and an amount in base units');
+    }
+    this.rail = rail;
+    this.railClient = railClient;
     this.identity = identity;
     this.client = client;
     this.statePath = statePath;
@@ -269,7 +285,7 @@ export class TclkPayer {
         job: { context, id: jobRefFor(question.key), proto: 'tclk-inline' },
         lock: 'hash',
         nonce: randomNonce(),
-        rails: ['paper'],
+        rails: [this.rail],
         refundAfterMs: now + OFFER_REFUND_AFTER_MS,
         role: 'payer'
       };
@@ -383,6 +399,7 @@ export class TclkPayer {
    * this deal is not ours to fund.
    */
   async #lock(deal, now) {
+    if (this.rail === 'flop-htlc') return this.#lockFlop(deal, now);
     const record = encodePaperRecord({
       status: 'locked',
       lock: 'hash',
@@ -463,6 +480,78 @@ export class TclkPayer {
   }
 
   /**
+   * Escrow test FLOP on the flop-htlc rail, verify it on the chain, then say so.
+   *
+   * Same order as the paper lock: the rail first, the frame second. Three states
+   * survive a restart:
+   *   - `railRef` set: the escrow exists; only the announcement may be missing.
+   *   - `lockUncertain`: the service may have submitted and the answer was lost.
+   *     Never lock again (the service also refuses a second attempt for the same
+   *     contract); the deal is parked, and the service journal holds its pending
+   *     reference for a manual recovery.
+   *   - neither: nothing was sent yet.
+   */
+  async #lockFlop(deal, now) {
+    if (deal.lockUncertain) return { action: 'lock_uncertain_parked', contract: deal.contract };
+    const terms = {
+      contract: deal.contract, lock: 'hash', statement: deal.statement,
+      amount: String(deal.offer.amount), asset: deal.offer.asset,
+      payer: this.identity.did, payee: deal.payee,
+      claimByMs: deal.offer.claimByMs, refundAfterMs: deal.offer.refundAfterMs
+    };
+    if (!deal.railRef) {
+      if (!this.#roomsOpen()) {
+        // Locking FLOP we could not announce would only park it until the refund.
+        return { action: 'lock_deferred_rooms_refused', contract: deal.contract, blockedForMin: minutesBlocked(this.budget, now) };
+      }
+      try {
+        deal.railRef = await this.railClient.lock(terms);
+      } catch (err) {
+        if (err.uncertain) { deal.lockUncertain = true; this.save(); return { action: 'lock_uncertain', contract: deal.contract, error: err.message }; }
+        if (err.status === 403) { this.#close(deal, 'abandoned', `flop rail refused: ${err.message}`); return { action: 'lock_refused_by_policy', contract: deal.contract, error: err.message }; }
+        return { action: 'lock_write_failed', contract: deal.contract, error: err.message };
+      }
+      deal.railTerms = terms;
+      this.save();
+    }
+
+    // The payee is told to check the rail, not our frame; we check it first.
+    let onRail = false;
+    try { onRail = await this.railClient.verifyLock(terms, deal.railRef); } catch (err) {
+      return { action: 'lock_verify_failed', contract: deal.contract, error: err.message };
+    }
+    if (!onRail) return { action: 'lock_not_on_rail', contract: deal.contract, railRecord: 'unverified' };
+
+    if (!this.#roomsOpen()) {
+      return { action: 'lock_unannounced_rooms_refused', contract: deal.contract, blockedForMin: minutesBlocked(this.budget, now) };
+    }
+    const posted = await this.#post(deal.room, {
+      type: 'lock', from: this.identity.did, contract: deal.contract, rail: 'flop-htlc', ref: deal.railRef
+    });
+    if (!posted) return { action: 'lock_announce_failed', contract: deal.contract };
+    deal.status = 'locked';
+    deal.lockedAt = now;
+    this.save();
+    try {
+      const pointer = statePointer(deal.contract);
+      await this.client.setKv(pointer.ns, pointer.key, stateNoteValue('locked', 'flop-htlc'));
+    } catch { /* courtesy only */ }
+    return { action: 'locked', contract: deal.contract, room: deal.room, payee: deal.payee, rail: 'flop-htlc' };
+  }
+
+  /** Refund a flop-htlc escrow once the chain allows it, then post the refund frame. */
+  async #refundFlop(deal) {
+    try {
+      await this.railClient.refund(deal.railRef);
+    } catch (err) {
+      return { action: err.waiting ? 'refund_waiting_for_chain' : 'refund_refused', contract: deal.contract, error: err.message };
+    }
+    await this.#post(deal.room, { type: 'refund', from: this.identity.did, contract: deal.contract, rail: 'flop-htlc', ref: deal.railRef });
+    this.#close(deal, 'abandoned', 'payee never revealed before refundAfterMs (FLOP refunded)');
+    return { action: 'refunded', contract: deal.contract, payee: deal.payee, rail: 'flop-htlc' };
+  }
+
+  /**
    * Wait for the reveal, or refund once the window opens.
    *
    * A reveal is only a reveal if the secret opens the statement we locked
@@ -501,7 +590,9 @@ export class TclkPayer {
       await this.#post(deal.room, null,
         `tclk payer receipt | contract ${deal.contract.slice(0, 18)}… | secret opened the statement we locked | `
         + `work line from the payee on this tape: ${delivered ? 'yes' : 'none seen'} | `
-        + 'settled on the paper rail, which holds no value');
+        + (this.rail === 'flop-htlc'
+          ? 'escrowed on flop-htlc (FLOP Testnet, test FLOP with no value); the payee claims it with this secret'
+          : 'settled on the paper rail, which holds no value'));
       this.#close(deal, 'completed', delivered ? 'revealed with work on the tape' : 'revealed, no work line seen');
       return { action: 'deal_claimed_by_payee', contract: deal.contract, payee: deal.payee, delivered };
     }
@@ -509,6 +600,8 @@ export class TclkPayer {
     if (now < deal.offer.refundAfterMs) {
       return { action: 'waiting_for_reveal', contract: deal.contract, refundAfterMs: deal.offer.refundAfterMs };
     }
+
+    if (this.rail === 'flop-htlc' || deal.railRef) return this.#refundFlop(deal);
 
     // The refund branch. CAS against the exact bytes we locked, so a rail note
     // somebody else has since overwritten is left alone rather than stamped
