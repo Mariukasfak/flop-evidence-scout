@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { checkLock, checkClaim, lockedInDay, FLOP } from '../chain/rail-policy.mjs';
+import { checkLock, checkClaim, checkFunds, lockedInDay, FLOP } from '../chain/rail-policy.mjs';
 
 const SCRIBE = 'did:key:z6MkfbpY47z3CaScribeXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX';
 const SCOUT = 'did:key:z6MkfbpY47z3CaScoutXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX';
@@ -67,4 +67,22 @@ test('checkLock: a refused attempt is not an attempt; a lock error is', () => {
   const at = new Date(NOW - 1000).toISOString();
   assert.equal(checkLock(terms(), ctx({ journal: [{ kind: 'lock-refused', contract: HEX('a'), at }] })).ok, true);
   assert.equal(checkLock(terms(), ctx({ journal: [{ kind: 'lock-error', contract: HEX('a'), at }] })).ok, false);
+});
+
+test('checkLock: a lock that failed before signing (lock-unsent) voids the attempt and the cap', () => {
+  const at = new Date(NOW - 1000).toISOString();
+  const journal = [
+    { kind: 'lock-pending', contract: HEX('a'), amount: String(FLOP / 4n), at },
+    { kind: 'lock-unsent', contract: HEX('a'), at },
+  ];
+  assert.equal(checkLock(terms(), ctx({ journal })).ok, true);
+  assert.equal(lockedInDay(journal, NOW), 0n);
+  const again = [...journal, { kind: 'lock-pending', contract: HEX('a'), amount: '1', at }];
+  assert.equal(checkLock(terms(), ctx({ journal: again })).ok, false, 'a fresh pending entry counts again');
+});
+
+test('checkFunds: the amount plus a 2 FLOP fee reserve must be free', () => {
+  assert.equal(checkFunds(10n * FLOP, String(FLOP / 4n)).ok, true);
+  assert.equal(checkFunds(2n * FLOP, String(FLOP / 4n)).ok, false);
+  assert.equal(checkFunds(0n, '1').ok, false);
 });

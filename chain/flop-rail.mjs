@@ -3,7 +3,7 @@
  * Local tclk settlement service for the flop-htlc rail on FLOP Testnet.
  *
  *   node flop-rail.mjs            serve on 127.0.0.1:8791 (FLOP-rail task)
- *   node flop-rail.mjs --status   print balances, journal tail and policy, then exit
+ *   node flop-rail.mjs --status   print the Scribe balance, journal tail and policy, then exit
  *
  * The daemon in C:\TriAgent has no Polkadot dependencies, so the tclk payer lane asks
  * this process to move FLOP. It wraps the official @flop-labs/tclk-flop rail (built in
@@ -16,9 +16,11 @@
  *   POST /rail/claim   {ref, secret}      payee key (Scout), only escrows paying the Scout
  *   GET  /rail/status
  *
- * Every submission is journalled BEFORE signing (data/local/flop-rail-journal.jsonl),
- * so a lost answer can never lead to a second deposit for the same contract: the
- * policy refuses any contract already in the journal. Requests are handled one at a
+ * Every submission is journalled BEFORE signing (data/local/flop-rail-journal.jsonl,
+ * `lock-pending` from tclk-flop's persistPending), so a lost answer can never lead to a
+ * second deposit for the same contract: the policy refuses any contract with an attempt
+ * in the journal. A failure before chain.open is journalled `lock-unsent` and voids it.
+ * The Scribe's free balance must cover the amount plus a fee reserve before any lock. Requests are handled one at a
  * time. Never retried automatically (the rail's own rule).
  */
 import fs from 'node:fs';
@@ -26,7 +28,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { agentSigner, agentIdentity, DATA } from './net.mjs';
-import { checkLock, checkClaim, lockedInDay, DEFAULT_POLICY } from './rail-policy.mjs';
+import { checkLock, checkClaim, checkFunds, lockedInDay, DEFAULT_POLICY } from './rail-policy.mjs';
 
 const PORT = Number(process.env.FLOP_RAIL_PORT || 8791);
 const RPC = process.env.FLOP_RAIL_RPC || 'wss://testnet.flop.network/';
@@ -52,20 +54,38 @@ export function refTerms(ref) {
 }
 
 const { connectFlopRail } = await import(pathToFileURL(TCLK_FLOP).href);
-async function withRail(agent, fn) {
+async function withRail(agent, fn, pendingEntry = {}) {
   const opts = { network: 'testnet', rpcUrl: RPC, expectedGenesisHash: GENESIS };
   if (agent) {
     opts.signer = await agentSigner(agent, 42);
-    opts.persistPending = async (pendingRef) => note({ kind: 'pending-ref', agent, pendingRef });
+    // tclk-flop calls this just before it signs: from here on the lock may exist.
+    opts.persistPending = async (pendingRef) => note({ kind: 'lock-pending', agent, ...pendingEntry, pendingRef });
   }
   const c = await connectFlopRail(opts);
   try { return await fn(c); } finally { await c.disconnect().catch(() => {}); }
 }
 
+/** Free balance of an agent on FLOP Testnet, in base units, from a genesis-checked RPC. */
+async function freeOf(agent) {
+  const { ApiPromise, WsProvider } = await import('@polkadot/api');
+  const provider = new WsProvider(RPC);
+  const api = await ApiPromise.create({ provider, noInitWarn: true, throwOnConnect: true });
+  try {
+    if (api.genesisHash.toHex() !== GENESIS) throw new Error('genesis mismatch');
+    const pair = await agentSigner(agent, 42);
+    return (await api.query.system.account(pair.address)).data.free.toBigInt();
+  } finally { await api.disconnect().catch(() => {}); }
+}
+
 async function handle(method, url, body) {
   if (method === 'GET' && url === '/rail/status') {
     const j = journal();
-    return { payer: payerDid, payee: payeeDid, policy: Object.fromEntries(Object.entries(DEFAULT_POLICY).map(([k, v]) => [k, String(v)])),
+    let payerFree = null; let balanceError = null;
+    try { payerFree = await freeOf('scribe'); } catch (err) { balanceError = err.message; }
+    // Funded: one more deal at the per-deal cap fits, with the fee reserve left over.
+    const funded = payerFree !== null && checkFunds(payerFree, DEFAULT_POLICY.maxLockPlanck).ok;
+    return { payer: payerDid, payee: payeeDid, payerFree: payerFree === null ? null : String(payerFree), funded, balanceError,
+      policy: Object.fromEntries(Object.entries(DEFAULT_POLICY).map(([k, v]) => [k, String(v)])),
       lockedToday: String(lockedInDay(j, Date.now())), journal: j.slice(-10) };
   }
   if (method !== 'POST') return { status: 404, error: 'not found' };
@@ -78,13 +98,23 @@ async function handle(method, url, body) {
     const terms = body.terms;
     const verdict = checkLock(terms, { payerDid, ownDids, journal: journal(), now: Date.now() });
     if (!verdict.ok) { note({ kind: 'lock-refused', contract: terms?.contract, why: verdict.why }); return { status: 403, error: verdict.why }; }
-    note({ kind: 'lock-pending', contract: terms.contract, amount: terms.amount, payee: terms.payee });
+    let free;
+    try { free = await freeOf('scribe'); } catch (err) { return { status: 503, error: `balance check failed: ${err.message}` }; }
+    const funds = checkFunds(free, terms.amount);
+    if (!funds.ok) { note({ kind: 'lock-refused', contract: terms.contract, why: funds.why }); return { status: 409, error: funds.why, unfunded: true }; }
+    const entry = { contract: terms.contract, amount: terms.amount, payee: terms.payee };
     try {
-      const ref = await withRail('scribe', (c) => c.rail.lock(terms));
-      note({ kind: 'lock', contract: terms.contract, amount: terms.amount, payee: terms.payee, ref });
+      const ref = await withRail('scribe', (c) => c.rail.lock(terms), entry);
+      note({ kind: 'lock', ...entry, ref });
       return { ref };
     } catch (err) {
-      note({ kind: 'lock-error', contract: terms.contract, error: err.message, txHash: err.txHash ?? null, ref: err.ref ?? null });
+      if (!err.pendingRef) {
+        // tclk-flop failed before chain.open (connect, stale anchor, window closed):
+        // nothing was signed, so this attempt is void and the deal may try again.
+        note({ kind: 'lock-unsent', contract: terms.contract, error: err.message });
+        return { status: 503, error: err.message };
+      }
+      note({ kind: 'lock-error', ...entry, error: err.message, txHash: err.txHash ?? null, pendingRef: err.pendingRef });
       return { status: 502, error: err.message, uncertain: true };
     }
   }

@@ -21,7 +21,28 @@ export const DEFAULT_POLICY = Object.freeze({
   dayCapPlanck: FLOP,                // 1 FLOP locked per rolling 24 h
   maxRefundAfterMs: 3 * 3600_000,    // refund window opens within 3 h of the lock
   minClaimWindowMs: 10 * 60_000,     // the payee gets at least 10 minutes to claim
+  minFreeAfterLockPlanck: 2n * FLOP, // fees for the lock and the later refund stay on hand
 });
+
+/**
+ * Contracts the payer key has tried to lock, in journal order. `lock-pending` is written
+ * by tclk-flop's persistPending, just before signing; `lock-unsent` follows only when the
+ * rail failed before chain.open, so nothing was signed and the attempt is void.
+ */
+export function attempts(journal) {
+  const out = new Map();
+  for (const e of journal) {
+    if (e.kind === 'lock-unsent') out.delete(e.contract);
+    else if (['lock', 'lock-pending', 'lock-error'].includes(e.kind) && !out.has(e.contract)) out.set(e.contract, e);
+  }
+  return out;
+}
+
+/** Is `free` (base units) enough to lock `amount` and still pay the fees after it? */
+export function checkFunds(free, amount, policy = DEFAULT_POLICY) {
+  const need = BigInt(amount) + policy.minFreeAfterLockPlanck;
+  return free >= need ? { ok: true, why: 'funded' } : { ok: false, why: `payer free ${free} below ${need} (amount plus fee reserve)` };
+}
 
 const DID = /^did:key:z6Mk[1-9A-HJ-NP-Za-km-z]{40,50}$/;
 const DAY_MS = 24 * 3600_000;
@@ -30,12 +51,10 @@ const DAY_MS = 24 * 3600_000;
 export function lockedInDay(journal, now) {
   // A contract counts once, from its first attempt: an uncertain submission may
   // still have locked the funds, so it is counted as if it did.
-  const seen = new Map();
-  for (const e of journal) {
-    if ((e.kind === 'lock' || e.kind === 'lock-pending') && now - Date.parse(e.at) < DAY_MS && !seen.has(e.contract)) seen.set(e.contract, BigInt(e.amount));
-  }
   let sum = 0n;
-  for (const v of seen.values()) sum += v;
+  for (const e of attempts(journal).values()) {
+    if (now - Date.parse(e.at) < DAY_MS && /^[0-9]{1,30}$/.test(String(e.amount))) sum += BigInt(e.amount);
+  }
   return sum;
 }
 
@@ -56,7 +75,7 @@ export function checkLock(terms, { payerDid, ownDids, journal = [], now = Date.n
   if (terms.claimByMs - now < policy.minClaimWindowMs) return no('claim window too short');
   if (terms.refundAfterMs <= terms.claimByMs) return no('refundAfterMs must follow claimByMs');
   if (terms.refundAfterMs - now > policy.maxRefundAfterMs) return no('refund window too far away');
-  if (journal.some((e) => e.contract === terms.contract && ['lock', 'lock-pending', 'lock-error'].includes(e.kind))) return no('this contract was already locked or attempted');
+  if (attempts(journal).has(terms.contract)) return no('this contract was already locked or attempted');
   const day = lockedInDay(journal, now);
   if (day + amount > policy.dayCapPlanck) return no(`rolling 24 h cap: ${day} locked, ${amount} more would pass ${policy.dayCapPlanck}`);
   return { ok: true, why: 'within policy' };

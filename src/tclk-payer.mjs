@@ -260,6 +260,13 @@ export class TclkPayer {
     const question = this.questionBank.find((q) => !spent.has(q.key));
     if (!question) return { action: 'no_question_left' };
 
+    if (this.rail === 'flop-htlc') {
+      // An offer we could not fund would end as an accepted deal that never locks.
+      let status = null;
+      try { status = await this.railClient.status(); } catch { /* treated as unfunded */ }
+      if (!status?.funded) return { action: 'rail_unfunded', payerFree: status?.payerFree ?? null };
+    }
+
     const frame = this.#offerFrameFor(question, now);
     if (!frame) return { action: 'question_too_large', key: question.key };
 

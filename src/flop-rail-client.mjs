@@ -13,6 +13,13 @@ export class FlopRailClient {
     this.fetch = fetchImpl;
   }
 
+  /** { funded, payerFree, lockedToday, ... } from GET /rail/status; throws if unreachable. */
+  async status() {
+    const res = await this.fetch(`${this.url}/rail/status`, { signal: AbortSignal.timeout(this.timeoutMs) });
+    if (!res.ok) throw new Error(`flop rail /rail/status: HTTP ${res.status}`);
+    return res.json();
+  }
+
   async #post(path, body) {
     let res;
     try {

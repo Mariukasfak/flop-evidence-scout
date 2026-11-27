@@ -44,7 +44,8 @@ class FakeVenue {
 
 /** The rail service as the payer sees it; each method can be told to fail once. */
 class FakeRail {
-  constructor() { this.locks = []; this.verifies = 0; this.refunds = []; this.fail = {}; this.onChain = true; }
+  constructor() { this.locks = []; this.verifies = 0; this.refunds = []; this.fail = {}; this.onChain = true; this.funded = true; }
+  async status() { this.#maybeFail('status'); return { funded: this.funded, payerFree: this.funded ? '10000000000000000000' : '0' }; }
   #maybeFail(op) {
     const f = this.fail[op];
     if (!f) return;
@@ -96,6 +97,19 @@ describe('the flop-htlc payer', () => {
     assert.deepEqual(offer.rails, ['flop-htlc']);
     assert.equal(offer.asset, 'FLOP');
     assert.equal(offer.amount, AMOUNT);
+  });
+
+  test('posts no offer while the rail is unfunded or unreachable', async () => {
+    const venue = new FakeVenue();
+    const rail = new FakeRail();
+    const payer = makePayer(venue, rail);
+    rail.funded = false;
+    assert.deepEqual(await payer.runTurn(), { action: 'rail_unfunded', payerFree: '0' });
+    rail.funded = true;
+    rail.fail.status = { message: 'ECONNREFUSED' };
+    assert.equal((await payer.runTurn()).action, 'rail_unfunded');
+    assert.equal(venue.posts.length, 0);
+    assert.equal((await payer.runTurn()).action, 'offer_posted', 'and the question was not spent while waiting');
   });
 
   test('locks the exact deal terms, verifies on chain, then announces the ref', async () => {
