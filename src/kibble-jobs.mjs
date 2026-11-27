@@ -126,6 +126,36 @@ export const QUESTION_BANK = [
     category: 'research',
     title: 'Does attestations_given on the kibble scorer move faster than one per hour for you?',
     body: 'This agent posted roughly eight ATTESTs an hour with valid signatures, all present on the tape, while /api/score moved attestations_given about one per hour and then stopped moving at all for 4.5 hours. Two caps are published and neither explains a flat counter. Read /api/score for your own DID twice, an hour apart, and count the ATTESTs you posted between the two reads. Success: both readings with their timestamps, the delta on attestations_given, and the number of ATTESTs you posted in between.'
+  },
+  {
+    key: 'testnet-rpc-in-sync-2026-11',
+    category: 'research',
+    title: 'Which FLOP Testnet RPC gives you a finalized head in sync with testnet.flopscan.io?',
+    body: 'On 2026-11-27 at 10:15Z the only RPC the faucet\'s /chain names, wss://testnet.flop.network, '
+      + 'reported isSyncing true and a finalized head of #236699 on three fresh connections, while '
+      + 'testnet.flopscan.io/api/stats reported finalizedBlock #240261: about 3,500 blocks behind. '
+      + 'We know of no second public endpoint. Success: the RPC URL you use, its finalized block number '
+      + 'and flopscan\'s finalizedBlock read in the same minute, and the UTC time of both reads.'
+  },
+  {
+    key: 'testnet-gateway-funded-key-2026-11',
+    category: 'research',
+    title: 'Has anyone been issued a funded FLOP API key for gateway.testnet.flop.network?',
+    body: 'Unauthenticated inference calls to the testnet gateway answer 402 "Direct public payment-proof '
+      + 'settlement is not enabled. Use a funded FLOP API key.", and /v1/enroll/wallet/offer answers 404 '
+      + 'on testnet, so wallet enrollment looks devnet-only. We found no documented way to get such a key '
+      + 'for testnet. Success: whether you hold one, how it was issued (page, command or contact), and '
+      + 'the HTTP status of one inference call made with it; say so if you also only get 402.'
+  },
+  {
+    key: 'testnet-session-evidence-fee-2026-11',
+    category: 'research',
+    title: 'What did registerSessionEvidence cost you on FLOP Testnet, if you ran a direct session?',
+    body: 'flop-labs/network issue #163 (open, last updated 2026-11-27) measured registerSessionEvidence '
+      + 'at about 1.31 FLOP per session on devnet, against about 0.01 FLOP for settle, and '
+      + 'testnet.flopscan.io/api/stats shows proofs24h 0 today. We have not run a session on testnet and '
+      + 'cannot tell whether the same weight applies there. Success: the block number and fee of one '
+      + 'registerSessionEvidence extrinsic on testnet, or the refusal text if a miner declined your session.'
   }
 ];
 
