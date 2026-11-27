@@ -4,5 +4,5 @@
   "rpc": "wss://testnet.flop.network/",
   "faucet": "https://faucet.flop.network",
   "indexer": "https://testnet.flopscan.io",
-  "gateway": "https://api.flop.network"
+  "gateway": "https://gateway.testnet.flop.network"
 }
