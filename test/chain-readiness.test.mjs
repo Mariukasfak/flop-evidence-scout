@@ -42,3 +42,17 @@ test('signals: real answers are summarized', async () => {
   assert.match(pay, /^HTTP 402 Direct public payment-proof settlement is not enabled/);
   assert.equal(await SIGNALS.tclkFlop(async () => ({ status: 404, body: {} })), 'unpublished');
 });
+
+test('rpcSync: in sync within 30 blocks of the indexer, otherwise behind', async () => {
+  const fake = (fin, idx, syncing) => async (url, init) => {
+    if (url.includes('flopscan')) return { status: 200, body: { finality: { finalizedBlock: idx } } };
+    const { method } = JSON.parse(init.body);
+    const result = method === 'chain_getFinalizedHead' ? '0xabc'
+      : method === 'chain_getHeader' ? { number: `0x${fin.toString(16)}` }
+      : { isSyncing: syncing };
+    return { status: 200, body: { result } };
+  };
+  assert.equal(await SIGNALS.rpcSync(fake(240_100, 240_120, false)), 'in sync');
+  assert.equal(await SIGNALS.rpcSync(fake(236_699, 240_486, true)), 'behind (syncing)');
+  await assert.rejects(SIGNALS.rpcSync(fake(240_100, null, false)), /height unknown/);
+});

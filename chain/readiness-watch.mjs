@@ -71,6 +71,20 @@ export const SIGNALS = {
   sdk: async (get = json) => { const r = await get('https://registry.npmjs.org/@flop-labs/sdk/latest'); if (!r.body?.version) throw new Error('no version'); return r.body.version; },
   cli: async (get = json) => { const r = await get('https://registry.npmjs.org/@flop-labs/cli/latest'); if (!r.body?.version) throw new Error('no version'); return r.body.version; },
   tclkFlop: async (get = json) => { const r = await get('https://registry.npmjs.org/@flop-labs/tclk-flop'); return r.status === 404 ? 'unpublished' : `published ${r.body?.['dist-tags']?.latest ?? '?'}`; },
+  // The public RPC the faucet names, against the indexer: our flop-htlc rail locks only
+  // while it is in sync (2026-11-27: syncing, finalized ~3,800 blocks behind).
+  rpcSync: async (get = json) => {
+    const rpc = (method, params = []) => get('https://testnet.flop.network/', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 1, jsonrpc: '2.0', method, params })
+    }).then((r) => { if (r.body?.result === undefined) throw new Error(`rpc ${method}`); return r.body.result; });
+    const head = await rpc('chain_getFinalizedHead');
+    const rpcFinalized = parseInt((await rpc('chain_getHeader', [head])).number, 16);
+    const syncing = (await rpc('system_health')).isSyncing;
+    const indexer = (await get('https://testnet.flopscan.io/api/stats')).body?.finality?.finalizedBlock;
+    if (!Number.isInteger(rpcFinalized) || !Number.isInteger(indexer)) throw new Error('height unknown');
+    return indexer - rpcFinalized <= 30 ? 'in sync' : `behind${syncing ? ' (syncing)' : ''}`;
+  },
   releases: async (get = json) => { const r = await get('https://api.github.com/repos/flop-labs/network/releases?per_page=3'); if (!Array.isArray(r.body)) throw new Error('no list'); return r.body.map((x) => x.tag_name).join(' '); },
 };
 
