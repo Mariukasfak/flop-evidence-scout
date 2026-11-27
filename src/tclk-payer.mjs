@@ -67,6 +67,8 @@ const READ_LIMIT = 200;
 export const OFFER_EXPIRES_MS = 45 * 60_000;
 export const OFFER_CLAIM_BY_MS = 90 * 60_000;
 export const OFFER_REFUND_AFTER_MS = 150 * 60_000;
+/** How long an unfunded answer from the flop-htlc rail service is trusted. */
+export const RAIL_RECHECK_MS = 10 * 60_000;
 
 /**
  * The gap between offers.
@@ -288,8 +290,13 @@ export class TclkPayer {
 
     if (this.rail === 'flop-htlc') {
       // An offer we could not fund would end as an accepted deal that never locks.
+      // Each status call opens a connection to the public RPC, so an unfunded
+      // answer is trusted for ten minutes instead of asked every cycle.
+      const last = this.railCheck;
+      if (last && !last.funded && now - last.at < RAIL_RECHECK_MS) return { action: 'rail_unfunded', payerFree: last.payerFree, cached: true };
       let status = null;
       try { status = await this.railClient.status(); } catch { /* treated as unfunded */ }
+      this.railCheck = { at: now, funded: Boolean(status?.funded), payerFree: status?.payerFree ?? null };
       if (!status?.funded) return { action: 'rail_unfunded', payerFree: status?.payerFree ?? null };
     }
 

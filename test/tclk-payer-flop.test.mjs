@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { TclkPayer } from '../src/tclk-payer.mjs';
+import { TclkPayer, RAIL_RECHECK_MS } from '../src/tclk-payer.mjs';
 import { FlopRailClient } from '../src/flop-rail-client.mjs';
 import { decodeFrame, encodeFrame, acceptFrameFor, generateHashLock, dealRoom } from '../src/tclk.mjs';
 
@@ -99,17 +99,27 @@ describe('the flop-htlc payer', () => {
     assert.equal(offer.amount, AMOUNT);
   });
 
-  test('posts no offer while the rail is unfunded or unreachable', async () => {
+  test('posts no offer while the rail is unfunded or unreachable, asking at most every ten minutes', async () => {
     const venue = new FakeVenue();
     const rail = new FakeRail();
-    const payer = makePayer(venue, rail);
+    let clock = T0;
+    let asks = 0;
+    const status = rail.status.bind(rail);
+    rail.status = async () => { asks += 1; return status(); };
+    const payer = makePayer(venue, rail, { now: () => clock });
     rail.funded = false;
     assert.deepEqual(await payer.runTurn(), { action: 'rail_unfunded', payerFree: '0' });
     rail.funded = true;
+    clock += 60_000;
+    assert.equal((await payer.runTurn()).cached, true, 'a minute later the old answer stands');
+    assert.equal(asks, 1);
+    clock += RAIL_RECHECK_MS;
     rail.fail.status = { message: 'ECONNREFUSED' };
-    assert.equal((await payer.runTurn()).action, 'rail_unfunded');
+    assert.equal((await payer.runTurn()).action, 'rail_unfunded', 'unreachable counts as unfunded');
     assert.equal(venue.posts.length, 0);
+    clock += RAIL_RECHECK_MS;
     assert.equal((await payer.runTurn()).action, 'offer_posted', 'and the question was not spent while waiting');
+    assert.equal(asks, 3);
   });
 
   test('locks the exact deal terms, verifies on chain, then announces the ref', async () => {
