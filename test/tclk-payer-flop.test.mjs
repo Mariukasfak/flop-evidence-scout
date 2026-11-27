@@ -214,3 +214,51 @@ describe('FlopRailClient', () => {
     await assert.rejects(new FlopRailClient({ fetchImpl: boom }).refund('r'), (e) => !e.uncertain);
   });
 });
+
+describe('escrows left open after a reveal', () => {
+  async function revealed() {
+    let clock = T0;
+    const made = await acceptedDeal({ now: () => clock });
+    await made.payer.runTurn();
+    made.venue.seed(dealRoom(made.contract), STRANGER,
+      encodeFrame({ type: 'reveal', from: STRANGER, contract: made.contract, secret: made.secret }));
+    assert.equal((await made.payer.runTurn()).action, 'deal_claimed_by_payee');
+    return { ...made, tick: (ms) => { clock += ms; } };
+  }
+
+  test('nothing is touched before the refund window', async () => {
+    const { payer, rail } = await revealed();
+    await payer.runTurn();
+    assert.equal(rail.refunds.length, 0);
+    assert.equal(payer.state.escrowWatch.length, 1);
+  });
+
+  test('an escrow the payee never claimed comes back after refundAfterMs', async () => {
+    const { payer, rail, tick, contract } = await revealed();
+    tick(151 * 60_000);
+    assert.deepEqual(await payer.runTurn(), { action: 'escrow_refunded_after_reveal', contract });
+    assert.deepEqual(rail.refunds, ['flop1.ref-1']);
+    assert.equal(payer.state.escrowWatch.length, 0);
+  });
+
+  test('a claimed escrow refuses the refund and is dropped after five tries, half an hour apart', async () => {
+    const { payer, rail, tick } = await revealed();
+    tick(151 * 60_000);
+    rail.refund = async (ref) => { rail.refunds.push(ref); throw Object.assign(new Error('escrow is not open'), { status: 502 }); };
+    for (let i = 0; i < 4; i++) { await payer.runTurn(); tick(31 * 60_000); }
+    assert.equal(rail.refunds.length, 4);
+    assert.equal((await payer.runTurn()).action, 'escrow_watch_dropped');
+    assert.equal(payer.state.escrowWatch.length, 0);
+  });
+
+  test('a refund window the chain has not opened yet is retried later without blocking the lane', async () => {
+    const { payer, rail, tick } = await revealed();
+    tick(151 * 60_000);
+    rail.fail.refund = { waiting: true, message: 'refund window is not open' };
+    const r = await payer.runTurn();
+    assert.notEqual(r.action, 'escrow_refunded_after_reveal');
+    assert.equal(payer.state.escrowWatch.length, 1);
+    tick(11 * 60_000);
+    assert.equal((await payer.runTurn()).action, 'escrow_refunded_after_reveal');
+  });
+});

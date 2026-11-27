@@ -196,9 +196,35 @@ export class TclkPayer {
    */
   async runTurn() {
     this.load();
+    const swept = await this.#sweepEscrows();
+    if (swept) return swept;
     if (this.state.deal) return this.advanceDeal();
     if (this.state.offer) return this.watchForAccept();
     return this.postOffer();
+  }
+
+  /**
+   * Escrows of revealed deals whose refund window has opened. A refund succeeds only if
+   * the payee never claimed; a claimed escrow refuses it, and after a few refusals that
+   * are not "window not open yet" the entry is dropped. Null when there was nothing due.
+   */
+  async #sweepEscrows() {
+    const now = this.now();
+    const due = (this.state.escrowWatch || []).find((e) => now >= e.refundAfterMs && now >= (e.retryAt || 0));
+    if (!due || !this.railClient) return null;
+    const drop = () => { this.state.escrowWatch = this.state.escrowWatch.filter((e) => e !== due); this.save(); };
+    try {
+      await this.railClient.refund(due.ref);
+    } catch (err) {
+      if (err.waiting) { due.retryAt = now + 10 * 60_000; this.save(); return null; }
+      due.failures += 1;
+      due.retryAt = now + 30 * 60_000;
+      if (due.failures >= 5) { drop(); return { action: 'escrow_watch_dropped', contract: due.contract, error: err.message }; }
+      this.save();
+      return null;
+    }
+    drop();
+    return { action: 'escrow_refunded_after_reveal', contract: due.contract };
   }
 
   /** Frames whose signed transport `from` matches the frame's own `from`. */
@@ -600,6 +626,12 @@ export class TclkPayer {
         + (this.rail === 'flop-htlc'
           ? 'escrowed on flop-htlc (FLOP Testnet, test FLOP with no value); the payee claims it with this secret'
           : 'settled on the paper rail, which holds no value'));
+      if (deal.railRef) {
+        // The reveal ends the deal on the tape, but the FLOP stays in escrow until the
+        // payee claims it. If they never do, it comes back after refundAfterMs.
+        this.state.escrowWatch = [...(this.state.escrowWatch || []),
+          { contract: deal.contract, ref: deal.railRef, refundAfterMs: deal.offer.refundAfterMs, failures: 0 }].slice(-20);
+      }
       this.#close(deal, 'completed', delivered ? 'revealed with work on the tape' : 'revealed, no work line seen');
       return { action: 'deal_claimed_by_payee', contract: deal.contract, payee: deal.payee, delivered };
     }
