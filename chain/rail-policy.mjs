@@ -22,7 +22,21 @@ export const DEFAULT_POLICY = Object.freeze({
   maxRefundAfterMs: 3 * 3600_000,    // refund window opens within 3 h of the lock
   minClaimWindowMs: 10 * 60_000,     // the payee gets at least 10 minutes to claim
   minFreeAfterLockPlanck: 2n * FLOP, // fees for the lock and the later refund stay on hand
+  maxRpcLagBlocks: 30,               // the RPC's finalized head may trail the indexer's by this much
 });
+
+/**
+ * Is the RPC we sign through in sync? On 2026-11-27 wss://testnet.flop.network was
+ * syncing with its finalized head 3,500 blocks (about 74 min) behind testnet.flopscan.io;
+ * a lock anchored there would carry stale deadlines and would not verify for an hour.
+ * Unknown counts as unhealthy: a lock waits, it is never guessed.
+ */
+export function checkChainHealth({ rpcFinalized, indexerFinalized, syncing }, policy = DEFAULT_POLICY) {
+  if (!Number.isInteger(rpcFinalized) || !Number.isInteger(indexerFinalized)) return { ok: false, why: 'chain height unknown' };
+  const lag = indexerFinalized - rpcFinalized;
+  if (lag > policy.maxRpcLagBlocks) return { ok: false, why: `rpc finalized #${rpcFinalized} trails the indexer #${indexerFinalized} by ${lag} blocks${syncing ? ' (node syncing)' : ''}` };
+  return { ok: true, why: `rpc within ${Math.max(lag, 0)} blocks of the indexer` };
+}
 
 /**
  * Contracts the payer key has tried to lock, in journal order. `lock-pending` is written

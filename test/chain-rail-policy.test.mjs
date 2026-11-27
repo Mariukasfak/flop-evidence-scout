@@ -86,3 +86,10 @@ test('checkFunds: the amount plus a 2 FLOP fee reserve must be free', () => {
   assert.equal(checkFunds(2n * FLOP, String(FLOP / 4n)).ok, false);
   assert.equal(checkFunds(0n, '1').ok, false);
 });
+
+test('checkChainHealth: a syncing RPC far behind the indexer, or an unknown height, blocks locks', async () => {
+  const { checkChainHealth } = await import('../chain/rail-policy.mjs');
+  assert.equal(checkChainHealth({ rpcFinalized: 240_100, indexerFinalized: 240_120, syncing: false }).ok, true);
+  assert.match(checkChainHealth({ rpcFinalized: 236_699, indexerFinalized: 240_261, syncing: true }).why, /3562 blocks \(node syncing\)/);
+  assert.equal(checkChainHealth({ rpcFinalized: 240_100, indexerFinalized: null }).ok, false);
+});

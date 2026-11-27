@@ -20,7 +20,8 @@
  * `lock-pending` from tclk-flop's persistPending), so a lost answer can never lead to a
  * second deposit for the same contract: the policy refuses any contract with an attempt
  * in the journal. A failure before chain.open is journalled `lock-unsent` and voids it.
- * The Scribe's free balance must cover the amount plus a fee reserve before any lock. Requests are handled one at a
+ * The Scribe's free balance must cover the amount plus a fee reserve before any lock, and
+ * the RPC's finalized head must be within 30 blocks of testnet.flopscan.io's. Requests are handled one at a
  * time. Never retried automatically (the rail's own rule).
  */
 import fs from 'node:fs';
@@ -28,12 +29,13 @@ import http from 'node:http';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { agentSigner, agentIdentity, DATA } from './net.mjs';
-import { checkLock, checkClaim, checkFunds, lockedInDay, DEFAULT_POLICY } from './rail-policy.mjs';
+import { checkLock, checkClaim, checkFunds, checkChainHealth, lockedInDay, DEFAULT_POLICY } from './rail-policy.mjs';
 
 const PORT = Number(process.env.FLOP_RAIL_PORT || 8791);
 const RPC = process.env.FLOP_RAIL_RPC || 'wss://testnet.flop.network/';
 const GENESIS = '0x918abd58fb16306b30ef3886514cfaebffecb4de43e82b6f8ec4795c43cfd800';
 const TCLK_FLOP = process.env.TCLK_FLOP_DIST || 'C:/FlopChain/tclk/flop/dist/index.js';
+const INDEXER = process.env.FLOP_RAIL_INDEXER || 'https://testnet.flopscan.io';
 const JOURNAL = path.join(DATA, 'data/local', 'flop-rail-journal.jsonl');
 
 const payerDid = agentIdentity('scribe').did;
@@ -65,26 +67,41 @@ async function withRail(agent, fn, pendingEntry = {}) {
   try { return await fn(c); } finally { await c.disconnect().catch(() => {}); }
 }
 
-/** Free balance of an agent on FLOP Testnet, in base units, from a genesis-checked RPC. */
-async function freeOf(agent) {
+/**
+ * The agent's free balance (base units) and the health of the RPC it was read from:
+ * the RPC's finalized height against the indexer's, from a genesis-checked connection.
+ */
+async function chainView(agent) {
   const { ApiPromise, WsProvider } = await import('@polkadot/api');
   const provider = new WsProvider(RPC);
   const api = await ApiPromise.create({ provider, noInitWarn: true, throwOnConnect: true });
   try {
     if (api.genesisHash.toHex() !== GENESIS) throw new Error('genesis mismatch');
     const pair = await agentSigner(agent, 42);
-    return (await api.query.system.account(pair.address)).data.free.toBigInt();
+    const free = (await api.query.system.account(pair.address)).data.free.toBigInt();
+    const rpcFinalized = (await api.rpc.chain.getHeader(await api.rpc.chain.getFinalizedHead())).number.toNumber();
+    const syncing = (await api.rpc.system.health()).isSyncing.isTrue;
+    let indexerFinalized = null;
+    try {
+      const r = await fetch(`${INDEXER}/api/stats`, { signal: AbortSignal.timeout(20_000) });
+      indexerFinalized = (await r.json())?.finality?.finalizedBlock ?? null;
+    } catch { /* unknown, so unhealthy */ }
+    const health = checkChainHealth({ rpcFinalized, indexerFinalized, syncing });
+    return { free, rpcFinalized, indexerFinalized, syncing, health };
   } finally { await api.disconnect().catch(() => {}); }
 }
 
 async function handle(method, url, body) {
   if (method === 'GET' && url === '/rail/status') {
     const j = journal();
-    let payerFree = null; let balanceError = null;
-    try { payerFree = await freeOf('scribe'); } catch (err) { balanceError = err.message; }
-    // Funded: one more deal at the per-deal cap fits, with the fee reserve left over.
-    const funded = payerFree !== null && checkFunds(payerFree, DEFAULT_POLICY.maxLockPlanck).ok;
+    let view = null; let balanceError = null;
+    try { view = await chainView('scribe'); } catch (err) { balanceError = err.message; }
+    const payerFree = view ? view.free : null;
+    // Funded: one more deal at the per-deal cap fits, with the fee reserve left over,
+    // and the RPC is in sync enough to anchor it. The payer offers nothing otherwise.
+    const funded = payerFree !== null && checkFunds(payerFree, DEFAULT_POLICY.maxLockPlanck).ok && view.health.ok;
     return { payer: payerDid, payee: payeeDid, payerFree: payerFree === null ? null : String(payerFree), funded, balanceError,
+      chain: view ? { rpcFinalized: view.rpcFinalized, indexerFinalized: view.indexerFinalized, syncing: view.syncing, health: view.health.why } : null,
       policy: Object.fromEntries(Object.entries(DEFAULT_POLICY).map(([k, v]) => [k, String(v)])),
       lockedToday: String(lockedInDay(j, Date.now())), journal: j.slice(-10) };
   }
@@ -98,9 +115,10 @@ async function handle(method, url, body) {
     const terms = body.terms;
     const verdict = checkLock(terms, { payerDid, ownDids, journal: journal(), now: Date.now() });
     if (!verdict.ok) { note({ kind: 'lock-refused', contract: terms?.contract, why: verdict.why }); return { status: 403, error: verdict.why }; }
-    let free;
-    try { free = await freeOf('scribe'); } catch (err) { return { status: 503, error: `balance check failed: ${err.message}` }; }
-    const funds = checkFunds(free, terms.amount);
+    let view;
+    try { view = await chainView('scribe'); } catch (err) { return { status: 503, error: `balance check failed: ${err.message}` }; }
+    if (!view.health.ok) return { status: 503, error: `chain not ready: ${view.health.why}` };
+    const funds = checkFunds(view.free, terms.amount);
     if (!funds.ok) { note({ kind: 'lock-refused', contract: terms.contract, why: funds.why }); return { status: 409, error: funds.why, unfunded: true }; }
     const entry = { contract: terms.contract, amount: terms.amount, payee: terms.payee };
     try {
