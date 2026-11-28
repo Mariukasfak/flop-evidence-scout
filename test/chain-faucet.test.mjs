@@ -37,3 +37,24 @@ test('claimedToday: accepted or unknown today blocks a second claim; refusals an
   assert.equal(claimedToday([{ ...base, at: '2026-11-24T23:00:00Z', outcome: 'accepted' }], { ...base, now }), false);
   assert.equal(claimedToday([{ ...base, agent: 'scribe', at: '2026-11-25T07:00:00Z', outcome: 'accepted' }], { ...base, now }), false);
 });
+
+test('capWaitMs: waits for a near reset of the daily cap, not for a far one or an open faucet', async () => {
+  const { capWaitMs } = await import('../chain/faucet-lib.mjs');
+  const now = Date.parse('2026-11-28T14:00:00Z');
+  const capped = (at) => ({ faucet: { status: 'daily_cap_reached', dailyCap: { nextFreeAt: at } } });
+  assert.equal(capWaitMs(capped('2026-11-28T14:35:51.852Z'), now), 35 * 60_000 + 51_852 + 5_000);
+  assert.equal(capWaitMs(capped('2026-11-28T16:00:00Z'), now), null);
+  assert.equal(capWaitMs(capped('2026-11-28T13:59:00Z'), now), 0);
+  assert.equal(capWaitMs(capped(undefined), now), null);
+  assert.equal(capWaitMs({ faucet: { status: 'open' } }, now), null);
+});
+
+test('busyRetrySeconds: only faucet_busy retries, honouring retryAfterSeconds within 60..300 s', async () => {
+  const { busyRetrySeconds } = await import('../chain/faucet-lib.mjs');
+  assert.equal(busyRetrySeconds(503, { reason: 'faucet_busy', action: 'retry_later', retryAfterSeconds: 60 }), 60);
+  assert.equal(busyRetrySeconds(503, { action: 'retry_later', retryAfterSeconds: 5 }), 60);
+  assert.equal(busyRetrySeconds(503, { reason: 'faucet_busy', retryAfterSeconds: 9999 }), 300);
+  assert.equal(busyRetrySeconds(429, { reason: 'address_cooldown', retryAfterSeconds: 86289 }), null);
+  assert.equal(busyRetrySeconds(200, { txHash: '0x1' }), null);
+  assert.equal(busyRetrySeconds(503, null), null);
+});

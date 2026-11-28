@@ -35,3 +35,30 @@ export function claimedToday(lines, { agent, genesis, now = new Date() }) {
   return lines.some((e) => e && e.agent === agent && e.genesis === genesis
     && String(e.at ?? '').slice(0, 10) === day && ['accepted', 'unknown'].includes(e.outcome));
 }
+
+/**
+ * How long to wait for the rolling daily cap to free (ms), or null when the faucet is not
+ * capped or frees too late to wait for. /limits shows dailyCap.nextFreeAt while the status is
+ * daily_cap_reached; the Scribe's claims on 2026-11-27 all ran while the cap was spent or the
+ * queue was full, so a run that starts close to the reset waits for it instead of giving up.
+ */
+export function capWaitMs(limits, now = Date.now(), maxWaitMs = 65 * 60_000) {
+  const f = limits?.faucet;
+  if (f?.status !== 'daily_cap_reached') return null;
+  const at = Date.parse(f?.dailyCap?.nextFreeAt ?? '');
+  if (!Number.isFinite(at)) return null;
+  const ms = at - now + 5_000;
+  return ms <= maxWaitMs ? Math.max(ms, 0) : null;
+}
+
+/**
+ * Seconds before re-sending the same signed claim (same nonce, so it can never pay twice),
+ * or null when the answer is not the faucet's "busy, retry later". The faucet says
+ * nothing was reserved in that case; we honour retryAfterSeconds, never less than 60 s.
+ */
+export function busyRetrySeconds(status, body) {
+  const busy = body?.reason === 'faucet_busy' || (status === 503 && body?.action === 'retry_later');
+  if (!busy) return null;
+  const s = Number(body?.retryAfterSeconds);
+  return Math.min(Math.max(Number.isFinite(s) ? s : 60, 60), 300);
+}

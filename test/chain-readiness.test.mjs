@@ -56,3 +56,12 @@ test('rpcSync: in sync within 30 blocks of the indexer, otherwise behind', async
   assert.equal(await SIGNALS.rpcSync(fake(236_699, 240_486, true)), 'behind (syncing)');
   await assert.rejects(SIGNALS.rpcSync(fake(240_100, null, false)), /height unknown/);
 });
+
+test('modelsListed: a stable yes/no, so a moving model count never raises an alarm', async () => {
+  const list = (n) => async () => ({ status: 200, body: { data: Array(n).fill({}) } });
+  assert.equal(await SIGNALS.modelsListed(list(8)), 'some models listed');
+  assert.equal(await SIGNALS.modelsListed(list(5)), 'some models listed');
+  assert.equal(await SIGNALS.modelsListed(list(0)), 'no models listed');
+  await assert.rejects(SIGNALS.modelsListed(async () => ({ status: 502, body: {} })), /no models/);
+  assert.equal(SIGNALS.models, undefined);
+});

@@ -66,8 +66,11 @@ export const SIGNALS = {
     return `${r.body.network} agent ${f.agent?.grantFlop ?? '?'} ${f.agent?.claimPath ?? '-'} tiers ${tiers}`;
   },
   faucetChain: async (get = json) => { const r = await get('https://faucet.flop.network/chain'); if (!r.body?.genesisHash) throw new Error('no genesis'); return r.body.genesisHash === GENESIS ? 'pinned testnet' : `OTHER ${r.body.genesisHash}`; },
-  // Explorer view of the market.
-  models: async (get = json) => { const r = await get(`${GW}/v1/models`); const n = r.body?.data?.length; if (typeof n !== 'number') throw new Error('no models'); return `${n} models`; },
+  // Whether the testnet gateway lists any model at all. The count itself moves with miner
+  // availability (7, 5, 8 within an hour on 2026-11-27) and raised alarms for nothing
+  // (mistakes log #15), so only the stable fact is a signal. Renamed from `models` so the
+  // first run records a baseline instead of reporting a change.
+  modelsListed: async (get = json) => { const r = await get(`${GW}/v1/models`); const n = r.body?.data?.length; if (typeof n !== 'number') throw new Error('no models'); return n > 0 ? 'some models listed' : 'no models listed'; },
   sdk: async (get = json) => { const r = await get('https://registry.npmjs.org/@flop-labs/sdk/latest'); if (!r.body?.version) throw new Error('no version'); return r.body.version; },
   cli: async (get = json) => { const r = await get('https://registry.npmjs.org/@flop-labs/cli/latest'); if (!r.body?.version) throw new Error('no version'); return r.body.version; },
   tclkFlop: async (get = json) => { const r = await get('https://registry.npmjs.org/@flop-labs/tclk-flop'); return r.status === 404 ? 'unpublished' : `published ${r.body?.['dist-tags']?.latest ?? '?'}`; },
